@@ -1,7 +1,7 @@
 #!/bin/bash
-# Quick start script for iota-sympantos
+# Quick start script for iota
 
 cd "$(dirname "$0")"
 
-echo "Starting iota-sympantos..."
-./target/release/iota-sympantos.exe
+echo "Starting iota..."
+./target/release/iota

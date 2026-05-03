@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command as TokioCommand};
 use tokio::time::{Duration, timeout};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AcpBackend {
     ClaudeCode,
     Codex,
@@ -70,16 +70,12 @@ impl fmt::Display for AcpBackend {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct AcpRunOptions {
     pub backend: AcpBackend,
     pub cwd: PathBuf,
     pub prompt: String,
     pub show_native: bool,
-    pub env: BTreeMap<String, String>,
-    pub cleanup_dirs: Vec<PathBuf>,
     pub timeout_ms: u64,
-    pub command_override: Option<(String, Vec<String>)>,
 }
 
 #[derive(Debug, Serialize)]
@@ -184,163 +180,14 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
         cwd,
         prompt,
         show_native,
-        env: BTreeMap::new(),
-        cleanup_dirs: Vec::new(),
         timeout_ms,
-        command_override: None,
     })
 }
 
 pub fn print_acp_help() {
     println!(
-        "Usage:\n  iota-sympantos acp [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n      --timeout-ms <ms>  ACP response timeout (default: 5000)\n  -h, --help             Show this help\n\nExamples:\n  iota-sympantos acp codex \"What is 2+2?\"\n  iota-sympantos acp --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
+        "Usage:\n  iota acp [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n      --timeout-ms <ms>  ACP response timeout (default: 5000)\n  -h, --help             Show this help\n\nExamples:\n  iota acp codex \"What is 2+2?\"\n  iota acp --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
     );
-}
-
-pub async fn run_acp_prompt(options: AcpRunOptions) -> Result<()> {
-    let result = run_acp_prompt_inner(&options).await;
-    for dir in &options.cleanup_dirs {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-    result
-}
-
-async fn run_acp_prompt_inner(options: &AcpRunOptions) -> Result<()> {
-    let (executable, args) = if let Some((executable, args)) = &options.command_override {
-        (executable.clone(), args.clone())
-    } else {
-        let (executable, args) = options.backend.command();
-        (
-            executable.to_string(),
-            args.into_iter().map(str::to_string).collect(),
-        )
-    };
-    eprintln!(
-        "Starting ACP backend '{}' with command: {} {}",
-        options.backend,
-        executable,
-        args.join(" ")
-    );
-
-    let mut child = TokioCommand::new(executable)
-        .args(&args)
-        .envs(&options.env)
-        .current_dir(&options.cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("Failed to start ACP backend '{}'", options.backend))?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("ACP backend stdin was not piped")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("ACP backend stdout was not piped")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("ACP backend stderr was not piped")?;
-
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if !line.trim().is_empty() {
-                eprintln!("[acp stderr] {}", line);
-            }
-        }
-    });
-
-    let mut lines = BufReader::new(stdout).lines();
-    let run_result = async {
-        send_request(
-            &mut stdin,
-            "init-0",
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {},
-                "clientInfo": { "name": "iota-sympantos", "version": env!("CARGO_PKG_VERSION") }
-            }),
-        )
-        .await?;
-
-        wait_for_response(
-            &mut lines,
-            "init-0",
-            options.show_native,
-            options.timeout_ms,
-        )
-        .await
-        .context("ACP initialize failed")?;
-
-        send_request(
-            &mut stdin,
-            "session:new",
-            "session/new",
-            session_new_params(options.backend, &options.cwd),
-        )
-        .await?;
-
-        let session_result = wait_for_response(
-            &mut lines,
-            "session:new",
-            options.show_native,
-            options.timeout_ms,
-        )
-        .await
-        .context("ACP session/new failed")?;
-        let session_id = session_result
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .context("ACP session/new result did not include sessionId")?;
-
-        send_request(
-            &mut stdin,
-            "prompt:0",
-            "session/prompt",
-            json!({
-                "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": options.prompt }]
-            }),
-        )
-        .await?;
-
-        read_prompt_events(&mut lines, &mut stdin, options).await
-    }
-    .await;
-
-    let _ = stdin.shutdown().await;
-    if timeout(Duration::from_millis(100), child.wait())
-        .await
-        .is_err()
-    {
-        let _ = child.kill().await;
-    }
-    run_result
-}
-
-async fn read_prompt_events<R>(
-    lines: &mut tokio::io::Lines<BufReader<R>>,
-    stdin: &mut ChildStdin,
-    options: &AcpRunOptions,
-) -> Result<()>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    read_prompt_events_for_id(
-        lines,
-        stdin,
-        options.show_native,
-        options.timeout_ms,
-        "prompt:0",
-    )
-    .await
 }
 
 async fn read_prompt_events_for_id<R>(
@@ -349,11 +196,12 @@ async fn read_prompt_events_for_id<R>(
     show_native: bool,
     timeout_ms: u64,
     expected_prompt_id: &str,
-) -> Result<()>
+) -> Result<String>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let mut printed_stream = false;
+    let mut output = String::new();
+    let mut streamed = false;
     loop {
         let Some(line) = read_next_line(lines, timeout_ms, "ACP prompt response timed out").await?
         else {
@@ -368,8 +216,7 @@ where
         if is_response_id(&message, expected_prompt_id) {
             if let Some(result) = &message.result {
                 if let Some(text) = extract_text(result) {
-                    print!("{}", text);
-                    io::stdout().flush()?;
+                    output.push_str(&text);
                 }
                 if is_terminal_result(result) {
                     break;
@@ -384,18 +231,16 @@ where
         match method {
             "session/update" | "session_update" => {
                 if let Some(text) = text_from_session_update(message.params.as_ref()) {
-                    printed_stream = true;
-                    print!("{}", text);
-                    io::stdout().flush()?;
+                    streamed = true;
+                    output.push_str(&text);
                 }
             }
             "session/complete" | "session_complete" => {
-                if !printed_stream {
+                if !streamed {
                     if let Some(text) = message.params.as_ref().and_then(extract_final_text) {
-                        print!("{}", text);
+                        output.push_str(&text);
                     }
                 }
-                println!();
                 break;
             }
             "session/request_permission" | "request_permission" | "permission/request" => {
@@ -408,11 +253,13 @@ where
             }
         }
     }
-    Ok(())
+    Ok(output)
 }
 
 pub struct AcpClient {
     backend: AcpBackend,
+    cwd: PathBuf,
+    session_id: Option<String>,
     stdin: ChildStdin,
     lines: tokio::io::Lines<BufReader<ChildStdout>>,
     child: Child,
@@ -480,23 +327,36 @@ impl AcpClient {
         });
 
         let mut lines = BufReader::new(stdout).lines();
-        send_request(
-            &mut stdin,
-            "init-0",
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": {},
-                "clientInfo": { "name": "iota-sympantos", "version": env!("CARGO_PKG_VERSION") }
-            }),
-        )
-        .await?;
-        wait_for_response(&mut lines, "init-0", show_native, timeout_ms)
-            .await
-            .context("ACP initialize failed")?;
+        let init_result = timeout(Duration::from_millis(timeout_ms), async {
+            send_request(
+                &mut stdin,
+                "init-0",
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientCapabilities": {},
+                    "clientInfo": { "name": "iota", "version": env!("CARGO_PKG_VERSION") }
+                }),
+            )
+            .await?;
+            wait_for_response(&mut lines, "init-0", show_native, timeout_ms)
+                .await
+                .context("ACP initialize failed")?;
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .unwrap_or_else(|_| Err(anyhow!("ACP initialize timed out after {}ms", timeout_ms)));
+
+        if let Err(err) = init_result {
+            let _ = stdin.shutdown().await;
+            terminate_child_tree(&mut child).await;
+            return Err(err);
+        }
 
         Ok(Self {
             backend,
+            cwd,
+            session_id: None,
             stdin,
             lines,
             child,
@@ -506,15 +366,50 @@ impl AcpClient {
         })
     }
 
-    pub async fn prompt(&mut self, prompt: &str) -> Result<()> {
+    pub async fn prompt_with_cwd(&mut self, cwd: &PathBuf, prompt: &str) -> Result<String> {
         self.prompt_counter += 1;
+        timeout(Duration::from_millis(self.timeout_ms), async {
+            let session_id = self.ensure_session(cwd).await?;
+            let id = format!("prompt:{}", self.prompt_counter);
+            send_request(
+                &mut self.stdin,
+                id.clone(),
+                "session/prompt",
+                json!({
+                    "sessionId": session_id,
+                    "prompt": [{ "type": "text", "text": prompt }]
+                }),
+            )
+            .await?;
+            read_prompt_events_for_id(
+                &mut self.lines,
+                &mut self.stdin,
+                self.show_native,
+                self.timeout_ms,
+                &id,
+            )
+            .await
+        })
+        .await
+        .unwrap_or_else(|_| Err(anyhow!("ACP prompt timed out after {}ms", self.timeout_ms)))
+    }
+
+    async fn ensure_session(&mut self, cwd: &PathBuf) -> Result<String> {
+        if self.cwd == *cwd {
+            if let Some(session_id) = self.session_id.clone() {
+                return Ok(session_id);
+            }
+        } else {
+            self.cwd = cwd.clone();
+            self.session_id = None;
+        }
+
         let session_request_id = format!("session:new:{}", self.prompt_counter);
-        let cwd = std::env::current_dir().context("Failed to get current directory")?;
         send_request(
             &mut self.stdin,
             session_request_id.clone(),
             "session/new",
-            session_new_params(self.backend, &cwd),
+            session_new_params(self.backend, &self.cwd),
         )
         .await?;
         let session_result = wait_for_response(
@@ -530,41 +425,47 @@ impl AcpClient {
             .and_then(Value::as_str)
             .map(str::to_string)
             .context("ACP session/new result did not include sessionId")?;
-
-        let id = format!("prompt:{}", self.prompt_counter);
-        send_request(
-            &mut self.stdin,
-            id.clone(),
-            "session/prompt",
-            json!({
-                "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": prompt }]
-            }),
-        )
-        .await?;
-        read_prompt_events_for_id(
-            &mut self.lines,
-            &mut self.stdin,
-            self.show_native,
-            self.timeout_ms,
-            &id,
-        )
-        .await
+        self.session_id = Some(session_id.clone());
+        Ok(session_id)
     }
     pub async fn shutdown(mut self) {
         let _ = self.stdin.shutdown().await;
-        if timeout(Duration::from_millis(100), self.child.wait())
-            .await
-            .is_err()
-        {
-            let _ = self.child.kill().await;
-        }
-    }
-
-    pub fn backend(&self) -> AcpBackend {
-        self.backend
+        terminate_child_tree(&mut self.child).await;
     }
 }
+async fn terminate_child_tree(child: &mut Child) {
+    let Some(pid) = child.id() else {
+        return;
+    };
+
+    if timeout(Duration::from_millis(100), child.wait())
+        .await
+        .is_ok()
+    {
+        return;
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill().await;
+    }
+
+    if timeout(Duration::from_millis(1_500), child.wait())
+        .await
+        .is_err()
+    {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+}
+
 async fn send_request(
     stdin: &mut ChildStdin,
     id: impl Into<String>,
@@ -580,7 +481,7 @@ async fn send_request(
     let mut line = serde_json::to_vec(&request).context("Failed to serialize ACP request")?;
     line.push(b'\n');
     stdin
-        .write_all(&line)
+        .write_all(line.as_slice())
         .await
         .context("Failed to write ACP request")?;
     stdin.flush().await.context("Failed to flush ACP stdin")?;
@@ -596,7 +497,7 @@ async fn send_response(stdin: &mut ChildStdin, id: Value, result: Value) -> Resu
     let mut line = serde_json::to_vec(&response).context("Failed to serialize ACP response")?;
     line.push(b'\n');
     stdin
-        .write_all(&line)
+        .write_all(line.as_slice())
         .await
         .context("Failed to write ACP response")?;
     stdin.flush().await.context("Failed to flush ACP stdin")?;
@@ -791,19 +692,11 @@ fn read_prompt_from_stdin() -> Result<String> {
 }
 
 fn is_backend_alias(value: &str) -> bool {
-    matches!(
-        value,
-        "claude"
-            | "claude-code"
-            | "claudecode"
-            | "codex"
-            | "gemini"
-            | "gemini-cli"
-            | "hermes"
-            | "hermes-agent"
-            | "opencode"
-            | "open-code"
-    )
+    match value {
+        "claude" | "claude-code" | "claudecode" | "codex" | "gemini" | "gemini-cli" | "hermes"
+        | "hermes-agent" | "opencode" | "open-code" => true,
+        _ => false,
+    }
 }
 
 fn format_acp_error(error: &AcpWireError) -> String {
@@ -815,140 +708,4 @@ fn format_acp_error(error: &AcpWireError) -> String {
         text = format!("{} ({})", text, data);
     }
     text
-}
-
-#[derive(Debug, Clone)]
-pub struct AcpInfoOptions {
-    pub backend: AcpBackend,
-    pub cwd: PathBuf,
-    pub env: BTreeMap<String, String>,
-    pub command_override: Option<(String, Vec<String>)>,
-    pub timeout_ms: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct AcpBackendInfo {
-    pub agent_name: Option<String>,
-    pub agent_version: Option<String>,
-    pub current_model: Option<String>,
-}
-
-pub async fn fetch_acp_info(options: AcpInfoOptions) -> Result<AcpBackendInfo> {
-    let (executable, args) = if let Some((executable, args)) = options.command_override {
-        (executable, args)
-    } else {
-        let (executable, args) = options.backend.command();
-        (
-            executable.to_string(),
-            args.into_iter().map(str::to_string).collect(),
-        )
-    };
-
-    let mut child = TokioCommand::new(executable)
-        .args(&args)
-        .envs(&options.env)
-        .current_dir(&options.cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("Failed to start ACP backend '{}'", options.backend))?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("ACP backend stdin was not piped")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("ACP backend stdout was not piped")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("ACP backend stderr was not piped")?;
-
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if !line.trim().is_empty() {
-                eprintln!("[acp stderr] {}", line);
-            }
-        }
-    });
-
-    let mut lines = BufReader::new(stdout).lines();
-    send_request(
-        &mut stdin,
-        "init-0",
-        "initialize",
-        json!({
-            "protocolVersion": 1,
-            "clientCapabilities": {},
-            "clientInfo": { "name": "iota-sympantos", "version": env!("CARGO_PKG_VERSION") }
-        }),
-    )
-    .await?;
-    let init = wait_for_response(&mut lines, "init-0", false, options.timeout_ms)
-        .await
-        .context("ACP initialize failed")?;
-
-    send_request(
-        &mut stdin,
-        "session:new",
-        "session/new",
-        session_new_params(options.backend, &options.cwd),
-    )
-    .await?;
-    let session = wait_for_response(&mut lines, "session:new", false, options.timeout_ms)
-        .await
-        .context("ACP session/new failed")?;
-
-    let _ = stdin.shutdown().await;
-    if timeout(Duration::from_millis(100), child.wait())
-        .await
-        .is_err()
-    {
-        let _ = child.kill().await;
-    }
-
-    Ok(AcpBackendInfo {
-        agent_name: init
-            .get("agentInfo")
-            .and_then(|value| value.get("name"))
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        agent_version: init
-            .get("agentInfo")
-            .and_then(|value| value.get("version"))
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        current_model: extract_current_model(&session),
-    })
-}
-
-fn extract_current_model(value: &Value) -> Option<String> {
-    value
-        .get("models")
-        .and_then(|models| models.get("currentModelId"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            value
-                .get("configOptions")
-                .and_then(Value::as_array)
-                .and_then(|options| {
-                    options.iter().find_map(|option| {
-                        let id = option.get("id").and_then(Value::as_str)?;
-                        if id == "model" {
-                            option
-                                .get("currentValue")
-                                .and_then(Value::as_str)
-                                .map(str::to_string)
-                        } else {
-                            None
-                        }
-                    })
-                })
-        })
 }

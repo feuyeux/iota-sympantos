@@ -11,11 +11,11 @@ claude_code:
   update:
     command: npx
     args: ["-y", "@agentclientprotocol/claude-agent-acp@latest", "--version"]
-  home: ~/.claude
-  env:
-    api_key: "sk-xxxxx"
-    base_url: "https://api.anthropic.com"
-    model: "claude-sonnet-4"
+  model:
+    provider: anthropic
+    name: claude-sonnet-4
+    base_url: https://api.anthropic.com
+    api_key: <api-key>
 
 codex:
   enabled: true
@@ -25,10 +25,11 @@ codex:
   update:
     command: npx
     args: ["-y", "@zed-industries/codex-acp@latest", "--version"]
-  home: ~/.codex-9router
-  env:
-    api_key: "sk_9router"
-    ROUTER_API_KEY: "sk_9router"
+  model:
+    provider: ninerouter
+    name: gh/gpt-5.5
+    base_url: http://localhost:20128/v1
+    api_key: <router-api-key>
 
 gemini:
   enabled: true
@@ -38,10 +39,10 @@ gemini:
   update:
     command: npx
     args: ["-y", "@google/gemini-cli@latest", "--version"]
-  home: ~/.gemini
-  env:
-    model: "gemini-2.5-flash"
-    # GEMINI_API_KEY: "AIzaSyxxxxx"
+  model:
+    provider: google
+    name: gemini-2.5-flash
+    # api_key: <gemini-api-key>
 
 opencode:
   enabled: true
@@ -51,8 +52,9 @@ opencode:
   update:
     command: npx
     args: ["-y", "opencode-ai@latest", "--version"]
-  home: ~/.config/opencode
-  env: {}
+  model:
+    provider: opencode
+    name: MiniMax-M2.7
 
 hermes:
   enabled: true
@@ -62,9 +64,8 @@ hermes:
   update:
     command: hermes
     args: ["update"]
-  home: ~/.i6/hermes
-  env:
-    api_key: "sk-xxxxx"
-    base_url: "https://api.minimaxi.com/anthropic"
-    model: "MiniMax-M2.7"
-    provider: "minimax-cn"
+  model:
+    provider: minimax-cn
+    name: MiniMax-M2.7
+    base_url: https://api.minimaxi.com/anthropic
+    api_key: <api-key>
