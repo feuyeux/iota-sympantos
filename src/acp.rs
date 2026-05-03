@@ -416,7 +416,6 @@ pub struct AcpClient {
     stdin: ChildStdin,
     lines: tokio::io::Lines<BufReader<ChildStdout>>,
     child: Child,
-    session_id: String,
     show_native: bool,
     timeout_ms: u64,
     prompt_counter: u64,
@@ -496,28 +495,11 @@ impl AcpClient {
             .await
             .context("ACP initialize failed")?;
 
-        send_request(
-            &mut stdin,
-            "session:new",
-            "session/new",
-            session_new_params(backend, &cwd),
-        )
-        .await?;
-        let session_result = wait_for_response(&mut lines, "session:new", show_native, timeout_ms)
-            .await
-            .context("ACP session/new failed")?;
-        let session_id = session_result
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .context("ACP session/new result did not include sessionId")?;
-
         Ok(Self {
             backend,
             stdin,
             lines,
             child,
-            session_id,
             show_native,
             timeout_ms,
             prompt_counter: 0,
@@ -526,13 +508,36 @@ impl AcpClient {
 
     pub async fn prompt(&mut self, prompt: &str) -> Result<()> {
         self.prompt_counter += 1;
+        let session_request_id = format!("session:new:{}", self.prompt_counter);
+        let cwd = std::env::current_dir().context("Failed to get current directory")?;
+        send_request(
+            &mut self.stdin,
+            session_request_id.clone(),
+            "session/new",
+            session_new_params(self.backend, &cwd),
+        )
+        .await?;
+        let session_result = wait_for_response(
+            &mut self.lines,
+            &session_request_id,
+            self.show_native,
+            self.timeout_ms,
+        )
+        .await
+        .context("ACP session/new failed")?;
+        let session_id = session_result
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .context("ACP session/new result did not include sessionId")?;
+
         let id = format!("prompt:{}", self.prompt_counter);
         send_request(
             &mut self.stdin,
             id.clone(),
             "session/prompt",
             json!({
-                "sessionId": self.session_id,
+                "sessionId": session_id,
                 "prompt": [{ "type": "text", "text": prompt }]
             }),
         )
@@ -546,7 +551,6 @@ impl AcpClient {
         )
         .await
     }
-
     pub async fn shutdown(mut self) {
         let _ = self.stdin.shutdown().await;
         if timeout(Duration::from_millis(100), self.child.wait())
@@ -811,4 +815,140 @@ fn format_acp_error(error: &AcpWireError) -> String {
         text = format!("{} ({})", text, data);
     }
     text
+}
+
+#[derive(Debug, Clone)]
+pub struct AcpInfoOptions {
+    pub backend: AcpBackend,
+    pub cwd: PathBuf,
+    pub env: BTreeMap<String, String>,
+    pub command_override: Option<(String, Vec<String>)>,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AcpBackendInfo {
+    pub agent_name: Option<String>,
+    pub agent_version: Option<String>,
+    pub current_model: Option<String>,
+}
+
+pub async fn fetch_acp_info(options: AcpInfoOptions) -> Result<AcpBackendInfo> {
+    let (executable, args) = if let Some((executable, args)) = options.command_override {
+        (executable, args)
+    } else {
+        let (executable, args) = options.backend.command();
+        (
+            executable.to_string(),
+            args.into_iter().map(str::to_string).collect(),
+        )
+    };
+
+    let mut child = TokioCommand::new(executable)
+        .args(&args)
+        .envs(&options.env)
+        .current_dir(&options.cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("Failed to start ACP backend '{}'", options.backend))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .context("ACP backend stdin was not piped")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("ACP backend stdout was not piped")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("ACP backend stderr was not piped")?;
+
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if !line.trim().is_empty() {
+                eprintln!("[acp stderr] {}", line);
+            }
+        }
+    });
+
+    let mut lines = BufReader::new(stdout).lines();
+    send_request(
+        &mut stdin,
+        "init-0",
+        "initialize",
+        json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+            "clientInfo": { "name": "iota-sympantos", "version": env!("CARGO_PKG_VERSION") }
+        }),
+    )
+    .await?;
+    let init = wait_for_response(&mut lines, "init-0", false, options.timeout_ms)
+        .await
+        .context("ACP initialize failed")?;
+
+    send_request(
+        &mut stdin,
+        "session:new",
+        "session/new",
+        session_new_params(options.backend, &options.cwd),
+    )
+    .await?;
+    let session = wait_for_response(&mut lines, "session:new", false, options.timeout_ms)
+        .await
+        .context("ACP session/new failed")?;
+
+    let _ = stdin.shutdown().await;
+    if timeout(Duration::from_millis(100), child.wait())
+        .await
+        .is_err()
+    {
+        let _ = child.kill().await;
+    }
+
+    Ok(AcpBackendInfo {
+        agent_name: init
+            .get("agentInfo")
+            .and_then(|value| value.get("name"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        agent_version: init
+            .get("agentInfo")
+            .and_then(|value| value.get("version"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        current_model: extract_current_model(&session),
+    })
+}
+
+fn extract_current_model(value: &Value) -> Option<String> {
+    value
+        .get("models")
+        .and_then(|models| models.get("currentModelId"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .get("configOptions")
+                .and_then(Value::as_array)
+                .and_then(|options| {
+                    options.iter().find_map(|option| {
+                        let id = option.get("id").and_then(Value::as_str)?;
+                        if id == "model" {
+                            option
+                                .get("currentValue")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        } else {
+                            None
+                        }
+                    })
+                })
+        })
 }

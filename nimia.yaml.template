@@ -1,13 +1,16 @@
 # iota-sympantos configuration template
 # Copy this to ~/.i6/nimia.yaml and customize values.
 # Backend config is read only from this file.
-# CLI starts one backend per request. TUI warms only enabled backends.
+# The acp section starts the ACP adapter; update declares how automation should update it.
 
 claude_code:
   enabled: true
   acp:
     command: npx
     args: ["-y", "@agentclientprotocol/claude-agent-acp@latest"]
+  update:
+    command: npx
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@latest", "--version"]
   home: ~/.claude
   env:
     api_key: "sk-xxxxx"
@@ -19,6 +22,9 @@ codex:
   acp:
     command: npx
     args: ["-y", "@zed-industries/codex-acp@latest"]
+  update:
+    command: npx
+    args: ["-y", "@zed-industries/codex-acp@latest", "--version"]
   home: ~/.codex-9router
   env:
     api_key: "sk_9router"
@@ -29,6 +35,9 @@ gemini:
   acp:
     command: npx
     args: ["-y", "@google/gemini-cli@latest", "--acp"]
+  update:
+    command: npx
+    args: ["-y", "@google/gemini-cli@latest", "--version"]
   home: ~/.gemini
   env:
     model: "gemini-2.5-flash"
@@ -39,6 +48,9 @@ opencode:
   acp:
     command: npx
     args: ["-y", "opencode-ai@latest", "acp"]
+  update:
+    command: npx
+    args: ["-y", "opencode-ai@latest", "--version"]
   home: ~/.config/opencode
   env: {}
 
@@ -47,6 +59,9 @@ hermes:
   acp:
     command: hermes
     args: ["acp"]
+  update:
+    command: hermes
+    args: ["update"]
   home: ~/.i6/hermes
   env:
     api_key: "sk-xxxxx"

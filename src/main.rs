@@ -2,16 +2,14 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 mod acp;
 
 type BackendEnv = BTreeMap<String, Option<String>>;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-struct AcpCommandConfig {
+struct CommandConfig {
     command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     args: Vec<String>,
@@ -22,7 +20,9 @@ struct BackendConfig {
     #[serde(default = "default_enabled")]
     enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    acp: Option<AcpCommandConfig>,
+    acp: Option<CommandConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    update: Option<CommandConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     home: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,9 +79,21 @@ async fn main() -> Result<()> {
                 print_config_summary(&config);
                 return Ok(());
             }
+            "info" => {
+                let config = read_config()?;
+                return print_backend_info(&config).await;
+            }
             "tui" => {
                 let config = read_config()?;
                 return run_tui(&config).await;
+            }
+            "bench-warm" => {
+                let config = read_config()?;
+                let rounds = args
+                    .get(1)
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(3);
+                return run_warm_benchmark(&config, rounds).await;
             }
             "-h" | "--help" | "help" => {
                 print_help();
@@ -103,7 +115,7 @@ async fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "Usage:\n  iota-sympantos check\n  iota-sympantos tui\n  iota-sympantos acp [backend] [options] <prompt>\n\nConfiguration:\n  All backend config is read from %USERPROFILE%\\.i6\\nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota-sympantos acp --help` for ACP options."
+        "Usage:\n  iota-sympantos check\n  iota-sympantos info\n  iota-sympantos tui\n  iota-sympantos bench-warm [rounds]\n  iota-sympantos acp [backend] [options] <prompt>\n\nConfiguration:\n  All backend config is read from %USERPROFILE%\\.i6\\nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota-sympantos acp --help` for ACP options."
     );
 }
 
@@ -130,7 +142,11 @@ fn print_config_summary(config: &NimiaConfig) {
             Some(_) => "missing acp.command",
             None => "missing section",
         };
-        println!("{}: {}", name, status);
+        let update = section
+            .and_then(|section| section.update.as_ref())
+            .map(|update| update.command.as_str())
+            .unwrap_or("-");
+        println!("{}: {} (update: {})", name, status, update);
     }
 }
 
@@ -153,13 +169,76 @@ fn normalize_command(command: &str) -> String {
     }
 }
 
-fn normalized_acp_command(acp: &AcpCommandConfig) -> (String, Vec<String>) {
+fn normalized_acp_command(acp: &CommandConfig) -> (String, Vec<String>) {
     (normalize_command(&acp.command), acp.args.clone())
 }
-async fn run_tui(config: &NimiaConfig) -> Result<()> {
-    use std::io::{self, Write as _};
-
+async fn print_backend_info(config: &NimiaConfig) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    println!("| Backend | Enabled | Tool | Version | Model |");
+    println!("|---|---:|---|---|---|");
+
+    for backend in acp::ALL_BACKENDS {
+        let Some(section) = backend_config(config, backend) else {
+            println!("| `{}` | no | missing section | - | - |", backend);
+            continue;
+        };
+        if !section.enabled {
+            println!("| `{}` | no | disabled | - | - |", backend);
+            continue;
+        }
+        let Some(acp_config) = section.acp.as_ref() else {
+            println!("| `{}` | yes | missing acp | - | - |", backend);
+            continue;
+        };
+        if acp_config.command.trim().is_empty() {
+            println!("| `{}` | yes | missing acp.command | - | - |", backend);
+            continue;
+        }
+
+        let env = backend_process_env(backend, section);
+        let cleanup_dirs: Vec<PathBuf> = Vec::new();
+
+        let result = acp::fetch_acp_info(acp::AcpInfoOptions {
+            backend,
+            cwd: cwd.clone(),
+            env,
+            command_override: Some(normalized_acp_command(acp_config)),
+            timeout_ms: 20_000,
+        })
+        .await;
+
+        for dir in cleanup_dirs {
+            let _ = fs::remove_dir_all(dir);
+        }
+
+        match result {
+            Ok(info) => println!(
+                "| `{}` | yes | {} | {} | {} |",
+                backend,
+                table_cell(info.agent_name.as_deref().unwrap_or("unknown")),
+                table_cell(info.agent_version.as_deref().unwrap_or("unknown")),
+                table_cell(info.current_model.as_deref().unwrap_or("unknown"))
+            ),
+            Err(err) => println!(
+                "| `{}` | yes | error | error | {} |",
+                backend,
+                table_cell(&err.to_string())
+            ),
+        }
+    }
+
+    Ok(())
+}
+
+fn table_cell(value: &str) -> String {
+    value.replace('|', "\\|").replace('\n', " ")
+}
+async fn warm_enabled_backends(
+    config: &NimiaConfig,
+    cwd: PathBuf,
+    show_native: bool,
+    timeout_ms: u64,
+) -> Result<Vec<(acp::AcpClient, Vec<PathBuf>)>> {
     let mut clients = Vec::new();
 
     for backend in acp::ALL_BACKENDS {
@@ -167,6 +246,13 @@ async fn run_tui(config: &NimiaConfig) -> Result<()> {
             continue;
         };
         if !section.enabled {
+            continue;
+        }
+        if backend == acp::AcpBackend::ClaudeCode {
+            eprintln!(
+                "Skipping {} in TUI warm mode: ACP adapter does not support reliable warm prompt reuse",
+                backend
+            );
             continue;
         }
         let Some(acp_config) = section.acp.as_ref() else {
@@ -178,21 +264,16 @@ async fn run_tui(config: &NimiaConfig) -> Result<()> {
             continue;
         }
 
-        let mut env = backend_process_env(backend, section);
-        let mut cleanup_dirs = Vec::new();
-        if backend == acp::AcpBackend::Hermes {
-            if let Some(cleanup_dir) = prepare_hermes_home(&mut env)? {
-                cleanup_dirs.push(cleanup_dir);
-            }
-        }
+        let env = backend_process_env(backend, section);
+        let cleanup_dirs = Vec::new();
 
         match acp::AcpClient::start(
             backend,
             cwd.clone(),
             env,
             Some(normalized_acp_command(acp_config)),
-            false,
-            20_000,
+            show_native,
+            timeout_ms,
         )
         .await
         {
@@ -200,6 +281,46 @@ async fn run_tui(config: &NimiaConfig) -> Result<()> {
             Err(err) => eprintln!("Failed to warm {}: {}", backend, err),
         }
     }
+
+    Ok(clients)
+}
+
+async fn shutdown_clients(clients: Vec<(acp::AcpClient, Vec<PathBuf>)>) {
+    for (client, cleanup_dirs) in clients {
+        client.shutdown().await;
+        for dir in cleanup_dirs {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+}
+
+async fn run_warm_benchmark(config: &NimiaConfig, rounds: usize) -> Result<()> {
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    let mut clients = warm_enabled_backends(config, cwd, false, 30_000).await?;
+    println!("backend,round,latency_ms,status");
+
+    for round in 1..=rounds {
+        for (client, _) in clients.iter_mut() {
+            let backend = client.backend();
+            let started = std::time::Instant::now();
+            let result = client.prompt("ping").await;
+            let elapsed = started.elapsed().as_millis();
+            let status = if result.is_ok() { "ok" } else { "error" };
+            println!("{},{},{},{}", backend, round, elapsed, status);
+            if let Err(err) = result {
+                eprintln!("{} round {} failed: {}", backend, round, err);
+            }
+        }
+    }
+
+    shutdown_clients(clients).await;
+    Ok(())
+}
+async fn run_tui(config: &NimiaConfig) -> Result<()> {
+    use std::io::{self, Write as _};
+
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    let mut clients = warm_enabled_backends(config, cwd, false, 20_000).await?;
 
     println!("Warm ACP backends: {}", clients.len());
     println!("Enter '<backend> <prompt>' or 'exit'. Example: codex ping");
@@ -241,13 +362,7 @@ async fn run_tui(config: &NimiaConfig) -> Result<()> {
         }
     }
 
-    for (client, cleanup_dirs) in clients {
-        client.shutdown().await;
-        for dir in cleanup_dirs {
-            let _ = fs::remove_dir_all(dir);
-        }
-    }
-
+    shutdown_clients(clients).await;
     Ok(())
 }
 fn prepare_acp_options(
@@ -287,12 +402,6 @@ fn prepare_acp_options(
     options.env = backend_process_env(options.backend, section);
     options.command_override = Some(normalized_acp_command(acp));
 
-    if options.backend == acp::AcpBackend::Hermes {
-        if let Some(cleanup_dir) = prepare_hermes_home(&mut options.env)? {
-            options.cleanup_dirs.push(cleanup_dir);
-        }
-    }
-
     Ok(options)
 }
 fn backend_config(config: &NimiaConfig, backend: acp::AcpBackend) -> Option<&BackendConfig> {
@@ -314,9 +423,11 @@ fn backend_process_env(
     let mut process_env = literal_env(env);
 
     if let Some(home) = section.home.as_deref().filter(|value| !value.is_empty()) {
-        process_env
-            .entry(backend_home_env_key(backend).to_string())
-            .or_insert(expand_home_path(home).unwrap_or_else(|_| home.to_string()));
+        if let Some(env_key) = backend_home_env_key(backend) {
+            process_env
+                .entry(env_key.to_string())
+                .or_insert(expand_home_path(home).unwrap_or_else(|_| home.to_string()));
+        }
     }
 
     match backend {
@@ -349,17 +460,24 @@ fn backend_process_env(
             insert_env(env, &mut process_env, "model", "GEMINI_MODEL");
         }
         acp::AcpBackend::Hermes => {
-            if let Some(value) = env_value(env, "api_key") {
+            // Resolve provider first — needed to map api_key to the correct env var.
+            let provider = env_value(env, "provider")
+                .or_else(|| env_value(env, "base_url").map(|u| infer_hermes_provider(&u).to_string()))
+                .unwrap_or_else(|| "minimax-cn".to_string());
+            let api_key = env_value(env, "api_key").unwrap_or_default();
+            let base_url = env_value(env, "base_url")
+                .unwrap_or_else(|| default_hermes_base_url(&provider).to_string());
+
+            // Set provider-native env vars that Hermes actually reads.
+            render_hermes_provider_env(&mut process_env, &provider, &api_key, &base_url);
+            process_env
+                .entry("HERMES_INFERENCE_PROVIDER".to_string())
+                .or_insert(provider);
+            if let Some(model) = env_value(env, "model") {
                 process_env
-                    .entry("HERMES_API_KEY".to_string())
-                    .or_insert_with(|| value.clone());
-                process_env
-                    .entry("HERMES_AUTH_TOKEN".to_string())
-                    .or_insert(value);
+                    .entry("HERMES_MODEL".to_string())
+                    .or_insert(model);
             }
-            insert_env(env, &mut process_env, "base_url", "HERMES_BASE_URL");
-            insert_env(env, &mut process_env, "model", "HERMES_MODEL");
-            insert_env(env, &mut process_env, "provider", "HERMES_PROVIDER");
         }
         acp::AcpBackend::OpenCode => {
             insert_env(env, &mut process_env, "model", "OPENCODE_MODEL");
@@ -369,82 +487,16 @@ fn backend_process_env(
     process_env
 }
 
-fn backend_home_env_key(backend: acp::AcpBackend) -> &'static str {
+fn backend_home_env_key(backend: acp::AcpBackend) -> Option<&'static str> {
     match backend {
-        acp::AcpBackend::ClaudeCode => "CLAUDE_CONFIG_DIR",
-        acp::AcpBackend::Codex => "CODEX_HOME",
-        acp::AcpBackend::Gemini => "GEMINI_CONFIG_DIR",
-        acp::AcpBackend::Hermes => "HERMES_HOME",
-        acp::AcpBackend::OpenCode => "OPENCODE_CONFIG_DIR",
+        acp::AcpBackend::ClaudeCode => Some("CLAUDE_CONFIG_DIR"),
+        acp::AcpBackend::Codex => Some("CODEX_HOME"),
+        acp::AcpBackend::Gemini => Some("GEMINI_CONFIG_DIR"),
+        // Hermes manages its own home via get_hermes_home(); overriding
+        // HERMES_HOME with a bare directory breaks its config/state expectations.
+        acp::AcpBackend::Hermes => None,
+        acp::AcpBackend::OpenCode => Some("OPENCODE_CONFIG_DIR"),
     }
-}
-
-fn prepare_hermes_home(env: &mut BTreeMap<String, String>) -> Result<Option<PathBuf>> {
-    let api_key = first_non_empty(env, &["HERMES_API_KEY", "HERMES_AUTH_TOKEN"]);
-    let base_url = first_non_empty(env, &["HERMES_BASE_URL", "HERMES_ENDPOINT"]);
-    let model = first_non_empty(env, &["HERMES_MODEL", "HERMES_DEFAULT_MODEL"]);
-    let explicit_provider = first_non_empty(env, &["HERMES_PROVIDER", "HERMES_INFERENCE_PROVIDER"]);
-
-    if api_key.is_none() && base_url.is_none() && model.is_none() && explicit_provider.is_none() {
-        return Ok(None);
-    }
-
-    let base_url = base_url.unwrap_or_default();
-    let provider =
-        explicit_provider.unwrap_or_else(|| infer_hermes_provider(&base_url).to_string());
-    let model = model.unwrap_or_else(|| "MiniMax-M2.7".to_string());
-    let base_url = if base_url.is_empty() {
-        default_hermes_base_url(&provider).to_string()
-    } else {
-        base_url
-    };
-    let api_key = api_key.unwrap_or_default();
-
-    let hermes_home = if let Some(home) = env.get("HERMES_HOME").filter(|value| !value.is_empty()) {
-        PathBuf::from(home)
-    } else {
-        unique_temp_dir("iota-sympantos-hermes")?
-    };
-    let cleanup = !env.contains_key("HERMES_HOME");
-
-    write_hermes_config(&hermes_home, &provider, &model, &base_url)?;
-    env.insert("HERMES_HOME".to_string(), hermes_home.display().to_string());
-    env.insert("HERMES_INFERENCE_PROVIDER".to_string(), provider.clone());
-    env.insert("HERMES_MODEL".to_string(), model);
-    render_hermes_provider_env(env, &provider, &api_key, &base_url);
-
-    Ok(if cleanup { Some(hermes_home) } else { None })
-}
-
-fn unique_temp_dir(prefix: &str) -> Result<PathBuf> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("System clock is before UNIX_EPOCH")?
-        .as_millis();
-    let path = std::env::temp_dir().join(format!("{}-{}-{}", prefix, std::process::id(), now));
-    fs::create_dir_all(&path).context("Failed to create temporary directory")?;
-    Ok(path)
-}
-
-fn write_hermes_config(path: &Path, provider: &str, model: &str, base_url: &str) -> Result<()> {
-    fs::create_dir_all(path).context("Failed to create Hermes home")?;
-    let config = serde_json::json!({
-        "model": {
-            "default": model,
-            "provider": provider,
-            "base_url": base_url,
-        },
-        "toolsets": ["hermes-acp"],
-        "terminal": {
-            "backend": "local",
-            "cwd": ".",
-        },
-    });
-    let content = serde_yaml::to_string(&config).context("Failed to serialize Hermes config")?;
-    let mut file =
-        fs::File::create(path.join("config.yaml")).context("Failed to write Hermes config")?;
-    file.write_all(content.as_bytes())?;
-    Ok(())
 }
 
 fn literal_env(env: &BackendEnv) -> BTreeMap<String, String> {
@@ -480,14 +532,6 @@ fn insert_env(
     if let Some(value) = env_value(source, generic_key) {
         target.entry(process_key.to_string()).or_insert(value);
     }
-}
-
-fn first_non_empty(env: &BTreeMap<String, String>, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .filter_map(|key| env.get(*key))
-        .map(|value| value.trim())
-        .find(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 fn infer_hermes_provider(base_url: &str) -> &'static str {

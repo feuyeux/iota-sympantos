@@ -1,6 +1,8 @@
 # iota-sympantos
 
-Rust CLI/TUI for sending prompts to five ACP backends using configuration from `~/.i6/nimia.yaml`.
+Cross-platform Rust CLI/TUI for sending prompts to five ACP backends using configuration from `~/.i6/nimia.yaml`.
+
+Targets Windows, macOS, and Linux. All path handling, command spawning, and env var mapping is platform-aware.
 
 ## Configuration
 
@@ -30,11 +32,22 @@ See `nimia.yaml.template` for all five backend sections.
 
 ## Usage
 
-```powershell
+```bash
 cargo build --offline
+```
+
+```powershell
+# Windows
 target\debug\iota-sympantos.exe check
 target\debug\iota-sympantos.exe tui
-target\debug\iota-sympantos.exe acp codex --timeout-ms 20000 --cwd D:\coding\creative\iota-sympantos "ping"
+target\debug\iota-sympantos.exe acp codex --timeout-ms 20000 "ping"
+```
+
+```bash
+# macOS / Linux
+target/debug/iota-sympantos check
+target/debug/iota-sympantos tui
+target/debug/iota-sympantos acp codex --timeout-ms 20000 "ping"
 ```
 
 `check` validates backend sections, enabled state, and `acp.command`. It does not update versions or rewrite backend paths.
