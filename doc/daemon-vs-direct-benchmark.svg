@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
+    <title id="title">iota Daemon Hot-Path vs Direct CLI Latency</title>
+    <desc id="desc">2026-05-04 benchmark: daemon hot-path vs direct CLI for all 5 backends. Daemon path wins across the board.</desc>
+    <defs>
+        <style>
+      .bg { fill: #f7f8fb; }
+      .panel { fill: #ffffff; stroke: #d9dee8; stroke-width: 1; }
+      .title { font: 700 30px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #172033; }
+      .subtitle { font: 400 15px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #536078; }
+      .axis { stroke: #b7c0d2; stroke-width: 1; }
+      .grid { stroke: #e5e9f2; stroke-width: 1; stroke-dasharray: 4 3; }
+      .label { font: 600 15px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #263248; }
+      .small { font: 400 13px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #67738a; }
+      .value { font: 700 14px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #172033; }
+      .direct { fill: #52677a; }
+      .daemon { fill: #0f9f8f; }
+      .direct-soft { fill: #e9edf2; }
+      .daemon-soft { fill: #def5f1; }
+      .speedup { fill: #0f7f72; font: 700 15px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; }
+      .card-title { font: 600 14px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #536078; }
+      .card-value { font: 700 26px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #172033; }
+      .footnote { font: 400 12px "Segoe UI", "Microsoft YaHei", Arial, sans-serif; fill: #6d7890; }
+        </style>
+    </defs>
+
+    <rect class="bg" x="0" y="0" width="1280" height="720"/>
+
+    <!-- Header -->
+    <text class="title" x="64" y="56">iota Daemon Hot-Path vs Direct CLI</text>
+    <text class="subtitle" x="64" y="82">Median latency (seconds)，2026-05-04，Prompt: "say hello"，2 warmup + 3 measured</text>
+
+    <!-- Main panel -->
+    <rect class="panel" x="64" y="106" width="1152" height="440" rx="8"/>
+
+    <!-- Legend -->
+    <rect class="daemon" x="900" y="122" width="16" height="16" rx="3"/>
+    <text class="small" x="922" y="135">iota acp (daemon)</text>
+    <rect class="direct" x="900" y="146" width="16" height="16" rx="3"/>
+    <text class="small" x="922" y="159">Direct CLI</text>
+
+    <!-- Grid: x0=240, plot width=780, max=20s -->
+    <!-- Grid lines at 0, 4, 8, 12, 16, 20 -->
+    <line class="axis" x1="240" y1="498" x2="1020" y2="498"/>
+    <line class="grid" x1="240" y1="170" x2="240" y2="498"/>
+    <line class="grid" x1="396" y1="170" x2="396" y2="498"/>
+    <line class="grid" x1="552" y1="170" x2="552" y2="498"/>
+    <line class="grid" x1="708" y1="170" x2="708" y2="498"/>
+    <line class="grid" x1="864" y1="170" x2="864" y2="498"/>
+    <line class="grid" x1="1020" y1="170" x2="1020" y2="498"/>
+    <text class="small" x="235" y="518">0</text>
+    <text class="small" x="390" y="518">4</text>
+    <text class="small" x="546" y="518">8</text>
+    <text class="small" x="700" y="518">12</text>
+    <text class="small" x="856" y="518">16</text>
+    <text class="small" x="1004" y="518">20 s</text>
+
+    <!-- scale: 1s = 39px (780/20) -->
+
+    <!-- claude-code: daemon=2.514s, direct=4.452s -->
+    <text class="label" x="96" y="202">claude-code</text>
+    <rect class="daemon-soft" x="240" y="185" width="780" height="18" rx="4"/>
+    <rect class="daemon" x="240" y="185" width="98" height="18" rx="4"/>
+    <text class="value" x="344" y="199">2.514</text>
+    <rect class="direct-soft" x="240" y="208" width="780" height="18" rx="4"/>
+    <rect class="direct" x="240" y="208" width="174" height="18" rx="4"/>
+    <text class="value" x="420" y="222">4.452</text>
+    <text class="speedup" x="1040" y="212">1.8×</text>
+
+    <!-- codex: daemon=1.496s, direct=18.058s -->
+    <text class="label" x="96" y="270">codex</text>
+    <rect class="daemon-soft" x="240" y="253" width="780" height="18" rx="4"/>
+    <rect class="daemon" x="240" y="253" width="58" height="18" rx="4"/>
+    <text class="value" x="304" y="267">1.496</text>
+    <rect class="direct-soft" x="240" y="276" width="780" height="18" rx="4"/>
+    <rect class="direct" x="240" y="276" width="704" height="18" rx="4"/>
+    <text class="value" x="950" y="290">18.058</text>
+    <text class="speedup" x="1040" y="280">12.1×</text>
+
+    <!-- gemini: daemon=1.033s, direct=10.952s -->
+    <text class="label" x="96" y="338">gemini</text>
+    <rect class="daemon-soft" x="240" y="321" width="780" height="18" rx="4"/>
+    <rect class="daemon" x="240" y="321" width="40" height="18" rx="4"/>
+    <text class="value" x="286" y="335">1.033</text>
+    <rect class="direct-soft" x="240" y="344" width="780" height="18" rx="4"/>
+    <rect class="direct" x="240" y="344" width="427" height="18" rx="4"/>
+    <text class="value" x="673" y="358">10.952</text>
+    <text class="speedup" x="1040" y="348">10.6×</text>
+
+    <!-- hermes: daemon=1.955s, direct=7.811s -->
+    <text class="label" x="96" y="406">hermes</text>
+    <rect class="daemon-soft" x="240" y="389" width="780" height="18" rx="4"/>
+    <rect class="daemon" x="240" y="389" width="76" height="18" rx="4"/>
+    <text class="value" x="322" y="403">1.955</text>
+    <rect class="direct-soft" x="240" y="412" width="780" height="18" rx="4"/>
+    <rect class="direct" x="240" y="412" width="305" height="18" rx="4"/>
+    <text class="value" x="551" y="426">7.811</text>
+    <text class="speedup" x="1040" y="416">4.0×</text>
+
+    <!-- opencode: daemon=1.554s, direct=5.522s -->
+    <text class="label" x="96" y="474">opencode</text>
+    <rect class="daemon-soft" x="240" y="457" width="780" height="18" rx="4"/>
+    <rect class="daemon" x="240" y="457" width="61" height="18" rx="4"/>
+    <text class="value" x="307" y="471">1.554</text>
+    <rect class="direct-soft" x="240" y="480" width="780" height="18" rx="4"/>
+    <rect class="direct" x="240" y="480" width="215" height="18" rx="4"/>
+    <text class="value" x="461" y="494">5.522</text>
+    <text class="speedup" x="1040" y="484">3.6×</text>
+
+    <!-- Speedup column header -->
+    <text class="small" x="1040" y="170">Speedup</text>
+
+    <!-- Summary cards -->
+    <rect class="panel" x="64" y="570" width="240" height="100" rx="8"/>
+    <text class="card-title" x="84" y="598">Best speedup</text>
+    <text class="card-value" x="84" y="632">codex 12.1×</text>
+    <text class="small" x="84" y="654">1.496 vs 18.058 s</text>
+
+    <rect class="panel" x="328" y="570" width="240" height="100" rx="8"/>
+    <text class="card-title" x="348" y="598">Fastest daemon</text>
+    <text class="card-value" x="348" y="632">gemini 1.033 s</text>
+    <text class="small" x="348" y="654">pure model inference</text>
+
+    <rect class="panel" x="592" y="570" width="240" height="100" rx="8"/>
+    <text class="card-title" x="612" y="598">Average speedup</text>
+    <text class="card-value" x="612" y="632">6.4×</text>
+    <text class="small" x="612" y="654">across all 5 backends</text>
+
+    <rect class="panel" x="856" y="570" width="360" height="100" rx="8"/>
+    <text class="card-title" x="876" y="598">Overhead beyond model</text>
+    <text class="card-value" x="876" y="632">≈ 0 ms (TCP &lt; 1ms)</text>
+    <text class="small" x="876" y="654">daemon hot-path = pure inference</text>
+
+    <text class="footnote" x="64" y="706">Setup: iota daemon --warm on 127.0.0.1:50100 | --require-daemon | 2 warmup + 3 measured | median values shown</text>
+</svg>

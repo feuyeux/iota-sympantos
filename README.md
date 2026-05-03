@@ -11,13 +11,13 @@ The Rust code is split into extension-oriented modules, mirroring the larger `io
 ```text
 src/
 ├── main.rs      # thin binary entrypoint
-├── cli.rs       # command dispatch for check/info/acp/tui/daemon/bench
+├── cli.rs       # command dispatch for check/info/acp/tui/daemon/warm/bench
 ├── tui.rs       # interactive prompt loop and warmed backend selection
 ├── engine.rs    # ACP runtime orchestration, warm backend pool, benchmarks
-├── agent.rs     # local daemon for cross-CLI/TUI ACP client reuse
+├── agent.rs     # local daemon for cross-CLI/TUI ACP client reuse + warm control plane
 ├── app.rs       # future app-facing read model/projection entrypoint
 ├── config.rs    # nimia.yaml schema, config loading, backend env rendering
-└── acp.rs       # ACP JSON-RPC protocol driver over backend subprocesses
+└── acp.rs       # ACP JSON-RPC protocol driver + timing instrumentation
 ```
 
 `cli` and `tui` are intentionally separate from `engine`: CLI/TUI own user interaction, while engine owns backend process orchestration. `app` and `agent` are explicit extension modules for future HTTP/WebSocket and application read-model work.
