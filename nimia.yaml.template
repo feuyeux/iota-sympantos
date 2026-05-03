@@ -1,0 +1,55 @@
+# iota-sympantos configuration template
+# Copy this to ~/.i6/nimia.yaml and customize values.
+# Backend config is read only from this file.
+# CLI starts one backend per request. TUI warms only enabled backends.
+
+claude_code:
+  enabled: true
+  acp:
+    command: npx
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@latest"]
+  home: ~/.claude
+  env:
+    api_key: "sk-xxxxx"
+    base_url: "https://api.anthropic.com"
+    model: "claude-sonnet-4"
+
+codex:
+  enabled: true
+  acp:
+    command: npx
+    args: ["-y", "@zed-industries/codex-acp@latest"]
+  home: ~/.codex-9router
+  env:
+    api_key: "sk_9router"
+    ROUTER_API_KEY: "sk_9router"
+
+gemini:
+  enabled: true
+  acp:
+    command: npx
+    args: ["-y", "@google/gemini-cli@latest", "--acp"]
+  home: ~/.gemini
+  env:
+    model: "gemini-2.5-flash"
+    # GEMINI_API_KEY: "AIzaSyxxxxx"
+
+opencode:
+  enabled: true
+  acp:
+    command: npx
+    args: ["-y", "opencode-ai@latest", "acp"]
+  home: ~/.config/opencode
+  env: {}
+
+hermes:
+  enabled: true
+  acp:
+    command: hermes
+    args: ["acp"]
+  home: ~/.i6/hermes
+  env:
+    api_key: "sk-xxxxx"
+    base_url: "https://api.minimaxi.com/anthropic"
+    model: "MiniMax-M2.7"
+    provider: "minimax-cn"
