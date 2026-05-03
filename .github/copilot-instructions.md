@@ -75,6 +75,29 @@ Hermes requires a `config.yaml` written to `HERMES_HOME` before startup. `prepar
 5. Add a case in `backend_config()`, `backend_home_env_key()`, and `backend_process_env()`.
 6. Add a backend section to `nimia.yaml.template`.
 
+### PowerShell variable interpolation with colons
+
+PowerShell treats `$name:suffix` in double-quoted strings as a scoped variable reference (`suffix` looked up in the `name` drive/scope), not as the literal string `"$name:suffix"`. This silently produces empty or wrong values when building argument strings that contain colons.
+
+**Affected patterns** — any script that assembles arguments or captures output tokens containing colons (e.g. JSON-RPC IDs like `session:new`, `prompt:0`):
+
+```powershell
+# WRONG — PowerShell resolves $session as drive scope, :new is eaten
+"$session:new"
+
+# CORRECT — brace-delimit the variable name
+"${session}:new"
+
+# CORRECT — single quotes when no interpolation is needed
+'session:new'
+
+# CORRECT — pass colon-containing values as literal arguments, not interpolated
+$id = "prompt:0"
+.\iota-sympantos.exe acp codex $id   # fine; $id is already resolved
+```
+
+When writing helper scripts that invoke `iota-sympantos.exe`, always use single quotes or `${var}` braces around any variable that is immediately followed by a colon.
+
 ### Debugging ACP wire messages
 
 Pass `--show-native` to print every raw JSON-RPC line to stderr:
