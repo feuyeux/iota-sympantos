@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::path::PathBuf;
 
-use crate::acp::{self, AcpBackend, AcpClient};
+use crate::acp::{self, AcpBackend, AcpClient, AcpPromptOutput};
 use crate::config::{
     NimiaConfig, backend_config, backend_process_env, config_path, normalized_acp_command,
 };
@@ -94,16 +94,33 @@ impl IotaEngine {
         cwd: PathBuf,
         prompt: &str,
     ) -> Result<String> {
-        self.ensure_client(backend, cwd.clone()).await?;
+        Ok(self.prompt_in_cwd_timed(backend, cwd, prompt).await?.text)
+    }
+
+    pub async fn prompt_in_cwd_timed(
+        &mut self,
+        backend: AcpBackend,
+        cwd: PathBuf,
+        prompt: &str,
+    ) -> Result<AcpPromptOutput> {
+        let client_started = self.ensure_client(backend, cwd.clone()).await?;
         let key = ClientKey {
             backend,
             cwd: cwd.clone(),
         };
-        self.clients
+        let client = self
+            .clients
             .get_mut(&key)
-            .context("ACP client missing after warm")?
-            .prompt_with_cwd(&cwd, prompt)
-            .await
+            .context("ACP client missing after warm")?;
+        let startup_timing = client.startup_timing();
+        let mut output = client.prompt_with_cwd_timed(&cwd, prompt).await?;
+        output.timing.client_started = client_started;
+        output.timing.process_spawned = client_started;
+        if client_started {
+            output.timing.process_spawn_ms = Some(startup_timing.process_spawn_ms);
+            output.timing.init_ms = Some(startup_timing.init_ms);
+        }
+        Ok(output)
     }
 
     pub fn is_warmed_in_cwd(&self, backend: AcpBackend, cwd: &PathBuf) -> bool {
@@ -113,19 +130,23 @@ impl IotaEngine {
         })
     }
 
+    pub async fn warm_backend_in_cwd(&mut self, backend: AcpBackend, cwd: PathBuf) -> Result<bool> {
+        self.ensure_client(backend, cwd).await
+    }
+
     pub async fn shutdown(mut self) {
         while let Some((_, client)) = self.clients.pop_first() {
             client.shutdown().await;
         }
     }
 
-    async fn ensure_client(&mut self, backend: AcpBackend, cwd: PathBuf) -> Result<()> {
+    async fn ensure_client(&mut self, backend: AcpBackend, cwd: PathBuf) -> Result<bool> {
         let key = ClientKey {
             backend,
             cwd: cwd.clone(),
         };
         if self.clients.contains_key(&key) {
-            return Ok(());
+            return Ok(false);
         }
         let client = self.start_client(backend, cwd.clone()).await?;
         match self.clients.entry(key) {
@@ -134,7 +155,7 @@ impl IotaEngine {
             }
             Entry::Occupied(_) => {}
         }
-        Ok(())
+        Ok(true)
     }
 
     async fn start_client(&self, backend: AcpBackend, cwd: PathBuf) -> Result<AcpClient> {

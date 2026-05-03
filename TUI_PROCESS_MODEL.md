@@ -10,7 +10,7 @@
 |---|---|---|
 | Single CLI | `iota acp <backend> <prompt>` | 优先连接 `iota daemon`；daemon 不可用时回退到本次 CLI 进程内 `IotaEngine`。|
 | TUI | `iota tui` | TUI 启动后不再预热所有后端；用户第一次选择某 backend 时 lazy-start 对应 ACP client，并在 TUI 退出前复用。|
-| Daemon | `iota daemon` | 在 `127.0.0.1:47661` 保持一个常驻 `IotaEngine`，跨 CLI 调用复用 backend+cwd 对应的 ACP subprocess 和 session。|
+| Daemon | `iota daemon [--warm]` | 在 `127.0.0.1:47661` 保持一个常驻 `IotaEngine`，跨 CLI 调用复用 backend+cwd 对应的 ACP subprocess 和 session；`--warm` 会在接受请求前预热 enabled backends。|
 
 `IotaEngine` 的缓存 key 是 `backend + cwd`。同一个 key 会复用同一个 `AcpClient`；`AcpClient` 首次 prompt 创建 ACP `sessionId`，后续 prompt 复用该 session。cwd 变化时会使用新的 cache key，避免不同工作目录共享同一个 ACP session。
 
@@ -20,7 +20,20 @@
 |---|---|
 | `iota bench-cold <rounds>` | 每个样本独立启动 backend、发送 prompt、回收，用于测冷启动。|
 | `iota bench-warm <rounds>` | 先预热 enabled backends，再在同一批 warmed clients 上重复发送 prompt，用于测进程内热路径。|
-| `iota daemon` + `iota acp ...` | 常驻 engine 场景，用于测跨 CLI 调用复用 ACP client/session 的路径。|
+| `iota daemon --warm` + `iota acp ...` | 常驻 engine 场景，用于测跨 CLI 调用复用 ACP client/session 的热路径。|
+| `iota warm [backend ...]` | 对已经运行的 daemon 发送预热请求，只启动 ACP client，不发送模型 prompt。|
+
+For daemon benchmarks, use:
+
+```powershell
+target\debug\iota.exe acp --require-daemon --trace-timing <backend> --timeout-ms 30000 "say hello. Reply with exactly: hello"
+```
+
+`--require-daemon` prevents silent fallback to the in-process CLI engine. `--trace-timing` writes a JSON line to stderr with `route`, `daemon_hit`, `fallback`, `client_started`, `process_spawn_ms`, `init_ms`, `session_reused`, `session_new_ms`, `prompt_ms`, and `total_ms` where available.
+
+For lower CLI latency, keep `target\debug\iota.exe daemon --warm` running in the same repository cwd used by `iota acp`. The first daemon startup pays backend warm cost; subsequent CLI invocations should report `daemon_hit: true`, `client_started: false`, and `session_reused: true` in `--trace-timing` output.
+
+If `127.0.0.1:47661` is reserved or blocked on Windows, set `IOTA_DAEMON_ADDR`, for example `$env:IOTA_DAEMON_ADDR = "127.0.0.1:47662"`, before starting both `iota daemon` and `iota acp`.
 
 ## Logical Backend Processes
 
@@ -52,6 +65,8 @@ Protocol:
   - OpenCode: `opencode run`
 - Raw samples: `benchmark-latest.json`; summary: `benchmark-latest-summary.json`.
 - Secrets and stdout bodies are not included in this document.
+
+Important caveat: this historical run predates `--require-daemon` and `--trace-timing`. The raw `iota-acp` stderr contains backend startup lines in some samples, so rerun this benchmark with the flags above before treating it as a clean daemon-hit measurement.
 
 ### Summary
 

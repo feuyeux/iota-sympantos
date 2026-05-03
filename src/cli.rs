@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::acp;
-use crate::agent::{self, DaemonPromptRequest};
+use crate::agent::{self, DaemonPromptRequest, DaemonWarmRequest};
 use crate::config::{self, NimiaConfig};
 use crate::engine::IotaEngine;
 use crate::tui;
@@ -13,24 +13,49 @@ pub async fn run() -> Result<()> {
         match command {
             "acp" => {
                 let options = acp::parse_acp_args(&args[1..])?;
+                let daemon_addr = agent::daemon_addr();
                 if !options.show_native {
                     let request = DaemonPromptRequest {
                         backend: options.backend.to_string(),
                         cwd: options.cwd.display().to_string(),
                         prompt: options.prompt.clone(),
                         timeout_ms: Some(options.timeout_ms),
+                        trace_timing: options.trace_timing,
                     };
-                    if let Ok(response) =
-                        agent::send_prompt(agent::DEFAULT_DAEMON_ADDR, &request).await
-                    {
-                        if response.ok {
-                            if let Some(text) = response.text.filter(|text| !text.is_empty()) {
-                                println!("{}", text);
+                    match agent::send_prompt(&daemon_addr, &request).await {
+                        Ok(response) => {
+                            if options.trace_timing {
+                                print_route_timing(
+                                    "daemon",
+                                    options.backend,
+                                    response.timing.as_ref(),
+                                );
                             }
-                            return Ok(());
+                            if response.ok {
+                                if let Some(text) = response.text.filter(|text| !text.is_empty()) {
+                                    println!("{}", text);
+                                }
+                                return Ok(());
+                            }
+                            if let Some(error) = response.error {
+                                anyhow::bail!(error);
+                            }
                         }
-                        if let Some(error) = response.error {
-                            anyhow::bail!(error);
+                        Err(err) => {
+                            if options.require_daemon {
+                                anyhow::bail!(
+                                    "Daemon is required but unavailable at {}: {}",
+                                    daemon_addr,
+                                    err
+                                );
+                            }
+                            eprintln!(
+                                "[iota acp] daemon unavailable at {}; falling back to in-process engine: {}",
+                                daemon_addr, err
+                            );
+                            if options.trace_timing {
+                                print_fallback_route(options.backend, &err.to_string());
+                            }
                         }
                     }
                 }
@@ -43,10 +68,14 @@ pub async fn run() -> Result<()> {
                     options.timeout_ms,
                 );
                 let result = engine
-                    .prompt_in_cwd(options.backend, options.cwd, &options.prompt)
+                    .prompt_in_cwd_timed(options.backend, options.cwd, &options.prompt)
                     .await;
                 engine.shutdown().await;
-                let text = result?;
+                let output = result?;
+                if options.trace_timing {
+                    print_route_timing("fallback", options.backend, Some(&output.timing));
+                }
+                let text = output.text;
                 if !text.is_empty() {
                     println!("{}", text);
                 }
@@ -54,7 +83,12 @@ pub async fn run() -> Result<()> {
             }
             "daemon" => {
                 let config = config::read_config()?;
-                return agent::run_daemon(config, agent::DEFAULT_DAEMON_ADDR, 30_000).await;
+                let warm_on_start = args[1..].iter().any(|arg| arg == "--warm");
+                let daemon_addr = agent::daemon_addr();
+                return agent::run_daemon(config, &daemon_addr, 30_000, warm_on_start).await;
+            }
+            "warm" => {
+                return run_daemon_warm(&args[1..]).await;
             }
             "check" => {
                 let config = config::read_config()?;
@@ -104,10 +138,80 @@ pub async fn run() -> Result<()> {
     Ok(())
 }
 
+fn print_route_timing(
+    route: &str,
+    backend: acp::AcpBackend,
+    timing: Option<&acp::AcpPromptTiming>,
+) {
+    eprintln!(
+        "[iota acp timing] {}",
+        serde_json::json!({
+            "route": route,
+            "daemon_hit": route == "daemon",
+            "fallback": route == "fallback",
+            "backend": backend.to_string(),
+            "timing": timing,
+        })
+    );
+}
+
+fn print_fallback_route(backend: acp::AcpBackend, error: &str) {
+    eprintln!(
+        "[iota acp timing] {}",
+        serde_json::json!({
+            "route": "fallback",
+            "daemon_hit": false,
+            "fallback": true,
+            "backend": backend.to_string(),
+            "daemon_error": error,
+        })
+    );
+}
+
 fn print_help() {
     println!(
-        "Usage:\n  iota check\n  iota info\n  iota tui\n  iota daemon\n  iota bench-cold [rounds]\n  iota bench-warm [rounds]\n  iota acp [backend] [options] <prompt>\n\nConfiguration:\n  All backend config is read from %USERPROFILE%\\.i6\\nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota acp --help` for ACP options."
+        "Usage:\n  iota check\n  iota info\n  iota tui\n  iota daemon [--warm]\n  iota warm [--cwd <path>] [backend ...]\n  iota bench-cold [rounds]\n  iota bench-warm [rounds]\n  iota acp [backend] [options] <prompt>\n\nConfiguration:\n  All backend config is read from %USERPROFILE%\\.i6\\nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota acp --help` for ACP options."
     );
+}
+
+async fn run_daemon_warm(args: &[String]) -> Result<()> {
+    let mut cwd = std::env::current_dir().context("Failed to get current directory")?;
+    let mut backends = Vec::new();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--cwd" => {
+                index += 1;
+                let value = args.get(index).context("--cwd requires a path")?;
+                cwd = value.into();
+            }
+            "-h" | "--help" => {
+                println!(
+                    "Usage:\n  iota warm [--cwd <path>] [backend ...]\n\nExamples:\n  iota warm\n  iota warm codex claude-code\n  iota warm --cwd D:\\\\coding\\\\creative\\\\iota-sympantos codex"
+                );
+                return Ok(());
+            }
+            value => backends.push(value.to_string()),
+        }
+        index += 1;
+    }
+
+    let request = DaemonWarmRequest {
+        request_type: "warm".to_string(),
+        cwd: cwd.display().to_string(),
+        backends,
+    };
+    let daemon_addr = agent::daemon_addr();
+    let response = agent::send_warm(&daemon_addr, &request).await?;
+    if response.ok {
+        println!("warmed {} backend(s)", response.warmed.unwrap_or(0));
+        return Ok(());
+    }
+    if let Some(error) = response.error {
+        anyhow::bail!(error);
+    }
+    anyhow::bail!("Daemon warm request failed without an error message")
 }
 
 fn print_config_summary(config: &NimiaConfig) {

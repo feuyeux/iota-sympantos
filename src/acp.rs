@@ -6,6 +6,7 @@ use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command as TokioCommand};
 use tokio::time::{Duration, timeout};
@@ -75,7 +76,41 @@ pub struct AcpRunOptions {
     pub cwd: PathBuf,
     pub prompt: String,
     pub show_native: bool,
+    pub require_daemon: bool,
+    pub trace_timing: bool,
     pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpStartupTiming {
+    pub process_spawn_ms: u64,
+    pub init_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpPromptTiming {
+    pub client_started: bool,
+    pub process_spawned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_spawn_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_ms: Option<u64>,
+    pub session_reused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_new_ms: Option<u64>,
+    pub prompt_ms: u64,
+    pub total_ms: u64,
+}
+
+pub struct AcpPromptOutput {
+    pub text: String,
+    pub timing: AcpPromptTiming,
+}
+
+struct AcpSessionResolution {
+    session_id: String,
+    reused: bool,
+    session_new_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,6 +156,8 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
     let mut backend = AcpBackend::Codex;
     let mut cwd = std::env::current_dir().context("Failed to get current directory")?;
     let mut show_native = false;
+    let mut require_daemon = false;
+    let mut trace_timing = false;
     let mut timeout_ms = 5_000_u64;
     let mut prompt_parts = Vec::new();
     let mut index = 0;
@@ -141,6 +178,12 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
             }
             "--show-native" => {
                 show_native = true;
+            }
+            "--require-daemon" => {
+                require_daemon = true;
+            }
+            "--trace-timing" => {
+                trace_timing = true;
             }
             "--timeout-ms" => {
                 index += 1;
@@ -180,13 +223,15 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
         cwd,
         prompt,
         show_native,
+        require_daemon,
+        trace_timing,
         timeout_ms,
     })
 }
 
 pub fn print_acp_help() {
     println!(
-        "Usage:\n  iota acp [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n      --timeout-ms <ms>  ACP response timeout (default: 5000)\n  -h, --help             Show this help\n\nExamples:\n  iota acp codex \"What is 2+2?\"\n  iota acp --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
+        "Usage:\n  iota acp [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n      --require-daemon   Fail instead of falling back when the daemon is unavailable\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 5000)\n  -h, --help             Show this help\n\nExamples:\n  iota acp codex \"What is 2+2?\"\n  iota acp --require-daemon --trace-timing codex \"What is 2+2?\"\n  iota acp --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
     );
 }
 
@@ -266,6 +311,7 @@ pub struct AcpClient {
     show_native: bool,
     timeout_ms: u64,
     prompt_counter: u64,
+    startup_timing: AcpStartupTiming,
 }
 
 impl AcpClient {
@@ -293,6 +339,7 @@ impl AcpClient {
             args.join(" ")
         );
 
+        let spawn_started = Instant::now();
         let mut child = TokioCommand::new(executable)
             .args(&args)
             .envs(&env)
@@ -303,6 +350,7 @@ impl AcpClient {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("Failed to start ACP backend '{}'", backend))?;
+        let process_spawn_ms = elapsed_ms(spawn_started);
 
         let mut stdin = child
             .stdin
@@ -327,6 +375,7 @@ impl AcpClient {
         });
 
         let mut lines = BufReader::new(stdout).lines();
+        let init_started = Instant::now();
         let init_result = timeout(Duration::from_millis(timeout_ms), async {
             send_request(
                 &mut stdin,
@@ -346,6 +395,7 @@ impl AcpClient {
         })
         .await
         .unwrap_or_else(|_| Err(anyhow!("ACP initialize timed out after {}ms", timeout_ms)));
+        let init_ms = elapsed_ms(init_started);
 
         if let Err(err) = init_result {
             let _ = stdin.shutdown().await;
@@ -363,41 +413,75 @@ impl AcpClient {
             show_native,
             timeout_ms,
             prompt_counter: 0,
+            startup_timing: AcpStartupTiming {
+                process_spawn_ms,
+                init_ms,
+            },
         })
     }
 
-    pub async fn prompt_with_cwd(&mut self, cwd: &PathBuf, prompt: &str) -> Result<String> {
+    pub async fn prompt_with_cwd_timed(
+        &mut self,
+        cwd: &PathBuf,
+        prompt: &str,
+    ) -> Result<AcpPromptOutput> {
+        let total_started = Instant::now();
         self.prompt_counter += 1;
-        timeout(Duration::from_millis(self.timeout_ms), async {
-            let session_id = self.ensure_session(cwd).await?;
+        let result = timeout(Duration::from_millis(self.timeout_ms), async {
+            let session = self.ensure_session_timed(cwd).await?;
             let id = format!("prompt:{}", self.prompt_counter);
+            let prompt_started = Instant::now();
             send_request(
                 &mut self.stdin,
                 id.clone(),
                 "session/prompt",
                 json!({
-                    "sessionId": session_id,
+                    "sessionId": session.session_id,
                     "prompt": [{ "type": "text", "text": prompt }]
                 }),
             )
             .await?;
-            read_prompt_events_for_id(
+            let text = read_prompt_events_for_id(
                 &mut self.lines,
                 &mut self.stdin,
                 self.show_native,
                 self.timeout_ms,
                 &id,
             )
-            .await
+            .await?;
+            Ok::<_, anyhow::Error>((
+                text,
+                session.reused,
+                session.session_new_ms,
+                elapsed_ms(prompt_started),
+            ))
         })
         .await
-        .unwrap_or_else(|_| Err(anyhow!("ACP prompt timed out after {}ms", self.timeout_ms)))
+        .unwrap_or_else(|_| Err(anyhow!("ACP prompt timed out after {}ms", self.timeout_ms)))?;
+        let (text, session_reused, session_new_ms, prompt_ms) = result;
+        Ok(AcpPromptOutput {
+            text,
+            timing: AcpPromptTiming {
+                client_started: false,
+                process_spawned: false,
+                process_spawn_ms: None,
+                init_ms: None,
+                session_reused,
+                session_new_ms,
+                prompt_ms,
+                total_ms: elapsed_ms(total_started),
+            },
+        })
     }
 
-    async fn ensure_session(&mut self, cwd: &PathBuf) -> Result<String> {
+    async fn ensure_session_timed(&mut self, cwd: &PathBuf) -> Result<AcpSessionResolution> {
         if self.cwd == *cwd {
             if let Some(session_id) = self.session_id.clone() {
-                return Ok(session_id);
+                return Ok(AcpSessionResolution {
+                    session_id,
+                    reused: true,
+                    session_new_ms: None,
+                });
             }
         } else {
             self.cwd = cwd.clone();
@@ -405,6 +489,7 @@ impl AcpClient {
         }
 
         let session_request_id = format!("session:new:{}", self.prompt_counter);
+        let session_started = Instant::now();
         send_request(
             &mut self.stdin,
             session_request_id.clone(),
@@ -426,8 +511,17 @@ impl AcpClient {
             .map(str::to_string)
             .context("ACP session/new result did not include sessionId")?;
         self.session_id = Some(session_id.clone());
-        Ok(session_id)
+        Ok(AcpSessionResolution {
+            session_id,
+            reused: false,
+            session_new_ms: Some(elapsed_ms(session_started)),
+        })
     }
+
+    pub fn startup_timing(&self) -> AcpStartupTiming {
+        self.startup_timing.clone()
+    }
+
     pub async fn shutdown(mut self) {
         let _ = self.stdin.shutdown().await;
         terminate_child_tree(&mut self.child).await;
@@ -708,4 +802,8 @@ fn format_acp_error(error: &AcpWireError) -> String {
         text = format!("{} ({})", text, data);
     }
     text
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
