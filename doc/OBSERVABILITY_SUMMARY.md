@@ -232,4 +232,4 @@ cargo test event_store::tests --lib
 
 ---
 
-**Last Updated:** 2026-05-04
+**Last Updated:** 2026-05-05

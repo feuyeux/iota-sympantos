@@ -44,8 +44,9 @@ iota-sympantos/
 │   ├── session_ledger.rs  # SessionLedger + 后端切换 handoff
 │   └── native_materializer.rs # 原生文件投影（可选）
 ├── doc/
-│   ├── plan-0504.md        # Context Fabric 完整规划
-│   └── plan-0504-plus.md  # Context Fabric 增强版规划
+│   ├── architecture.md       # 分层架构和模块职责
+│   ├── code-call-chains.md  # 入口、IPC 和调用链
+│   └── *observability*.md   # 观测性命令、存储和指标文档
 ├── Cargo.toml
 └── ~/.i6/nimia.yaml       # 唯一配置来源
 ```
@@ -148,23 +149,27 @@ iota __daemon           # 内部 daemon 入口
 | Tab 队列（运行时缓存输入） | `tui.rs` | ✅ |
 | 浮层枚举（None/Help/Pager/QuitConfirm） | `tui.rs` | ✅ |
 
-### TUI 仍缺失功能
+### TUI 当前状态
+
+| 功能 | 文件 | 状态 |
+|------|------|------|
+| Panic hook 终端恢复 | `tui.rs` | ✅ |
+| 错误路径终端恢复（RAII guard） | `tui.rs` | ✅ |
+| stdout is-terminal 检查 | `tui.rs` | ✅ |
+| Engine turn 后台 task 执行 | `tui.rs` | ✅ |
+| Approval 浮层 | `tui.rs` / `acp_permission.rs` | ✅ |
+| 帧率限制器（约 120 FPS） | `tui.rs` | ✅ |
+| 流式输出增量渲染 | `tui.rs` / `engine.rs` / `acp.rs` | ✅ |
+| 鼠标捕获启用 | `tui.rs` | ✅ |
+
+### TUI 仍可改进
 
 | 功能 | 优先级 | 说明 |
 |------|--------|------|
-| 恐慌钩子（崩溃前恢复终端） | P0 | 暂无 `set_panic_hook()` |
-| 错误路径终端恢复 | P0 | `?` 提前返回会跳过清理 |
-| is-terminal 检查 | P0 | 未检查 stdin/stdout 是否为终端 |
-| Engine turn 移出主任务 | P0 | 阻塞绘制循环 |
-| Approval 浮层 | P1 | `session/request_permission` 被静默丢弃 |
-| 帧率限制器（120 FPS） | P1 | 无 MIN_FRAME_MS 节流 |
-| 流式输出（增量渲染） | P3 | 仍等待完整文本一次性渲染 |
-| 鼠标滚轮 | P2 | 事件未处理 |
-| 光标隐藏 | P2 | 光标在 TUI 上闪烁 |
-| 键盘增强标志 | P2 | Shift+Enter 在部分终端可能失效 |
-| Ctrl+D / EOF 处理 | P2 | 清理路径可能被跳过 |
-| 窗口标题（OSC） | P3 | 未实现 |
-| 外部编辑器（Ctrl+X） | P3 | 未实现 |
+| 鼠标滚轮滚动 | P2 | 已启用鼠标捕获，但滚轮事件未形成完整滚动交互 |
+| 键盘增强标志 | P2 | Shift+Enter 在部分终端仍依赖终端自身支持 |
+| 窗口标题（OSC） | P3 | 尚未设置终端窗口标题 |
+| 外部编辑器（Ctrl+X） | P3 | 尚未接入 `$EDITOR` / `$VISUAL` |
 
 ---
 

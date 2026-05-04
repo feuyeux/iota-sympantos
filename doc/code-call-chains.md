@@ -382,10 +382,10 @@ fun.zig         -> write_source(main.zig) -> zig run
 观测命令：
 
 ```text
-iota observability summary/recent/metrics
+iota observability logging/tracing/metrics
   -> cli::run_observability_command()
   -> EventStore::open(default_path)
-  -> observability_summary() / recent_executions() / prometheus_metrics()
+  -> logging queries, tracing queries, metrics JSON/Prometheus
   -> print JSON or Prometheus text
 ```
 

@@ -15,21 +15,22 @@ src/
 ├── tui.rs       # interactive prompt loop and warmed backend selection
 ├── engine.rs    # ACP runtime orchestration, warm backend pool, benchmarks
 ├── agent.rs     # local daemon for cross-CLI ACP client reuse and internal warm control plane
-├── app.rs       # future app-facing read model/projection entrypoint
 ├── config.rs    # nimia.yaml schema, config loading, backend env rendering
 └── acp.rs       # ACP JSON-RPC protocol driver + timing instrumentation
 ```
 
-`cli` and `tui` are intentionally separate from `engine`: CLI/TUI own user interaction, while engine owns backend process orchestration. `app` and `agent` are explicit extension modules for future HTTP/WebSocket and application read-model work.
+`cli` and `tui` are intentionally separate from `engine`: CLI/TUI own user interaction, while engine owns backend process orchestration. `agent` is the local daemon boundary for cross-CLI client reuse.
 
 ## Configuration
 
 Backend configuration is read only from `~/.i6/nimia.yaml`. The runtime does not read external project config, network overlays, Redis, npm cache discovery, or generated backend data.
 
-Each backend section uses only these fields:
+Each backend section commonly uses these fields:
 
 - `enabled`: whether CLI/TUI may use this backend. TUI only warms enabled backends.
-- `run`: command and args used to install/update/start the backend ACP adapter.
+- `acp`: command and args used to start the backend ACP adapter.
+- `update`: optional command and args used by check output for update/version probing.
+- `home`: optional backend config directory, expanded with `~/` when supported.
 - `model`: provider, model name, endpoint, and API key; iota renders this into backend process environment variables.
 
 Example:
@@ -47,7 +48,7 @@ codex:
     api_key: "<router-api-key>"
 ```
 
-See `nimia.yaml.template` for all five backend sections.
+Use `iota check` to inspect the effective configuration for all five backend sections.
 
 ## Usage
 
@@ -68,7 +69,7 @@ After install, use `iota` from your shell:
 target\debug\iota.exe
 target\debug\iota.exe check
 target\debug\iota.exe check --daemon
-target\debug\iota.exe acp codex --timeout-ms 20000 "ping"
+target\debug\iota.exe run codex --timeout-ms 20000 "ping"
 target\debug\iota.exe run --daemon --trace-timing codex --timeout-ms 20000 "ping"
 ```
 

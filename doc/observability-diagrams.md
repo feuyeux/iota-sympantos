@@ -50,51 +50,25 @@
 ## Query Path: observability command
 
 ```
-CLI: iota observability summary/recent/metrics
-     │
-     ├─► EventStore::open(~/.i6/context/events.sqlite)
-     │
-     └─┬─► run_observability_command(&args)
-       │
-       ├─ "summary" ──► EventStore::observability_summary(limit)
-       │               │
-       │               ├─► count_status(all) ────► SELECT COUNT(*) FROM executions
-       │               ├─► count_status("completed") ──► WHERE status='completed'
-       │               ├─► count_status("failed")
-       │               ├─► count_status("running")
-       │               │
-       │               ├─► avg_column(TotalMs) ──► SELECT AVG(total_ms) FROM executions
-       │               ├─► avg_column(PromptMs)
-       │               │
-       │               ├─► percentile_total_ms(0.95) ──► P95 from last 10k
-       │               │
-       │               ├─► token_usage_summary() ──► SELECT * FROM events
-       │               │                              WHERE event_type='token_usage'
-       │               │
-       │               ├─► counter_value("cache_hit") ──► SELECT value FROM observability_counters
-       │               ├─► counter_value("cache_miss")
-       │               │
-       │               ├─► gauge_value("active_sessions") ──► SELECT value FROM observability_gauges
-       │               ├─► gauge_value("queued_prompts")
-       │               │
-       │               └─► recent_executions(limit) ──► SELECT * FROM executions LIMIT N
-       │
-       ├─ "recent" ──► EventStore::recent_executions(limit)
-       │              │
-       │              └─► SELECT execution_id, session_id, backend, status, timing
-       │                  FROM executions
-       │                  ORDER BY started_at DESC, fencing_token DESC
-       │                  LIMIT N
-       │
-       └─ "metrics" ──► EventStore::prometheus_metrics()
-                       │
-                       └─► Build Prometheus Registry
-                           │
-                           ├─► Counters (execution_attempts, completed, failed)
-                           ├─► Gauges (token usage, latency averages)
-                           ├─► Histograms (latency distributions)
-                           │
-                           └─► TextEncoder::encode() ──► Print text exposition
+CLI: iota observability logging/tracing/metrics
+     |
+     |-> EventStore::open(~/.i6/context/events.sqlite)
+     |
+     `-> run_observability_command(&args)
+         |
+         |-> logging: recent_executions / executions_by_status / execution_events
+         |   |-> recent and failed execution rows
+         |   |-> full event stream for one execution
+         |   `-> filtered ToolCall and Approval events from recent executions
+         |
+         |-> tracing: recent_executions / slowest_executions / get_execution / observability_summary
+         |   |-> timing rows ordered by recency or total_ms
+         |   |-> process_spawn/init/session_new/prompt/total breakdown
+         |   `-> avg and p95 latency summary
+         |
+         `-> metrics: observability_summary / prometheus_metrics
+             |-> JSON aggregate output
+             `-> Prometheus Registry + TextEncoder exposition
 ```
 
 ## Database Schema Relationships
