@@ -28,6 +28,7 @@ pub fn render(
     has_queued: bool,
     quit_confirm: bool,
     latest_observability: Option<&ObservabilityMeta>,
+    scrolled_up: bool,
 ) {
     let model_str = model.unwrap_or("—");
     let left_text = format!(" {} · {} ", backend, model_str);
@@ -38,6 +39,11 @@ pub fn render(
         Some(Span::styled(
             "  Press Ctrl+C again to quit",
             theme::tool_result_err_style(),
+        ))
+    } else if scrolled_up {
+        Some(Span::styled(
+            "  [Ctrl+D or End to jump to bottom]",
+            theme::system_notice_style(),
         ))
     } else if is_searching {
         let q = search_query.unwrap_or("");

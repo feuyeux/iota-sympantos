@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event as CEvent, EventStream, KeyCode, KeyModifiers,
+    MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -132,7 +133,7 @@ impl TuiApp {
         let engine = Arc::new(TokioMutex::new(IotaEngine::new(
             config.clone(),
             false,
-            crate::acp::DEFAULT_TIMEOUT_MS,
+            300_000, // 5 minutes timeout for TUI
         )));
         let (turn_tx, turn_rx) = mpsc::channel(4);
         let (stream_tx, stream_rx) = mpsc::channel::<String>(64);
@@ -192,6 +193,59 @@ impl TuiApp {
         self.history
             .push(ConversationEntry::SystemNotice { text: notice });
         self.history.scroll_to_bottom();
+    }
+
+    // ── export ───────────────────────────────────────────────────────────────
+
+    fn export_history(&mut self) -> Result<PathBuf> {
+        use std::fs;
+
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let filename = format!("iota_transcript_{}.txt", timestamp);
+        let path = self.cwd.join(&filename);
+
+        let mut content = String::new();
+        content.push_str(&format!("iota TUI Transcript\n"));
+        content.push_str(&format!("Exported: {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+        content.push_str(&format!("Backend: {}\n", self.active_backend));
+        if let Some(model) = &self.active_model {
+            content.push_str(&format!("Model: {}\n", model));
+        }
+        content.push_str(&format!("Working Directory: {}\n", self.cwd.display()));
+        content.push_str("\n");
+        content.push_str(&"=".repeat(80));
+        content.push_str("\n\n");
+
+        for entry in &self.history.entries {
+            match entry {
+                ConversationEntry::UserMessage { text } => {
+                    content.push_str("YOU:\n");
+                    content.push_str(text);
+                    content.push_str("\n\n");
+                }
+                ConversationEntry::AssistantMessage { backend, text, observability } => {
+                    content.push_str(&format!("{}:\n", backend.to_string().to_uppercase()));
+                    content.push_str(text);
+                    content.push_str("\n");
+                    if let Some(meta) = observability {
+                        if let Some(line) = observability_line(meta, None) {
+                            content.push_str(&format!("[{}]\n", line));
+                        }
+                    }
+                    content.push_str("\n");
+                }
+                ConversationEntry::SystemNotice { text } => {
+                    content.push_str(&format!("── {} ──\n\n", text));
+                }
+                ConversationEntry::ToolResult { name, ok, text } => {
+                    let icon = if *ok { "✓" } else { "✗" };
+                    content.push_str(&format!("{} {} → {}\n\n", icon, name, text));
+                }
+            }
+        }
+
+        fs::write(&path, content)?;
+        Ok(path)
     }
 
     // ── submit ───────────────────────────────────────────────────────────────
@@ -287,14 +341,21 @@ impl TuiApp {
             self.queued_prompt.is_some(),
             matches!(self.overlay, Overlay::QuitConfirm),
             self.latest_observability.as_ref(),
+            self.history.scroll_offset > 0, // not at bottom
         );
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let cwd_str = self.cwd.display().to_string();
         let backend_str = self.active_backend.to_string();
-        let text = format!(" iota  {}  [{}]", cwd_str, backend_str);
-        let line = Line::from(Span::styled(text, theme::header_style()));
+        let model_str = self.active_model.as_deref().unwrap_or("—");
+        let version = env!("CARGO_PKG_VERSION");
+        let build_time = env!("BUILD_TIMESTAMP");
+
+        // Logo and info line
+        let logo = "ιώτα";  // Greek word iota
+        let info = format!(" {} v{}-{}  {}  [{}·{}]", logo, version, build_time, cwd_str, backend_str, model_str);
+        let line = Line::from(Span::styled(info, theme::header_style()));
         frame.render_widget(Paragraph::new(line), area);
     }
 
@@ -371,27 +432,16 @@ impl TuiApp {
                 ))),
                 inner,
             );
+            // Set cursor at the beginning when empty
+            frame.set_cursor_position((inner.x, inner.y));
             return;
         }
 
-        // Multi-line: split by newlines and insert cursor marker.
+        // Multi-line: split by newlines and render without cursor marker.
         let (disp_lines, cur_row, cur_col) = self.composer.display_lines();
         let para_lines: Vec<Line> = disp_lines
             .iter()
-            .enumerate()
-            .map(|(row, line_text)| {
-                if row == cur_row {
-                    let before: String = line_text.chars().take(cur_col).collect();
-                    let after: String = line_text.chars().skip(cur_col).collect();
-                    Line::from(vec![
-                        Span::raw(before),
-                        Span::styled("│", theme::user_label_style()),
-                        Span::raw(after),
-                    ])
-                } else {
-                    Line::raw(line_text.clone())
-                }
-            })
+            .map(|line_text| Line::raw(line_text.clone()))
             .collect();
 
         // Scroll the paragraph so the cursor row is visible.
@@ -408,6 +458,20 @@ impl TuiApp {
                 .wrap(Wrap { trim: false }),
             inner,
         );
+
+        // Set the real terminal cursor position
+        // Calculate display width (considering wide characters like Chinese)
+        use unicode_width::UnicodeWidthStr;
+        let cursor_display_width = if cur_row < disp_lines.len() {
+            let line = &disp_lines[cur_row];
+            let chars_before_cursor: String = line.chars().take(cur_col).collect();
+            UnicodeWidthStr::width(chars_before_cursor.as_str())
+        } else {
+            0
+        };
+        let cursor_x = inner.x + cursor_display_width as u16;
+        let cursor_y = inner.y + (cur_row as u16).saturating_sub(scroll_row);
+        frame.set_cursor_position((cursor_x, cursor_y));
     }
 
     fn render_approval_overlay(&self, frame: &mut Frame, area: Rect) {
@@ -483,7 +547,6 @@ fn render_entries(entries: &std::collections::VecDeque<ConversationEntry>) -> Ve
                     Span::styled("you  ", theme::user_label_style()),
                     Span::raw(text.clone()),
                 ]));
-                lines.push(Line::raw(""));
             }
             ConversationEntry::AssistantMessage {
                 backend,
@@ -515,14 +578,12 @@ fn render_entries(entries: &std::collections::VecDeque<ConversationEntry>) -> Ve
                         )));
                     }
                 }
-                lines.push(Line::raw(""));
             }
             ConversationEntry::SystemNotice { text } => {
                 lines.push(Line::from(Span::styled(
                     format!("── {} ──", text),
                     theme::system_notice_style(),
                 )));
-                lines.push(Line::raw(""));
             }
             ConversationEntry::ToolResult { name, ok, text } => {
                 let style = if *ok {
@@ -662,8 +723,11 @@ impl TuiApp {
             ("Ctrl+W", "Delete word backward"),
             ("Alt+B / Alt+F", "Word backward / forward"),
             ("Ctrl+T", "Toggle transcript pager"),
+            ("Ctrl+E", "Export history to file"),
             ("Ctrl+B", "Select backend"),
             ("Ctrl+L", "Clear history"),
+            ("Ctrl+D / End", "Jump to bottom"),
+            ("PageUp / PageDown", "Scroll history"),
             ("Esc", "Interrupt running turn"),
             ("? ", "Toggle this help"),
             ("Ctrl+C", "Quit (press twice)"),
@@ -767,12 +831,13 @@ pub async fn run(config: NimiaConfig) -> Result<()> {
         original_hook(info);
     }));
 
-    // Terminal setup
+    // Terminal setup — mouse capture for scroll wheel; Option+drag to select text in macOS
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    terminal.hide_cursor()?;
 
     // The guard ensures teardown on all exit paths (including `?` propagation).
     let _guard = TerminalGuard;
@@ -913,6 +978,14 @@ async fn run_loop(
             maybe_event = events.next() => {
                 let Some(Ok(event)) = maybe_event else { break };
                 match event {
+                    // ── Mouse: scroll wheel only (no click capture)
+                    CEvent::Mouse(m) => {
+                        match m.kind {
+                            MouseEventKind::ScrollUp   => app.history.scroll_up(3),
+                            MouseEventKind::ScrollDown => app.history.scroll_down(3),
+                            _ => {}
+                        }
+                    }
                     CEvent::Key(key) => {
                         // ── Approval overlay ────────────────────────────────
                         if app.pending_approval.is_some() {
@@ -1087,12 +1160,34 @@ async fn run_loop(
                                 app.history.scroll_to_bottom();
                             }
 
+                            // Export history
+                            (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+                                match app.export_history() {
+                                    Ok(path) => {
+                                        app.history.push(ConversationEntry::SystemNotice {
+                                            text: format!("Exported to {}", path.display()),
+                                        });
+                                    }
+                                    Err(err) => {
+                                        app.history.push(ConversationEntry::SystemNotice {
+                                            text: format!("Export failed: {}", err),
+                                        });
+                                    }
+                                }
+                            }
+
                             // Page scroll (when composer is empty / history focused)
                             (KeyModifiers::NONE, KeyCode::PageUp) => {
                                 app.history.scroll_up(10);
                             }
                             (KeyModifiers::NONE, KeyCode::PageDown) => {
                                 app.history.scroll_down(10);
+                            }
+
+                            // Jump to bottom
+                            (KeyModifiers::CONTROL, KeyCode::Char('d'))
+                            | (KeyModifiers::NONE, KeyCode::End) => {
+                                app.history.scroll_to_bottom();
                             }
 
                             // Tab — queue if running, otherwise submit

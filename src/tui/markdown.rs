@@ -210,11 +210,9 @@ impl LinesBuilder {
             TagEnd::Heading(_) => {
                 self.pop_style();
                 self.flush_line();
-                self.lines.push(Line::from(Span::raw(String::new()))); // blank after heading
             }
             TagEnd::Paragraph => {
                 self.flush_line();
-                self.lines.push(Line::from(Span::raw(String::new())));
             }
             TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough | TagEnd::Link => {
                 self.pop_style();
@@ -223,7 +221,6 @@ impl LinesBuilder {
                 self.flush_line();
                 self.in_code_block = false;
                 self.pop_style();
-                self.lines.push(Line::from(Span::raw(String::new())));
             }
             TagEnd::BlockQuote(_) => {
                 self.flush_line();
@@ -232,12 +229,9 @@ impl LinesBuilder {
             }
             TagEnd::List(_) => {
                 self.list_stack.pop();
-                if self.list_stack.is_empty() {
-                    self.lines.push(Line::from(Span::raw(String::new())));
-                }
             }
             TagEnd::Item => {
-                self.flush_line();
+                // Item content (paragraphs) already handles line breaks
             }
             _ => {}
         }

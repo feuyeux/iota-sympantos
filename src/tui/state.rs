@@ -67,6 +67,10 @@ impl HistoryState {
 
     pub fn scroll_down(&mut self, rows: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(rows);
+        // Snap to bottom when close enough — prevents getting stuck near-bottom
+        if self.scroll_offset <= rows {
+            self.scroll_offset = 0;
+        }
     }
 
     pub fn scroll_to_bottom(&mut self) {
