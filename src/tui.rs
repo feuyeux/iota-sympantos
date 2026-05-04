@@ -7,7 +7,7 @@ use crate::engine::IotaEngine;
 
 pub async fn run(config: NimiaConfig) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    let mut engine = IotaEngine::new(config, cwd.clone(), false, 20_000);
+    let mut engine = IotaEngine::new(config, false, acp::DEFAULT_TIMEOUT_MS);
 
     println!("ACP backends start lazily on first use.");
     println!("Enter '<backend> <prompt>' or 'exit'. Example: codex ping");

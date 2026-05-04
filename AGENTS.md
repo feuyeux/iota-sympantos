@@ -4,6 +4,13 @@
 
 iota-sympantos is a lightweight Rust CLI that orchestrates multiple AI coding assistant backends through the ACP (Agent Control Protocol). It provides both single-shot and interactive TUI modes for sending prompts to backends like Claude Code, Codex, Gemini CLI, Hermes, and OpenCode.
 
+
+## Codex Operating Identity
+
+This repository is maintained by Codex as the coding agent in this workspace. When acting on tasks here, operate as Codex: make concrete code/doc changes, run local verification, preserve unrelated user changes, and keep ACP/backend details grounded in the current Rust code.
+
+Do not describe yourself as one of the five runtime backends. Claude Code, Codex, Gemini CLI, Hermes, and OpenCode are target backends orchestrated by iota-sympantos; the working agent editing this repository is Codex.
+
 ## Cross-Platform Requirement
 
 **All code, configuration, and path handling must work on Windows, macOS, and Linux.** This is a hard constraint for every change:
@@ -22,10 +29,10 @@ iota-sympantos is a lightweight Rust CLI that orchestrates multiple AI coding as
 iota-sympantos/
 ├── src/
 │   ├── main.rs          # thin binary entrypoint
-│   ├── cli.rs           # command dispatch for check/info/acp/tui/daemon/warm/bench
-│   ├── TUI.rs           # interactive loop over warmed ACP clients
+│   ├── cli.rs           # command dispatch for default TUI, check/run/bench, daemon routing
+│   ├── tui.rs           # interactive loop over lazily warmed ACP clients
 │   ├── engine.rs        # ACP runtime orchestration, warm pool, benchmarks
-│   ├── agent.rs         # local daemon for cross-CLI/TUI ACP client reuse + warm control plane
+│   ├── agent.rs         # local daemon for cross-CLI ACP client reuse + internal warm control plane
 │   ├── app.rs           # future app-facing read model/projection entrypoint
 │   ├── config.rs        # nimia.yaml schema, config loading, env translation
 │   └── acp.rs           # ACP JSON-RPC 2.0 protocol driver + timing instrumentation
@@ -37,7 +44,7 @@ iota-sympantos/
 
 ## Source Of Truth
 
-Use current code first — runtime responsibilities are split across `cli`, `TUI`, `engine`, `agent`, `app`, `config`, and `acp` modules. Then refer to `~/.i6/nimia.yaml` for runtime configuration semantics.
+Use current code first — runtime responsibilities are split across `cli`, `tui`, `engine`, `agent`, `config`, and `acp` modules. Then refer to `~/.i6/nimia.yaml` for runtime configuration semantics.
 
 If code and this document diverge, prefer the current code and update this file to match.
 
@@ -53,21 +60,21 @@ initialize → session/new → session/prompt → stream session/update events �
 
 Two execution paths exist:
 
-- **`IotaEngine::prompt_in_cwd`** — runtime path: lazily starts one ACP client per backend+cwd and reuses it until engine shutdown. `iota daemon` keeps this engine alive across CLI invocations; `iota acp` tries the daemon first and falls back to an in-process engine.
+- **`IotaEngine::prompt_in_cwd`** — runtime path: lazily starts one ACP client per backend+cwd and reuses it until engine shutdown. `iota run` uses an in-process engine by default and does not probe the daemon. Adding `--daemon` or `-d` routes through the daemon, silently starts it if needed, and the first request warms the required backend client.
 - **`AcpClient`** — persistent: used by `IotaEngine` to keep backend subprocesses alive and reuse ACP `sessionId` for repeated prompts in the same cwd.
 
 ### Daemon & Warm Control Plane
 
-`iota daemon` listens on `127.0.0.1:47661` (override with `IOTA_DAEMON_ADDR`). It accepts two JSON request types over TCP:
+The daemon is an internal helper started automatically by `--daemon` / `-d`. It listens on `127.0.0.1:47661` (override with `IOTA_DAEMON_ADDR`) and accepts two JSON request types over TCP:
 
 - **Prompt request**: `{"backend", "cwd", "prompt", "timeout_ms", "trace_timing"}` — dispatches through `IotaEngine::prompt_in_cwd_timed`, returns `{"ok", "text", "timing"}`.
 - **Warm request**: `{"request_type": "warm", "cwd", "backends"}` — starts ACP clients without sending a model prompt, returns `{"ok", "warmed"}`.
 
-`--warm` flag on `iota daemon` prewarms all enabled backends before accepting connections. `iota warm [backend ...]` sends a warm request to a running daemon.
+There are no user-facing `daemon` or `warm` commands. Warm requests remain an internal control-plane message; `check --daemon` can prewarm enabled backends, and `run --daemon` warms the selected backend as part of the prompt request.
 
 ### ACP Timing Instrumentation
 
-`AcpPromptTiming` tracks per-prompt phase latencies: `process_spawn_ms`, `init_ms`, `session_new_ms`, `prompt_ms`, `total_ms`, plus boolean flags `client_started`, `process_spawned`, `session_reused`. Use `--trace-timing` on `iota acp` to emit this as JSON to stderr. Use `--require-daemon` to prevent silent fallback to in-process engine during benchmarks.
+`AcpPromptTiming` tracks per-prompt phase latencies: `process_spawn_ms`, `init_ms`, `session_new_ms`, `prompt_ms`, `total_ms`, plus boolean flags `client_started`, `process_spawned`, `session_reused`. Use `--trace-timing` on `iota run` to emit this as JSON to stderr. Use `--daemon` / `-d` to route through the daemon during benchmarks.
 
 ### Backend Adapters
 
@@ -137,39 +144,45 @@ cargo build --offline                # no network (all deps in Cargo.lock)
 
 ```powershell
 # Windows
+target\debug\iota.exe
 target\debug\iota.exe check
-target\debug\iota.exe tui
-target\debug\iota.exe daemon --warm
-target\debug\iota.exe warm codex claude-code
-target\debug\iota.exe acp codex --timeout-ms 20000 "your prompt"
-target\debug\iota.exe acp --require-daemon --trace-timing claude-code --timeout-ms 30000 "say hello"
+target\debug\iota.exe check --daemon
+target\debug\iota.exe run codex --timeout-ms 20000 "your prompt"
+target\debug\iota.exe run --daemon --trace-timing claude-code --timeout-ms 30000 "say hello"
 ```
 
 ```bash
 # macOS / Linux
+target/debug/iota
 target/debug/iota check
-target/debug/iota tui
-target/debug/iota daemon --warm
-target/debug/iota warm codex claude-code
-target/debug/iota acp codex --timeout-ms 20000 "your prompt"
-target/debug/iota acp --require-daemon --trace-timing claude-code --timeout-ms 30000 "say hello"
+target/debug/iota check --daemon
+target/debug/iota run codex --timeout-ms 20000 "your prompt"
+target/debug/iota run --daemon --trace-timing claude-code --timeout-ms 30000 "say hello"
 ```
 
-If the default daemon port `47661` is unavailable, set `IOTA_DAEMON_ADDR` before both `daemon` and `acp` commands:
+If the default daemon port `47661` is unavailable, set `IOTA_DAEMON_ADDR` before daemon-routed commands:
 
 ```powershell
 $env:IOTA_DAEMON_ADDR = '127.0.0.1:50100'
 ```
 
-No formal test suite exists in this repository. Use `cargo build`, `iota check`, `iota acp --help`, and focused cold/warm manual runs.
+No formal test suite exists in this repository. Use `cargo build`, `iota check`, `iota run --help`, and focused direct/daemon manual runs.
 
 ## Development Workflow
 
-1. Make changes in the module that owns the behavior: `cli.rs` for command dispatch, `TUI.rs` for interactive UI, `engine.rs` for process orchestration, `agent.rs` for daemon/warm control plane, `config.rs` for config/env translation, and `acp.rs` for wire protocol/timing.
+1. Make changes in the module that owns the behavior: `cli.rs` for command dispatch, `tui.rs` for interactive UI, `engine.rs` for process orchestration, `agent.rs` for daemon/internal warm control plane, `config.rs` for config/env translation, and `acp.rs` for wire protocol/timing.
 2. `cargo build` to verify compilation.
-3. Test manually via `target\debug\iota.exe acp <backend> "ping"`.
+3. Test manually via `target\debug\iota.exe run <backend> "ping"`.
 4. Use `--show-native` to debug ACP wire messages.
 5. Use `--trace-timing` to verify daemon hot path and phase latencies.
+
+## Codex Tooling Notes
+
+- `apply_patch` is a FREEFORM tool. Do not call it with JSON such as `{ "input": "..." }`.
+- When using `apply_patch`, the tool message body must be the raw unified diff text, beginning with `*** Begin Patch` and ending with `*** End Patch`.
+- If the environment or tool bridge keeps wrapping `apply_patch` as JSON and patching fails repeatedly, stop after one failed retry. Use a scoped fallback edit method only for the requested file, then verify with a read command and `git diff`.
+- Do not leave the turn stuck in repeated tool-call attempts; preserve progress and report the fallback clearly.
+
 
 ## Adding a New Backend
 
@@ -199,9 +212,9 @@ When reviewing code, pay extra attention to:
 - Windows command normalization edge cases
 - Error handling in JSON-RPC stream parsing
 - Permission request handling in both single-shot and TUI modes
-- Daemon warm/prompt request dispatch in `agent.rs`
+- Daemon prompt/internal warm request dispatch in `agent.rs`
 - `AcpPromptTiming` accuracy — `Instant`-based measurements must not double-count phases
-- `IOTA_DAEMON_ADDR` consistency: both `iota daemon` and `iota acp` must read the same address
+- `IOTA_DAEMON_ADDR` consistency: auto-started daemon and daemon-routed commands must read the same address
 
 ## Security
 

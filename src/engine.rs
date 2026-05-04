@@ -21,7 +21,7 @@ pub struct IotaEngine {
 }
 
 impl IotaEngine {
-    pub fn new(config: NimiaConfig, _cwd: PathBuf, show_native: bool, timeout_ms: u64) -> Self {
+    pub fn new(config: NimiaConfig, show_native: bool, timeout_ms: u64) -> Self {
         Self {
             config,
             clients: BTreeMap::new(),
@@ -135,6 +135,23 @@ impl IotaEngine {
     }
 
     pub async fn shutdown(mut self) {
+        while let Some((_, client)) = self.clients.pop_first() {
+            client.shutdown().await;
+        }
+    }
+
+    pub fn clients_count(&self) -> usize {
+        self.clients.len()
+    }
+
+    pub fn set_timeout_ms(&mut self, timeout_ms: u64) {
+        self.timeout_ms = timeout_ms;
+        for client in self.clients.values_mut() {
+            client.set_timeout_ms(timeout_ms);
+        }
+    }
+
+    pub async fn shutdown_all_clients(&mut self) {
         while let Some((_, client)) = self.clients.pop_first() {
             client.shutdown().await;
         }

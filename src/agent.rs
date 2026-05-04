@@ -1,7 +1,7 @@
 //! Agent service extension point.
 //!
 //! The agent surface keeps one [`crate::engine::IotaEngine`] alive across CLI
-//! invocations so short `iota acp` commands can reuse ACP subprocesses.
+//! invocations so short `iota run` commands can reuse ACP subprocesses.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::acp::{AcpBackend, AcpPromptTiming};
 use crate::config::NimiaConfig;
@@ -65,12 +66,7 @@ pub async fn run_daemon(
     warm_on_start: bool,
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    let engine = Arc::new(Mutex::new(IotaEngine::new(
-        config,
-        cwd.clone(),
-        false,
-        timeout_ms,
-    )));
+    let engine = Arc::new(Mutex::new(IotaEngine::new(config, false, timeout_ms)));
     if warm_on_start {
         eprintln!("warming enabled ACP backends before accepting daemon requests");
         let mut engine_guard = engine.lock().await;
@@ -81,15 +77,44 @@ pub async fn run_daemon(
         .await
         .with_context(|| format!("Failed to bind daemon at {}", addr))?;
     eprintln!("iota agent daemon listening on {}", addr);
+    eprintln!("Press Ctrl+C to shut down gracefully");
+
+    let shutdown_token = CancellationToken::new();
+    let shutdown_signal = shutdown_token.clone();
+
+    tokio::spawn(async move {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {
+                eprintln!("\nReceived Ctrl+C, shutting down daemon...");
+                shutdown_signal.cancel();
+            }
+            Err(err) => {
+                eprintln!("Failed to listen for Ctrl+C: {}", err);
+            }
+        }
+    });
 
     loop {
-        let (stream, _) = listener.accept().await?;
-        let engine = Arc::clone(&engine);
-        tokio::spawn(async move {
-            if let Err(err) = handle_connection(stream, engine).await {
-                eprintln!("daemon request failed: {}", err);
+        tokio::select! {
+            _ = shutdown_token.cancelled() => {
+                eprintln!("Shutting down ACP clients...");
+                let mut engine_guard = engine.lock().await;
+                let clients_count = engine_guard.clients_count();
+                engine_guard.shutdown_all_clients().await;
+                eprintln!("Shut down {} ACP client(s)", clients_count);
+                eprintln!("Daemon shutdown complete");
+                return Ok(());
             }
-        });
+            accept_result = listener.accept() => {
+                let (stream, _) = accept_result?;
+                let engine = Arc::clone(&engine);
+                tokio::spawn(async move {
+                    if let Err(err) = handle_connection(stream, engine).await {
+                        eprintln!("daemon request failed: {}", err);
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -97,7 +122,30 @@ pub async fn send_prompt(
     addr: &str,
     request: &DaemonPromptRequest,
 ) -> Result<DaemonPromptResponse> {
-    send_request(addr, request).await
+    send_request_with_retry(addr, request, 2, 100).await
+}
+
+async fn send_request_with_retry<T: Serialize + ?Sized>(
+    addr: &str,
+    request: &T,
+    max_retries: usize,
+    retry_delay_ms: u64,
+) -> Result<DaemonPromptResponse> {
+    let mut last_error = None;
+
+    for attempt in 0..=max_retries {
+        match send_request(addr, request).await {
+            Ok(response) => return Ok(response),
+            Err(err) => {
+                last_error = Some(err);
+                if attempt < max_retries {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(retry_delay_ms)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap())
 }
 
 pub async fn send_warm(addr: &str, request: &DaemonWarmRequest) -> Result<DaemonPromptResponse> {
@@ -166,6 +214,18 @@ async fn handle_prompt(
     };
     let cwd = PathBuf::from(request.cwd);
     let mut engine = engine.lock().await;
+    if let Some(timeout_ms) = request.timeout_ms {
+        if timeout_ms == 0 {
+            return DaemonPromptResponse {
+                ok: false,
+                text: None,
+                error: Some("timeout_ms must be greater than 0".to_string()),
+                timing: None,
+                warmed: None,
+            };
+        }
+        engine.set_timeout_ms(timeout_ms);
+    }
     match engine
         .prompt_in_cwd_timed(backend, cwd, &request.prompt)
         .await

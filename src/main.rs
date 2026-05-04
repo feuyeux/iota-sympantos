@@ -1,6 +1,5 @@
 mod acp;
 mod agent;
-mod app;
 mod cli;
 mod config;
 mod engine;

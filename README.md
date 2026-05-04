@@ -11,10 +11,10 @@ The Rust code is split into extension-oriented modules, mirroring the larger `io
 ```text
 src/
 ├── main.rs      # thin binary entrypoint
-├── cli.rs       # command dispatch for check/info/acp/tui/daemon/warm/bench
+├── cli.rs       # command dispatch for default TUI, check/run/bench and daemon routing
 ├── tui.rs       # interactive prompt loop and warmed backend selection
 ├── engine.rs    # ACP runtime orchestration, warm backend pool, benchmarks
-├── agent.rs     # local daemon for cross-CLI/TUI ACP client reuse + warm control plane
+├── agent.rs     # local daemon for cross-CLI ACP client reuse and internal warm control plane
 ├── app.rs       # future app-facing read model/projection entrypoint
 ├── config.rs    # nimia.yaml schema, config loading, backend env rendering
 └── acp.rs       # ACP JSON-RPC protocol driver + timing instrumentation
@@ -29,7 +29,7 @@ Backend configuration is read only from `~/.i6/nimia.yaml`. The runtime does not
 Each backend section uses only these fields:
 
 - `enabled`: whether CLI/TUI may use this backend. TUI only warms enabled backends.
-- `acp`: command and args used to install/update/start the backend ACP adapter.
+- `run`: command and args used to install/update/start the backend ACP adapter.
 - `model`: provider, model name, endpoint, and API key; iota renders this into backend process environment variables.
 
 Example:
@@ -65,24 +65,24 @@ After install, use `iota` from your shell:
 
 ```powershell
 # Windows
+target\debug\iota.exe
 target\debug\iota.exe check
-target\debug\iota.exe tui
-target\debug\iota.exe daemon --warm
-target\debug\iota.exe warm codex
+target\debug\iota.exe check --daemon
 target\debug\iota.exe acp codex --timeout-ms 20000 "ping"
-target\debug\iota.exe acp --require-daemon --trace-timing codex --timeout-ms 20000 "ping"
+target\debug\iota.exe run --daemon --trace-timing codex --timeout-ms 20000 "ping"
 ```
 
 ```bash
 # macOS / Linux
+target/debug/iota
 target/debug/iota check
-target/debug/iota tui
-target/debug/iota daemon --warm
-target/debug/iota warm codex
-target/debug/iota acp codex --timeout-ms 20000 "ping"
-target/debug/iota acp --require-daemon --trace-timing codex --timeout-ms 20000 "ping"
+target/debug/iota check --daemon
+target/debug/iota run codex --timeout-ms 20000 "ping"
+target/debug/iota run --daemon --trace-timing codex --timeout-ms 20000 "ping"
 ```
 
-`check` validates backend sections, enabled state, and `acp.command`. It does not update versions or rewrite backend paths.
+`iota` with no arguments enters the interactive TUI. The explicit `tui` command is no longer needed.
 
-`iota daemon` keeps one local `IotaEngine` alive on `127.0.0.1:47661`. Override that address with `IOTA_DAEMON_ADDR=127.0.0.1:47662` if the default port is unavailable. Start the daemon with `--warm` when optimizing repeated CLI calls, or run `iota warm [backend ...]` against an existing daemon; both prestart ACP clients for the chosen working directory without sending a model prompt. `iota acp` first tries that daemon and falls back to an in-process engine if it is not running. Use `--require-daemon` for benchmarks that must fail rather than silently fall back, and `--trace-timing` to print route plus ACP phase timings to stderr as JSON. TUI starts backend clients lazily on first use and reuses them, including their ACP session, until TUI exits. `bench-cold` measures one backend process per sample; `bench-warm` prewarms once and measures repeated prompts on the same warmed clients.
+`check` prints one combined JSON structure: config path, daemon address, per-backend check status, command labels, update/version probe command, and configured model.
+
+`daemon` and `warm` are no longer user-facing commands. Add `--daemon` or `-d` to supported commands when you want daemon routing. If the daemon is not running, iota starts it silently and continues. The first daemon-routed request starts/reuses the needed ACP client, so that request is also the warm path. Override the daemon address with `IOTA_DAEMON_ADDR=127.0.0.1:47662` if the default port is unavailable. `iota run` runs directly in-process unless `--daemon/-d` is present. `--trace-timing` prints route plus ACP phase timings to stderr as JSON. `bench-cold` measures one backend process per sample; `bench-warm` prewarms once in-process; adding `--daemon/-d` measures the daemon hot path.

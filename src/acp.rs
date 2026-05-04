@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command as TokioCommand};
@@ -27,6 +27,8 @@ pub const ALL_BACKENDS: [AcpBackend; 5] = [
     AcpBackend::Hermes,
     AcpBackend::OpenCode,
 ];
+
+pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
 impl AcpBackend {
     pub fn parse(value: &str) -> Result<Self> {
@@ -76,7 +78,7 @@ pub struct AcpRunOptions {
     pub cwd: PathBuf,
     pub prompt: String,
     pub show_native: bool,
-    pub require_daemon: bool,
+    pub use_daemon: bool,
     pub trace_timing: bool,
     pub timeout_ms: u64,
 }
@@ -156,9 +158,9 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
     let mut backend = AcpBackend::Codex;
     let mut cwd = std::env::current_dir().context("Failed to get current directory")?;
     let mut show_native = false;
-    let mut require_daemon = false;
+    let mut use_daemon = false;
     let mut trace_timing = false;
-    let mut timeout_ms = 5_000_u64;
+    let mut timeout_ms = DEFAULT_TIMEOUT_MS;
     let mut prompt_parts = Vec::new();
     let mut index = 0;
 
@@ -179,8 +181,8 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
             "--show-native" => {
                 show_native = true;
             }
-            "--require-daemon" => {
-                require_daemon = true;
+            "-d" | "--daemon" | "--require-daemon" => {
+                use_daemon = true;
             }
             "--trace-timing" => {
                 trace_timing = true;
@@ -189,6 +191,9 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
                 index += 1;
                 let value = args.get(index).context("--timeout-ms requires a value")?;
                 timeout_ms = value.parse().context("--timeout-ms must be an integer")?;
+                if timeout_ms == 0 {
+                    bail!("--timeout-ms must be greater than 0");
+                }
             }
             "-h" | "--help" => {
                 print_acp_help();
@@ -223,7 +228,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
         cwd,
         prompt,
         show_native,
-        require_daemon,
+        use_daemon,
         trace_timing,
         timeout_ms,
     })
@@ -231,7 +236,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
 
 pub fn print_acp_help() {
     println!(
-        "Usage:\n  iota acp [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n      --require-daemon   Fail instead of falling back when the daemon is unavailable\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 5000)\n  -h, --help             Show this help\n\nExamples:\n  iota acp codex \"What is 2+2?\"\n  iota acp --require-daemon --trace-timing codex \"What is 2+2?\"\n  iota acp --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
+        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon; starts it silently if needed\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 30000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --daemon --trace-timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
     );
 }
 
@@ -247,9 +252,9 @@ where
 {
     let mut output = String::new();
     let mut streamed = false;
+    let timeout_message = format!("ACP prompt timed out after {}ms", timeout_ms);
     loop {
-        let Some(line) = read_next_line(lines, timeout_ms, "ACP prompt response timed out").await?
-        else {
+        let Some(line) = read_next_line(lines, timeout_ms, &timeout_message).await? else {
             break;
         };
         let message = parse_message_line(&line, show_native)?;
@@ -332,12 +337,14 @@ impl AcpClient {
                 args.into_iter().map(str::to_string).collect(),
             )
         };
-        eprintln!(
-            "Starting warm ACP backend '{}' with command: {} {}",
-            backend,
-            executable,
-            args.join(" ")
-        );
+        if show_native {
+            eprintln!(
+                "Starting ACP backend '{}' with command: {} {}",
+                backend,
+                executable,
+                args.join(" ")
+            );
+        }
 
         let spawn_started = Instant::now();
         let mut child = TokioCommand::new(executable)
@@ -368,7 +375,7 @@ impl AcpClient {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if !line.trim().is_empty() {
+                if show_native && !line.trim().is_empty() {
                     eprintln!("[acp stderr] {}", line);
                 }
             }
@@ -522,13 +529,17 @@ impl AcpClient {
         self.startup_timing.clone()
     }
 
+    pub fn set_timeout_ms(&mut self, timeout_ms: u64) {
+        self.timeout_ms = timeout_ms;
+    }
+
     pub async fn shutdown(mut self) {
         let _ = self.stdin.shutdown().await;
         terminate_child_tree(&mut self.child).await;
     }
 }
 async fn terminate_child_tree(child: &mut Child) {
-    let Some(pid) = child.id() else {
+    let Some(_pid) = child.id() else {
         return;
     };
 
@@ -541,8 +552,8 @@ async fn terminate_child_tree(child: &mut Child) {
 
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &_pid.to_string(), "/T", "/F"])
             .output();
     }
 
@@ -611,8 +622,8 @@ where
         lines,
         timeout_ms,
         &format!(
-            "ACP backend timed out waiting for response '{}'",
-            expected_id
+            "ACP backend timed out after {}ms waiting for response '{}'",
+            timeout_ms, expected_id
         ),
     )
     .await?
