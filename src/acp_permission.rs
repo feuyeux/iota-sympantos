@@ -31,15 +31,14 @@ fn approval_lock() -> &'static RwLock<Option<mpsc::Sender<ApprovalRequest>>> {
 }
 
 /// Install (or replace) the approval channel.  Call before starting the TUI event loop.
-pub fn install_tui_approval_channel(tx: mpsc::Sender<ApprovalRequest>) {
-    // Use blocking_write so this can be called from sync context (e.g. TUI setup).
-    *approval_lock().blocking_write() = Some(tx);
+pub async fn install_tui_approval_channel(tx: mpsc::Sender<ApprovalRequest>) {
+    *approval_lock().write().await = Some(tx);
 }
 
 /// Remove the approval channel (e.g. when the TUI exits).
 #[allow(dead_code)]
-pub fn uninstall_tui_approval_channel() {
-    *approval_lock().blocking_write() = None;
+pub async fn uninstall_tui_approval_channel() {
+    *approval_lock().write().await = None;
 }
 
 pub async fn answer_permission_request(

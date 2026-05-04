@@ -67,6 +67,7 @@ enum Overlay {
     Help,
     Pager { scroll: usize },
     QuitConfirm,
+    BackendSelector { selected: usize },
 }
 
 // ── TuiApp ──────────────────────────────────────────────────────────────────
@@ -165,43 +166,27 @@ impl TuiApp {
         })
     }
 
-    // ── backend cycling (Ctrl+B) ─────────────────────────────────────────────
+    // ── backend management ───────────────────────────────────────────────────
 
-    fn cycle_backend(&mut self) {
-        let config = &self.config;
-        let enabled: Vec<AcpBackend> = ALL_BACKENDS
+    fn enabled_backends(&self) -> Vec<AcpBackend> {
+        ALL_BACKENDS
             .iter()
             .copied()
             .filter(|&b| {
-                backend_config(config, b)
+                backend_config(&self.config, b)
                     .map(|c| c.enabled)
                     .unwrap_or(false)
             })
-            .collect();
+            .collect()
+    }
 
-        if enabled.len() <= 1 {
-            return;
-        }
-
-        let current = self.active_backend;
-        let next = enabled
-            .iter()
-            .copied()
-            .skip_while(|&b| b != current)
-            .nth(1)
-            .or_else(|| enabled.first().copied())
-            .unwrap_or(current);
-
-        if next == current {
-            return;
-        }
-
-        self.active_backend = next;
-        self.active_model = backend_config(config, next).and_then(configured_model);
+    fn switch_backend(&mut self, backend: AcpBackend) {
+        self.active_backend = backend;
+        self.active_model = backend_config(&self.config, backend).and_then(configured_model);
 
         let notice = format!(
             "Switched to {} · {}",
-            next,
+            backend,
             self.active_model.as_deref().unwrap_or("—")
         );
         self.history
@@ -257,6 +242,10 @@ impl TuiApp {
             }
             Overlay::Help => {
                 self.render_help(frame, area);
+                return;
+            }
+            Overlay::BackendSelector { selected } => {
+                self.render_backend_selector(frame, area, *selected);
                 return;
             }
             Overlay::QuitConfirm => {
@@ -673,7 +662,7 @@ impl TuiApp {
             ("Ctrl+W", "Delete word backward"),
             ("Alt+B / Alt+F", "Word backward / forward"),
             ("Ctrl+T", "Toggle transcript pager"),
-            ("Ctrl+B", "Cycle backend"),
+            ("Ctrl+B", "Select backend"),
             ("Ctrl+L", "Clear history"),
             ("Esc", "Interrupt running turn"),
             ("? ", "Toggle this help"),
@@ -691,6 +680,54 @@ impl TuiApp {
             .collect();
 
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    }
+
+    /// Backend selector overlay (Ctrl+B when held or double-tap).
+    fn render_backend_selector(&self, frame: &mut Frame, area: Rect, selected: usize) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::composer_border_style(true))
+            .title(Span::styled(
+                " Select Backend ",
+                theme::status_bar_style(),
+            ));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let enabled = self.enabled_backends();
+        let lines: Vec<Line> = enabled
+            .iter()
+            .enumerate()
+            .map(|(i, &backend)| {
+                let model = backend_config(&self.config, backend)
+                    .and_then(configured_model)
+                    .unwrap_or_else(|| "—".to_string());
+                let prefix = if i == selected { "▶ " } else { "  " };
+                let text = format!("{}{} · {}", prefix, backend, model);
+                let style = if i == selected {
+                    theme::tool_call_style()
+                } else {
+                    theme::assistant_text_style()
+                };
+                Line::from(Span::styled(text, style))
+            })
+            .collect();
+
+        let hint = Line::from(vec![
+            Span::raw("  "),
+            Span::styled("↑/↓", theme::tool_call_style()),
+            Span::raw(" navigate  "),
+            Span::styled("Enter", theme::tool_call_style()),
+            Span::raw(" select  "),
+            Span::styled("Esc", theme::tool_call_style()),
+            Span::raw(" cancel"),
+        ]);
+
+        let mut all_lines = lines;
+        all_lines.push(Line::raw(""));
+        all_lines.push(hint);
+
+        frame.render_widget(Paragraph::new(all_lines).wrap(Wrap { trim: false }), inner);
     }
 }
 
@@ -719,7 +756,7 @@ pub async fn run(config: NimiaConfig) -> Result<()> {
 
     // Install the approval channel so acp.rs routes permission requests here.
     let (approval_tx, approval_rx) = mpsc::channel::<ApprovalRequest>(8);
-    install_tui_approval_channel(approval_tx);
+    install_tui_approval_channel(approval_tx).await;
 
     // Install a panic hook that restores the terminal before printing the
     // panic message, so the user's shell is not left in raw mode.
@@ -913,6 +950,7 @@ async fn run_loop(
                         if let Overlay::Pager { ref mut scroll } = app.overlay {
                             match (key.modifiers, key.code) {
                                 (KeyModifiers::NONE, KeyCode::Char('q'))
+                                | (KeyModifiers::NONE, KeyCode::Esc)
                                 | (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
                                     app.overlay = Overlay::None;
                                 }
@@ -937,6 +975,47 @@ async fn run_loop(
                         // ── Help overlay ─────────────────────────────────────
                         if app.overlay == Overlay::Help {
                             app.overlay = Overlay::None;
+                            continue;
+                        }
+
+                        // ── Backend selector overlay ─────────────────────────
+                        if let Overlay::BackendSelector { selected } = app.overlay {
+                            let enabled = app.enabled_backends();
+                            let mut new_selected = selected;
+                            let mut should_close = false;
+                            let mut should_switch = None;
+
+                            match (key.modifiers, key.code) {
+                                (KeyModifiers::NONE, KeyCode::Esc)
+                                | (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+                                    should_close = true;
+                                }
+                                (KeyModifiers::NONE, KeyCode::Up) => {
+                                    new_selected = new_selected.saturating_sub(1);
+                                }
+                                (KeyModifiers::NONE, KeyCode::Down) => {
+                                    new_selected = (new_selected + 1).min(enabled.len().saturating_sub(1));
+                                }
+                                (KeyModifiers::NONE, KeyCode::Enter) => {
+                                    if let Some(&backend) = enabled.get(new_selected) {
+                                        should_switch = Some(backend);
+                                    }
+                                    should_close = true;
+                                }
+                                (KeyModifiers::CONTROL, KeyCode::Char('c')) => break,
+                                _ => {}
+                            }
+
+                            if should_close {
+                                app.overlay = Overlay::None;
+                            } else {
+                                app.overlay = Overlay::BackendSelector { selected: new_selected };
+                            }
+
+                            if let Some(backend) = should_switch {
+                                app.switch_backend(backend);
+                            }
+
                             continue;
                         }
 
@@ -990,9 +1069,16 @@ async fn run_loop(
                                 app.overlay = Overlay::Help;
                             }
 
-                            // Backend cycle
+                            // Backend selector
                             (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
-                                app.cycle_backend();
+                                let enabled = app.enabled_backends();
+                                if enabled.len() > 1 {
+                                    let selected = enabled
+                                        .iter()
+                                        .position(|&b| b == app.active_backend)
+                                        .unwrap_or(0);
+                                    app.overlay = Overlay::BackendSelector { selected };
+                                }
                             }
 
                             // Clear history
