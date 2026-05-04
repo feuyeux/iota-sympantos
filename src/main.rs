@@ -1,6 +1,7 @@
 mod acp;
 mod acp_permission;
 mod acp_session;
+mod acp_wire;
 mod agent;
 mod approval;
 mod cli;

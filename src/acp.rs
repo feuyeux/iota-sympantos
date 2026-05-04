@@ -14,6 +14,9 @@ use tokio::time::{Duration, timeout};
 
 use crate::acp_permission;
 use crate::acp_session::{AcpMcpServer, session_new_params};
+use crate::acp_wire::{
+    AcpWireMessage, format_acp_error, is_response_id, parse_message_line, read_next_line,
+};
 use crate::mcp_router;
 use crate::runtime_event::{self, RuntimeEvent};
 
@@ -157,30 +160,6 @@ struct JsonRpcResponse {
     jsonrpc: &'static str,
     id: Value,
     result: Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct AcpWireMessage {
-    #[serde(default)]
-    id: Option<Value>,
-    #[serde(default)]
-    method: Option<String>,
-    #[serde(default)]
-    params: Option<Value>,
-    #[serde(default)]
-    result: Option<Value>,
-    #[serde(default)]
-    error: Option<AcpWireError>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AcpWireError {
-    #[serde(default)]
-    code: Option<i64>,
-    #[serde(default)]
-    message: String,
-    #[serde(default)]
-    data: Option<Value>,
 }
 
 pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
@@ -719,46 +698,6 @@ where
     ))
 }
 
-async fn read_next_line<R>(
-    lines: &mut tokio::io::Lines<BufReader<R>>,
-    timeout_ms: u64,
-    message: &str,
-) -> Result<Option<String>>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    read_next_line_with_duration(lines, Duration::from_millis(timeout_ms), message).await
-}
-
-async fn read_next_line_with_duration<R>(
-    lines: &mut tokio::io::Lines<BufReader<R>>,
-    duration: Duration,
-    message: &str,
-) -> Result<Option<String>>
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    timeout(duration, lines.next_line())
-        .await
-        .map_err(|_| anyhow!(message.to_string()))?
-        .context("Failed to read ACP stdout")
-}
-
-fn parse_message_line(line: &str, show_native: bool) -> Result<AcpWireMessage> {
-    if show_native {
-        eprintln!("[acp <=] {}", line);
-    }
-    serde_json::from_str::<AcpWireMessage>(line)
-        .with_context(|| format!("ACP backend emitted non-JSON line: {}", line))
-}
-
-fn is_response_id(message: &AcpWireMessage, expected: &str) -> bool {
-    match message.id.as_ref() {
-        Some(Value::String(id)) => id == expected,
-        Some(Value::Number(id)) => id.to_string() == expected,
-        _ => false,
-    }
-}
 
 fn text_from_session_update(params: Option<&Value>) -> Option<String> {
     let params = params?;
@@ -852,16 +791,6 @@ fn is_backend_alias(value: &str) -> bool {
     }
 }
 
-fn format_acp_error(error: &AcpWireError) -> String {
-    let mut text = error.message.clone();
-    if let Some(code) = error.code {
-        text = format!("ACP error {}: {}", code, text);
-    }
-    if let Some(data) = &error.data {
-        text = format!("{} ({})", text, data);
-    }
-    text
-}
 
 fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
