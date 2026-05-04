@@ -32,7 +32,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use tokio::sync::mpsc;
 
-use crate::acp::{ALL_BACKENDS, AcpBackend, ApprovalRequest, install_tui_approval_channel};
+use crate::acp::{ALL_BACKENDS, AcpBackend};
+use crate::acp_permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
 use composer::{Composer, ComposerAction};

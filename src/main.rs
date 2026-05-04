@@ -1,4 +1,5 @@
 mod acp;
+mod acp_permission;
 mod acp_session;
 mod agent;
 mod approval;
