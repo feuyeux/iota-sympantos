@@ -2,7 +2,7 @@
 
 iota-sympantos 是一个 Rust CLI/TUI 编排器。核心运行路径是：用户入口进入表现层，表现层调用服务编排层，服务编排层组合 Context Fabric 与持久化存储，再通过协议适配层驱动 ACP/MCP 子进程。配置层为所有运行路径提供只读配置和后端环境变量渲染。
 
-本文描述当前代码的实际分层和模块关系。调用链细节见 [code-call-chains.md](code-call-chains.md)，关系图见 `images/code-call-chains.svg`。
+本文描述当前代码的实际分层和模块关系。调用链细节见 [code-call-chains.md](code-call-chains.md)，分层架构和链路图见 [`images/architecture-flow.svg`](images/architecture-flow.svg)，历史调用链图见 `images/code-call-chains.svg`。
 
 ## Layer Diagram
 
@@ -89,8 +89,8 @@ Presentation code should not own ACP sessions directly. It reaches backend execu
 |---|---|---|
 | `acp.rs` | ACP backend enum, command parsing for `iota run`, ACP child-process lifecycle, JSON-RPC request/response, session lifecycle, prompt event loop, timings | `acp_permission`, `acp_session`, `acp_wire`, `mcp_router`, `runtime_event` |
 | `acp_wire.rs` | Timeout line reads, ACP JSON message parsing, response id matching, error formatting | none project-level |
-| `acp_session.rs` | Renders `session/new` params and backend-specific `mcpServers` shape | `acp::AcpBackend` |
-| `acp_permission.rs` | Handles ACP permission requests, bridges to TUI channel or terminal yes/no, writes approval records, sends ACP response | `approval`, `runtime_event` |
+| `acp_session.rs` | Renders `session/new` params and per-backend `mcpServers` shape. ClaudeCode/Hermes: `name+type+env[]`. Gemini: no `name`, has `type+env[]`. Codex: no `type` field. | `acp::AcpBackend` |
+| `acp_permission.rs` | Handles ACP permission requests. Auto-approves `iota_*`/`mcp__iota-*` tools by returning `{"optionId":"allow"}` without any prompt. Non-iota tools route to TUI approval channel or terminal yes/no. Writes approval records. | `approval`, `runtime_event` |
 | `mcp_client.rs` | Engine-side stdio MCP client. Starts MCP server process, initializes, calls tools | none project-level |
 | `mcp_router.rs` | Intercepts ACP-side MCP tool-call messages and routes safe iota tools or denies external tools | `memory`, `skills` |
 | `runtime_event.rs` | Normalizes ACP updates/errors/tool/usage/approval events into internal `RuntimeEvent` | none project-level |
@@ -101,7 +101,7 @@ Protocol adapters should not know CLI/TUI/daemon details. Their job is to transl
 
 | Module | Responsibility | Depends On |
 |---|---|---|
-| `context.rs` | ContextEngine, budgeted context capsule composition, dialogue buffer, workspace `git status` summary | `acp`, `config`, `memory`, `skills`, `utils` |
+| `context.rs` | ContextEngine, budgeted context capsule composition, dialogue buffer, workspace `git status` summary, `<memory-tools>` injection for LLM-driven memory writes | `acp`, `config`, `memory`, `skills`, `utils` |
 | `skills.rs` | Distributed skill registry, YAML frontmatter parsing, trigger matching, backend compatibility, skill index rendering | `acp` |
 | `skill_runner.rs` | Executes `execution.mode = mcp` skills through MCP tools and renders skill output | `mcp_client`, `runtime_event`, `skills` |
 | `context_mcp.rs` | `iota-context` MCP stdio server exposing memory, skill, session, handoff tools/resources | `memory`, `session_ledger`, `skills`, `acp` |
@@ -132,6 +132,100 @@ Store modules should remain below orchestration. They expose typed operations an
 `config.rs` is intentionally close to the bottom of the stack, but in the current flat layout it references `AcpBackend` and `AcpMcpServer` to keep backend-specific config rendering type-safe.
 
 ## Primary Runtime Flows
+
+### 全链路架构图
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│  用户                                                                    │
+│  iota <prompt>  /  iota tui  /  iota run [backend] <prompt>            │
+└───────────────────────────┬─────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  cli.rs  →  IotaEngine                                                  │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ Context Fabric                                                    │   │
+│  │  context.rs: memory buckets + skill index + <memory-tools>       │   │
+│  │  skills.rs: trigger match → skill_runner.rs → mcp_client.rs      │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                    │                          │                          │
+│                    │ engine-run skill          │ ACP backend prompt      │
+│                    ▼                          ▼                          │
+│  ┌──────────────────────┐     ┌────────────────────────────────────┐    │
+│  │ MCP sidecar (skill)  │     │ ACP backend process                │    │
+│  │ iota fun-mcp /       │     │ claude-code / codex / gemini /     │    │
+│  │ iota context-mcp     │     │ hermes / opencode                  │    │
+│  │ [stdio JSON-RPC]     │     │ [stdio JSON-RPC]                   │    │
+│  └──────────────────────┘     └─────────────┬──────────────────────┘    │
+│                                             │                           │
+│                               ┌─────────────▼──────────────────────┐   │
+│                               │ MCP sidecar (backend-started)       │   │
+│                               │ iota context-mcp / iota fun-mcp     │   │
+│                               │ [stdio JSON-RPC per mcpServers]     │   │
+│                               └─────────────┬──────────────────────┘   │
+│                                             │                           │
+│                               ┌─────────────▼──────────────────────┐   │
+│                               │ acp_permission.rs                   │   │
+│                               │ session/request_permission          │   │
+│                               │  iota_* → auto-approve (optionId)  │   │
+│                               │  other  → TUI overlay / stdin y/n  │   │
+│                               └─────────────┬──────────────────────┘   │
+│                                             │                           │
+│  ┌──────────────────────────────────────────▼─────────────────────┐    │
+│  │ Store Layer                                                      │    │
+│  │  memory.rs (SQLite FTS5)  event_store.rs  session_ledger.rs     │    │
+│  └──────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 内存写回路径（LLM → MCP → SQLite）
+
+```text
+context.rs
+  └─ compose_effective_prompt()
+       └─ injects <memory-tools> block
+            ┌────────────────────────────────────────────┐
+            │  ACP backend sends prompt to LLM            │
+            │  LLM decides to call iota_memory_write      │
+            └───────────────────┬────────────────────────┘
+                                │ session/request_permission
+                                ▼
+                     acp_permission.rs
+                       tool_name from params.toolCall.title
+                       is_iota_tool = true
+                       send {optionId: "allow"}  ──────────────────────┐
+                                                                        │ approved
+                                ┌───────────────────────────────────────┘
+                                ▼
+                     context-mcp sidecar
+                       tools/call iota_memory_write
+                                │
+                                ▼
+                     memory.rs → SQLite
+```
+
+### Skill 并行执行路径（engine-run MCP skill）
+
+```text
+IotaEngine::prompt_in_cwd_timed()
+  └─ SkillRegistry::match_skill()   (trigger 匹配)
+       └─ skill_runner::run_engine_skill()
+            ├─ parallel: true
+            │    └─ mcp_client::call_stdio_batch()
+            │         ├─ [child process] iota fun-mcp
+            │         │    ├─ fun.cpp   → clang++/g++ → binary
+            │         │    ├─ fun.rust  → rustc → binary
+            │         │    ├─ fun.zig   → zig run
+            │         │    ├─ fun.java  → javac → java
+            │         │    ├─ fun.go    → go run
+            │         │    ├─ fun.ts    → node -e
+            │         │    └─ fun.python→ python3 -c
+            │         └─ (~100ms wall time, 编译缓存 ~/.i6/fun-cache/)
+            └─ render_template()
+                 └─ SkillRunOutput → engine records Output event
+```
 
 ### CLI Direct Prompt
 
@@ -181,6 +275,43 @@ engine -> acp_session::session_new_params()
 acp -> ACP backend process
 ACP backend -> starts iota context-mcp / fun-mcp          [backend-controlled process boundary]
 MCP tool/resource calls -> sidecar stdio JSON-RPC
+```
+
+### LLM-Driven Memory Write via MCP
+
+```text
+context.rs injects <memory-tools> block into prompt
+  -> ACP backend sends prompt to LLM
+  -> LLM decides to call mcp__iota-context__iota_memory_write
+  -> ACP backend sends session/request_permission
+       params.toolCall.title = "mcp__iota-context__iota_memory_write"
+       params.options = [{optionId: "allow"}, {optionId: "allow_always"}, ...]
+  -> acp_permission::answer_permission_request()
+       tool name extracted from params.toolCall.title
+       is_iota_tool = true (starts with "mcp__iota-")
+       send_response({optionId: "allow"})  [no user prompt]
+  -> ACP backend calls context-mcp sidecar tool
+  -> context_mcp::call_tool("iota_memory_write")
+  -> MemoryStore::insert()
+  -> SQLite memory persisted
+```
+
+Alternative pre-authorization path (settings.json):
+
+```text
+~/.claude/settings.json
+  permissions.allow: ["mcp__iota-context__*"]
+  -> claude-code never sends session/request_permission for matching tools
+  -> MCP tool call proceeds immediately
+```
+
+### Per-Backend MCP Server Rendering
+
+```text
+acp_session::render_mcp_server(backend, server)
+  ├── Gemini   -> {type:"stdio", command, args, env:["K=V",...]}    (no "name" field)
+  ├── ClaudeCode/Hermes -> {name, type:"stdio", command, args, env:["K=V",...]}
+  └── Codex    -> {name, command, args, env:{K:V,...}}              (no "type" field)
 ```
 
 ## Module Relationship Rules

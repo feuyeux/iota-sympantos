@@ -29,8 +29,8 @@ digraph IotaLayeredModuleMap {
     label="Protocol Adapter Layer"; color="#fed7aa"; style="rounded,filled"; fillcolor="#fff7ed";
     acp [label="acp.rs\nAcpClient JSON-RPC"];
     acp_wire [label="acp_wire.rs\nline read/parse"];
-    acp_session [label="acp_session.rs\nsession/new mcpServers"];
-    acp_permission [label="acp_permission.rs\napproval bridge"];
+    acp_session [label="acp_session.rs\nper-backend mcpServers shape\nGemini/ClaudeCode/Hermes/Codex"];
+    acp_permission [label="acp_permission.rs\nauto-approve iota_* (optionId)\nTUI channel / stdin fallback"];
     runtime_event [label="runtime_event.rs\nevent mapping"];
     mcp_router [label="mcp_router.rs\nACP tool intercept"];
     mcp_client [label="mcp_client.rs\nstdio MCP client"];
@@ -38,7 +38,7 @@ digraph IotaLayeredModuleMap {
 
   subgraph cluster_context {
     label="Context Fabric Layer"; color="#f5d0fe"; style="rounded,filled"; fillcolor="#fdf4ff";
-    context [label="context.rs\ncontext capsule"];
+    context [label="context.rs\ncontext capsule\n+ &lt;memory-tools&gt; injection"];
     skills [label="skills.rs\nSkillRegistry"];
     skill_runner [label="skill_runner.rs\nengine-run MCP skills"];
     context_mcp [label="context_mcp.rs\niota-context MCP"];
@@ -115,6 +115,8 @@ digraph IotaLayeredModuleMap {
   acp -> acp_backend [style=dashed, color="#dc2626", label="stdio JSON-RPC"];
   acp_session -> mcp_sidecar [style=dashed, color="#dc2626", label="mcpServers spawn by backend"];
   acp_permission -> approval;
+  acp_permission -> acp_backend [style=dashed, color="#16a34a", label="optionId: allow\n(iota tools)"];
+  context -> acp_backend [style=dotted, color="#7c3aed", label="&lt;memory-tools&gt;\nin prompt"];
   mcp_router -> memory [label="iota_memory_search"];
   mcp_router -> skills [label="iota_skill_search"];
 

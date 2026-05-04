@@ -60,7 +60,6 @@ iota run [backend] <prompt>
        -> EventStore::append_event() / record_timing() / finish_execution()
        -> SessionLedger::record_turn()
        -> MemoryStore::insert() episodic memory
-       -> MemoryStore::insert() explicit keyword memory
   -> cli prints output
   -> IotaEngine::shutdown()
        -> AcpClient::shutdown()
@@ -228,14 +227,25 @@ AcpClient::prompt_with_cwd_timed_for_execution()
        -> collect response text
        -> map runtime events
        -> handle session/request_permission
+            -> acp_permission::answer_permission_request()
+                 -> extract tool_name from params.toolCall.title / toolName / name / tool
+                 -> if is_iota_tool (starts_with "iota_" / contains "__iota_" / starts_with "mcp__iota-"):
+                      -> read optionId from params.options (prefer "allow")
+                      -> send_response({optionId})  [no user prompt, no TUI overlay]
+                 -> else if TUI active:
+                      -> send ApprovalRequest to TUI channel
+                      -> wait oneshot reply
+                 -> else:
+                      -> prompt_yes_no() on stdin
+                      -> ApprovalStore::record_request()/record_decision()
        -> intercept tools/call if needed
 ```
 
 辅助模块：
 
 - `acp_wire.rs`：读取带 timeout 的 stdout 行、解析 ACP JSON、匹配 response id、格式化 ACP error。
-- `acp_session.rs`：构造 `session/new` params，包含 cwd 和 `mcpServers`；Hermes 的 env 渲染为字符串数组，其它后端为对象。
-- `acp_permission.rs`：处理权限请求。TUI 运行时走 TUI approval channel；非 TUI 时走 stdin yes/no，并写 `ApprovalStore`。
+- `acp_session.rs`：构造 `session/new` params，包含 cwd 和 `mcpServers`；Gemini 不含 `name` 字段，env 渲染为 `["K=V"]` 字符串数组；ClaudeCode/Hermes 含 `name`+`type`+`env[]`；Codex 不含 `type` 字段。
+- `acp_permission.rs`：处理权限请求。`iota_*`/`mcp__iota-*` 工具自动批准，回写 `{"optionId":"allow"}`，不弹提示。非 iota 工具走 TUI approval channel；非 TUI 时走 stdin yes/no，并写 `ApprovalStore`。
 - `runtime_event.rs`：把 ACP `session/update`、usage、tool、approval、error 等协议形态归一为 `RuntimeEvent`。
 - `mcp_router.rs`：拦截 ACP 侧 `tools/call`/`mcp/tools/call`/`mcp/tool_call`，只允许部分 `iota_*` 工具，默认拒绝外部工具。
 
@@ -260,6 +270,7 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
        -> workspace git status
        -> skill index
        -> handoff summary
+       -> <memory-tools> block (iota_memory_write/iota_memory_search MCP tool declarations)
        -> user prompt
 ```
 
@@ -272,8 +283,19 @@ ACP/skill output completed
   -> SessionLedger::record_turn()
   -> DialogueBuffer::push_turn()
   -> MemoryStore::insert(episodic prompt/output memory)
-  -> extract_explicit_memory()
-       -> MemoryStore::insert(semantic memory if prompt contains remember/save/记住/保存)
+```
+
+LLM 主动写回链（经 MCP）：
+
+```text
+context.rs injects <memory-tools> in prompt
+  -> LLM calls mcp__iota-context__iota_memory_write
+  -> session/request_permission received
+  -> acp_permission::answer_permission_request()
+       -> auto-approve (is_iota_tool=true)
+       -> send_response({optionId: "allow"})
+  -> context-mcp sidecar: iota_memory_write
+  -> MemoryStore::insert()
 ```
 
 ## 链路 6：engine-run skill 与 MCP
@@ -499,7 +521,7 @@ ApprovalStore
 | `acp.rs` | ACP client、子进程启动、JSON-RPC 请求/响应、prompt 事件读取 | 1,4 |
 | `acp_wire.rs` | ACP line read/parse/response id/error | 4 |
 | `acp_session.rs` | session/new 参数和 mcpServers 渲染 | 4,7,8 |
-| `acp_permission.rs` | ACP 权限请求处理，TUI channel 或 stdin 决策 | 3,4 |
+| `acp_permission.rs` | ACP 权限请求处理：iota 工具自动批准（optionId），TUI channel 或 stdin 决策 | 3,4 |
 | `runtime_event.rs` | ACP 事件归一化 | 1,4,9 |
 | `agent.rs` | daemon TCP server/client、engine pool、warm/prompt 请求 | 2 |
 | `tui.rs` | ratatui 主循环、渲染、engine task、stream/approval channel | 3 |

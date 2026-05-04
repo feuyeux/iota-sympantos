@@ -1,39 +1,55 @@
-# iota
+# iota sympantos
 
-Cross-platform Rust CLI/TUI for sending prompts to five ACP backends using configuration from `~/.i6/nimia.yaml`.
+Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-code / codex / gemini / hermes / opencode），共享统一的记忆、技能与上下文层。
 
-Targets Windows, macOS, and Linux. All path handling, command spawning, and env var mapping is platform-aware.
+## 核心功能
 
-## Architecture
+- **跨后端记忆** — Rust 引擎层 SQLite 存储（SHA-256 去重、FTS5、6 召回桶）。任一后端写入的记忆可在其他后端召回注入。
+- **确定性技能** — YAML 声明的技能由 Rust 引擎分发，触发匹配与输出模板与后端无关，所有后端产出一致的结构化结果。
+- **iota-fun 多语言执行** — 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` 支持。
+- **Daemon 热路径** — 可选 TCP daemon 保持 ACP 客户端预热；任何命令加 `--daemon/-d` 即可路由。
+- **交互式 TUI** — ratatui 循环，含多行编辑器、Markdown 渲染、流式输出与权限审批覆层。
 
-The Rust code is split into extension-oriented modules, mirroring the larger `iota` separation while keeping this crate lightweight:
+## 架构
 
-```text
-src/
-├── main.rs      # thin binary entrypoint
-├── cli.rs       # command dispatch for default TUI, check/run/bench and daemon routing
-├── tui.rs       # interactive prompt loop and warmed backend selection
-├── engine.rs    # ACP runtime orchestration, warm backend pool, benchmarks
-├── agent.rs     # local daemon for cross-CLI ACP client reuse and internal warm control plane
-├── config.rs    # nimia.yaml schema, config loading, backend env rendering
-└── acp.rs       # ACP JSON-RPC protocol driver + timing instrumentation
+![Architecture Overview](images/iota-sympantos-architecture.png)
+
+
+| 层级 | 模块 |
+|------|------|
+| **UI** | `cli.rs`, `tui.rs` + `tui/` |
+| **编排** | `engine.rs`, `agent.rs`, `acp*.rs`, `mcp_*.rs`, `context.rs`, `skills.rs`, `skill_runner.rs` |
+| **存储** | `memory.rs`, `event_store.rs`, `session_ledger.rs`, `approval.rs` |
+
+详见 [`doc/architecture.md`](doc/architecture.md) 和 [`doc/code-call-chains.md`](doc/code-call-chains.md)。
+
+## 请求流程
+
+![Request Workflow](images/iota-sympantos-workflow.png)
+
+## 功能实验室
+
+
+| # | 主题 | 报告 |
+|---|------|------|
+| 01 | 跨后端记忆延续 — 6 召回桶、SHA-256 去重、置信度过滤、token 预算 | [`gefsi/exp01-memory.md`](gefsi/exp01-memory.md) |
+| 02 | Skill + iota-fun 多语言执行 — 触发匹配、并行工具、编译缓存、5 后端一致性 | [`gefsi/exp02-skill-fun.md`](gefsi/exp02-skill-fun.md) |
+
+![Component Diagram](images/iota-sympantos-component.png)
+
+## 快速开始
+
+### 构建
+
+```bash
+cargo build --offline
+cargo install --path .
 ```
 
-`cli` and `tui` are intentionally separate from `engine`: CLI/TUI own user interaction, while engine owns backend process orchestration. `agent` is the local daemon boundary for cross-CLI client reuse.
 
-## Configuration
+### 配置
 
-Backend configuration is read only from `~/.i6/nimia.yaml`. The runtime does not read external project config, network overlays, Redis, npm cache discovery, or generated backend data.
-
-Each backend section commonly uses these fields:
-
-- `enabled`: whether CLI/TUI may use this backend. TUI only warms enabled backends.
-- `acp`: command and args used to start the backend ACP adapter.
-- `update`: optional command and args used by check output for update/version probing.
-- `home`: optional backend config directory, expanded with `~/` when supported.
-- `model`: provider, model name, endpoint, and API key; iota renders this into backend process environment variables.
-
-Example:
+配置文件：`~/.i6/nimia.yaml`，每个后端的关键字段：
 
 ```yaml
 codex:
@@ -48,42 +64,15 @@ codex:
     api_key: "<router-api-key>"
 ```
 
-Use `iota check` to inspect the effective configuration for all five backend sections.
+`iota check` 查看所有后端的生效配置。
 
-## Usage
-
-```bash
-cargo build --offline
-```
-
-Install the short command locally:
+### 运行 
 
 ```bash
-cargo install --path .
+iota                                              # 交互式 TUI
+iota run codex "ping"                             # 单次 prompt，直连
+iota run --daemon codex --timeout-ms 20000 "ping" # 经由 daemon（热路径）
+iota check                                        # 检查配置与后端状态
 ```
 
-After install, use `iota` from your shell:
-
-```powershell
-# Windows
-target\debug\iota.exe
-target\debug\iota.exe check
-target\debug\iota.exe check --daemon
-target\debug\iota.exe run codex --timeout-ms 20000 "ping"
-target\debug\iota.exe run --daemon --trace-timing codex --timeout-ms 20000 "ping"
-```
-
-```bash
-# macOS / Linux
-target/debug/iota
-target/debug/iota check
-target/debug/iota check --daemon
-target/debug/iota run codex --timeout-ms 20000 "ping"
-target/debug/iota run --daemon --trace-timing codex --timeout-ms 20000 "ping"
-```
-
-`iota` with no arguments enters the interactive TUI. The explicit `tui` command is no longer needed.
-
-`check` prints one combined JSON structure: config path, daemon address, per-backend check status, command labels, update/version probe command, and configured model.
-
-`daemon` and `warm` are no longer user-facing commands. Add `--daemon` or `-d` to supported commands when you want daemon routing. If the daemon is not running, iota starts it silently and continues. The first daemon-routed request starts/reuses the needed ACP client, so that request is also the warm path. Override the daemon address with `IOTA_DAEMON_ADDR=127.0.0.1:47662` if the default port is unavailable. `iota run` runs directly in-process unless `--daemon/-d` is present. `--trace-timing` prints route plus ACP phase timings to stderr as JSON. `bench-cold` measures one backend process per sample; `bench-warm` prewarms once in-process; adding `--daemon/-d` measures the daemon hot path.
+`--trace-timing` 将路由与 ACP 阶段耗时以 JSON 格式输出到 stderr。

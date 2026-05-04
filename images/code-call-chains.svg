@@ -1,233 +1,742 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1500" viewBox="0 0 2200 1500">
-  <defs>
-    <style>
-      text { font-family: Arial, Helvetica, sans-serif; fill: #0f172a; }
-      .title { font-size: 28px; font-weight: 700; }
-      .subtitle { font-size: 14px; fill: #475569; }
-      .laneTitle { font-size: 18px; font-weight: 700; fill: #1e293b; }
-      .laneNote { font-size: 12px; fill: #64748b; }
-      .entryLane { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; rx: 18; }
-      .presentationLane { fill: #f0f9ff; stroke: #bae6fd; stroke-width: 1.2; rx: 18; }
-      .serviceLane { fill: #f7fee7; stroke: #d9f99d; stroke-width: 1.2; rx: 18; }
-      .protocolLane { fill: #fff7ed; stroke: #fed7aa; stroke-width: 1.2; rx: 18; }
-      .contextLane { fill: #fdf4ff; stroke: #f5d0fe; stroke-width: 1.2; rx: 18; }
-      .storeLane { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1.2; rx: 18; }
-      .externalLane { fill: #fef2f2; stroke: #fecaca; stroke-width: 1.2; rx: 18; }
-      .configLane { fill: #ecfdf5; stroke: #bbf7d0; stroke-width: 1.2; rx: 18; }
-      .mod { fill: #ffffff; stroke: #475569; stroke-width: 1.35; rx: 10; }
-      .ipcMod { fill: #fff1f2; stroke: #dc2626; stroke-width: 1.7; rx: 10; }
-      .tcpMod { fill: #fffbeb; stroke: #d97706; stroke-width: 1.7; rx: 10; }
-      .netMod { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.7; rx: 10; }
-      .name { font-size: 13px; font-weight: 700; }
-      .desc { font-size: 11px; fill: #475569; }
-      .edge { stroke: #334155; stroke-width: 1.55; fill: none; marker-end: url(#arrow); }
-      .thin { stroke: #64748b; stroke-width: 1.15; fill: none; marker-end: url(#arrow-light); }
-      .ipc { stroke: #dc2626; stroke-width: 1.8; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrow-red); }
-      .tcp { stroke: #d97706; stroke-width: 1.8; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrow-orange); }
-      .net { stroke: #2563eb; stroke-width: 1.8; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrow-blue); }
-      .label { font-size: 11px; fill: #334155; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
-      .ipcLabel { font-size: 11px; fill: #b91c1c; font-weight: 700; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
-      .tcpLabel { font-size: 11px; fill: #b45309; font-weight: 700; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
-      .legend { font-size: 12px; fill: #334155; }
-    </style>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#334155"/></marker>
-    <marker id="arrow-light" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#64748b"/></marker>
-    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#dc2626"/></marker>
-    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#d97706"/></marker>
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#2563eb"/></marker>
-  </defs>
-
-  <text x="40" y="44" class="title">iota-sympantos layered module relationship map</text>
-  <text x="40" y="70" class="subtitle">Clean layered view: primary runtime flow goes downward; local module fan-out stays within the same lane; dashed lines mark process/TCP/stdio/network boundaries.</text>
-
-  <rect x="30" y="100" width="2140" height="90" class="entryLane"/>
-  <text x="55" y="130" class="laneTitle">Entry Layer</text>
-  <text x="55" y="152" class="laneNote">binary startup</text>
-
-  <rect x="30" y="210" width="2140" height="175" class="presentationLane"/>
-  <text x="55" y="240" class="laneTitle">Presentation Layer</text>
-  <text x="55" y="262" class="laneNote">commands and terminal UI</text>
-
-  <rect x="30" y="405" width="2140" height="125" class="serviceLane"/>
-  <text x="55" y="435" class="laneTitle">Service Orchestration Layer</text>
-  <text x="55" y="457" class="laneNote">engine pool and turn lifecycle</text>
-
-  <rect x="30" y="550" width="2140" height="170" class="protocolLane"/>
-  <text x="55" y="580" class="laneTitle">Protocol Adapter Layer</text>
-  <text x="55" y="602" class="laneNote">ACP/MCP adapters and event mapping</text>
-
-  <rect x="30" y="740" width="2140" height="190" class="contextLane"/>
-  <text x="55" y="770" class="laneTitle">Context Fabric Layer</text>
-  <text x="55" y="792" class="laneNote">context capsule, skills, MCP sidecars, projections</text>
-
-  <rect x="30" y="950" width="2140" height="140" class="storeLane"/>
-  <text x="55" y="980" class="laneTitle">Store Layer</text>
-  <text x="55" y="1002" class="laneNote">SQLite stores</text>
-
-  <rect x="30" y="1110" width="2140" height="155" class="externalLane"/>
-  <text x="55" y="1140" class="laneTitle">External Process / Network Boundaries</text>
-  <text x="55" y="1162" class="laneNote">IPC and subprocesses</text>
-
-  <rect x="30" y="1285" width="2140" height="110" class="configLane"/>
-  <text x="55" y="1315" class="laneTitle">Configuration and Shared Utility Layer</text>
-  <text x="55" y="1337" class="laneNote">read-only config and low-level helpers</text>
-
-  <!-- Entry -->
-  <rect x="1010" y="120" width="180" height="52" class="mod"/>
-  <text x="1032" y="143" class="name">main.rs</text><text x="1032" y="161" class="desc">Tokio entrypoint</text>
-
-  <!-- Presentation -->
-  <rect x="175" y="260" width="190" height="64" class="mod"/>
-  <text x="197" y="286" class="name">cli.rs</text><text x="197" y="304" class="desc">command dispatch</text>
-  <rect x="500" y="260" width="190" height="64" class="mod"/>
-  <text x="522" y="286" class="name">tui.rs</text><text x="522" y="304" class="desc">ratatui runtime loop</text>
-  <rect x="780" y="235" width="150" height="46" class="mod"/><text x="800" y="264" class="name">composer.rs</text>
-  <rect x="960" y="235" width="150" height="46" class="mod"/><text x="980" y="264" class="name">markdown.rs</text>
-  <rect x="1140" y="235" width="150" height="46" class="mod"/><text x="1160" y="264" class="name">status_bar.rs</text>
-  <rect x="1320" y="235" width="150" height="46" class="mod"/><text x="1350" y="264" class="name">theme.rs</text>
-  <rect x="1500" y="235" width="150" height="46" class="mod"/><text x="1534" y="264" class="name">state.rs</text>
-  <rect x="1680" y="235" width="170" height="46" class="mod"/><text x="1702" y="258" class="name">TUI channels</text><text x="1702" y="276" class="desc">stream / approval</text>
-
-  <!-- Service -->
-  <rect x="500" y="435" width="220" height="66" class="mod"/>
-  <text x="522" y="462" class="name">agent.rs</text><text x="522" y="480" class="desc">daemon TCP plane</text>
-  <rect x="920" y="435" width="240" height="66" class="mod"/>
-  <text x="942" y="462" class="name">engine.rs</text><text x="942" y="480" class="desc">IotaEngine orchestration</text>
-
-  <!-- Protocol -->
-  <rect x="580" y="590" width="210" height="66" class="mod"/>
-  <text x="602" y="617" class="name">acp.rs</text><text x="602" y="635" class="desc">AcpClient JSON-RPC</text>
-  <rect x="840" y="580" width="145" height="52" class="mod"/><text x="860" y="612" class="name">acp_wire.rs</text>
-  <rect x="1015" y="580" width="155" height="52" class="mod"/><text x="1035" y="612" class="name">acp_session.rs</text>
-  <rect x="1200" y="580" width="170" height="52" class="mod"/><text x="1220" y="612" class="name">acp_permission.rs</text>
-  <rect x="1400" y="580" width="160" height="52" class="mod"/><text x="1420" y="612" class="name">runtime_event.rs</text>
-  <rect x="1590" y="580" width="155" height="52" class="mod"/><text x="1610" y="612" class="name">mcp_router.rs</text>
-  <rect x="1780" y="580" width="155" height="52" class="mod"/><text x="1800" y="612" class="name">mcp_client.rs</text>
-
-  <!-- Context -->
-  <rect x="190" y="795" width="170" height="62" class="mod"/>
-  <text x="212" y="821" class="name">context.rs</text><text x="212" y="839" class="desc">capsule/dialogue</text>
-  <rect x="430" y="795" width="170" height="62" class="mod"/>
-  <text x="452" y="821" class="name">skills.rs</text><text x="452" y="839" class="desc">registry/triggers</text>
-  <rect x="670" y="795" width="170" height="62" class="mod"/>
-  <text x="692" y="821" class="name">skill_runner.rs</text><text x="692" y="839" class="desc">engine-run MCP</text>
-  <rect x="930" y="795" width="175" height="62" class="mod"/>
-  <text x="952" y="821" class="name">context_mcp.rs</text><text x="952" y="839" class="desc">MCP tools/resources</text>
-  <rect x="1165" y="795" width="175" height="62" class="mod"/>
-  <text x="1187" y="821" class="name">fun_mcp.rs</text><text x="1187" y="839" class="desc">7 language tools</text>
-  <rect x="1400" y="795" width="190" height="62" class="mod"/>
-  <text x="1422" y="821" class="name">native_materializer.rs</text><text x="1422" y="839" class="desc">native projection</text>
-  <rect x="1650" y="795" width="190" height="62" class="mod"/>
-  <text x="1672" y="821" class="name">skill_registry_cache.rs</text><text x="1672" y="839" class="desc">pull/cache skills</text>
-
-  <!-- Store -->
-  <rect x="420" y="1008" width="185" height="60" class="mod"/>
-  <text x="442" y="1033" class="name">event_store.rs</text><text x="442" y="1051" class="desc">executions/events</text>
-  <rect x="690" y="1008" width="165" height="60" class="mod"/>
-  <text x="712" y="1033" class="name">memory.rs</text><text x="712" y="1051" class="desc">memory SQLite/FTS</text>
-  <rect x="960" y="1008" width="165" height="60" class="mod"/>
-  <text x="982" y="1033" class="name">approval.rs</text><text x="982" y="1051" class="desc">policy/store</text>
-  <rect x="1230" y="1008" width="190" height="60" class="mod"/>
-  <text x="1252" y="1033" class="name">session_ledger.rs</text><text x="1252" y="1051" class="desc">sessions/handoff</text>
-
-  <!-- External -->
-  <rect x="175" y="1180" width="185" height="58" class="tcpMod"/>
-  <text x="197" y="1205" class="name">iota __daemon</text><text x="197" y="1223" class="desc">child process</text>
-  <rect x="430" y="1180" width="190" height="58" class="tcpMod"/>
-  <text x="452" y="1205" class="name">127.0.0.1:47661</text><text x="452" y="1223" class="desc">TCP JSON line</text>
-  <rect x="685" y="1180" width="230" height="58" class="ipcMod"/>
-  <text x="707" y="1205" class="name">ACP backend process</text><text x="707" y="1223" class="desc">Claude/Codex/Gemini/etc.</text>
-  <rect x="1000" y="1180" width="210" height="58" class="ipcMod"/>
-  <text x="1022" y="1205" class="name">MCP sidecar process</text><text x="1022" y="1223" class="desc">iota context/fun MCP</text>
-  <rect x="1280" y="1180" width="220" height="58" class="ipcMod"/>
-  <text x="1302" y="1205" class="name">compiler/interpreter</text><text x="1302" y="1223" class="desc">python/node/rustc/go/etc.</text>
-  <rect x="1560" y="1180" width="165" height="58" class="ipcMod"/>
-  <text x="1582" y="1205" class="name">git</text><text x="1582" y="1223" class="desc">status --short</text>
-  <rect x="1810" y="1180" width="185" height="58" class="netMod"/>
-  <text x="1832" y="1205" class="name">HTTP(S) source</text><text x="1832" y="1223" class="desc">skill pull</text>
-
-  <!-- Config -->
-  <rect x="620" y="1320" width="210" height="56" class="mod"/>
-  <text x="642" y="1344" class="name">config.rs</text><text x="642" y="1362" class="desc">nimia/env/MCP config</text>
-  <rect x="960" y="1320" width="190" height="56" class="mod"/>
-  <text x="982" y="1344" class="name">utils.rs</text><text x="982" y="1362" class="desc">time/summary/lock</text>
-
-  <!-- Main flow: intentionally orthogonal -->
-  <path class="edge" d="M1010 146 L270 146 L270 260"/><text x="545" y="136" class="label">main -> cli::run()</text>
-  <path class="edge" d="M365 292 L500 292"/><text x="405" y="282" class="label">tui</text>
-  <path class="edge" d="M270 324 L270 392 L610 392 L610 435"/><text x="335" y="384" class="label">daemon route</text>
-  <path class="edge" d="M270 324 L270 405 L1040 405 L1040 435"/><text x="575" y="396" class="label">direct run / bench</text>
-  <path class="edge" d="M595 324 L595 385 L1040 385 L1040 435"/><text x="720" y="376" class="label">TUI prompt task</text>
-  <path class="edge" d="M720 468 L920 468"/><text x="765" y="456" class="label">EnginePool</text>
-
-  <!-- TUI local fan-out; short lines only -->
-  <path class="thin" d="M690 266 L780 258"/>
-  <path class="thin" d="M690 270 L960 258"/>
-  <path class="thin" d="M690 274 L1140 258"/>
-  <path class="thin" d="M690 278 L1320 258"/>
-  <path class="thin" d="M690 282 L1500 258"/>
-  <path class="thin" d="M690 286 L1680 258"/>
-
-  <!-- Engine down to modules: grouped with separate vertical tracks -->
-  <path class="edge" d="M960 501 L960 540 L685 540 L685 590"/><text x="730" y="532" class="label">ACP prompt</text>
-  <path class="edge" d="M1000 501 L1000 735 L275 735 L275 795"/><text x="390" y="726" class="label">compose context</text>
-  <path class="edge" d="M1020 501 L1020 750 L515 750 L515 795"/><text x="600" y="742" class="label">load/match skills</text>
-  <path class="edge" d="M1040 501 L1040 765 L755 765 L755 795"/><text x="790" y="756" class="label">engine-run skill</text>
-  <path class="edge" d="M1060 501 L1060 925 L512 925 L512 1008"/><text x="585" y="917" class="label">events/timing/cache</text>
-  <path class="edge" d="M1080 501 L1080 910 L772 910 L772 1008"/><text x="810" y="902" class="label">recall/write memory</text>
-  <path class="edge" d="M1100 501 L1100 895 L1325 895 L1325 1008"/><text x="1168" y="886" class="label">session/handoff</text>
-
-  <!-- Protocol local relations -->
-  <path class="thin" d="M790 606 L840 606"/>
-  <path class="thin" d="M790 612 L1015 606"/>
-  <path class="thin" d="M790 618 L1200 606"/>
-  <path class="thin" d="M790 624 L1400 606"/>
-  <path class="thin" d="M790 630 L1590 606"/>
-  <path class="edge" d="M755 857 L755 884 L1857 884 L1857 632"/><text x="1280" y="875" class="label">MCP skill tool calls</text>
-  <path class="edge" d="M1285 632 L1285 970 L1042 970 L1042 1008"/><text x="1080" y="960" class="label">permission store</text>
-  <path class="edge" d="M1667 632 L1667 940 L772 940 L772 1008"/><text x="1180" y="932" class="label">iota_memory_search</text>
-  <path class="edge" d="M1667 632 L1667 755 L515 755 L515 795"/><text x="1220" y="747" class="label">iota_skill_search</text>
-
-  <!-- Context local relations -->
-  <path class="edge" d="M360 826 L430 826"/><text x="370" y="815" class="label">skill index</text>
-  <path class="edge" d="M275 857 L275 930 L772 930 L772 1008"/><text x="420" y="922" class="label">memory buckets</text>
-  <path class="edge" d="M1017 857 L1017 915 L772 915 L772 1008"/><text x="820" y="906" class="label">memory tools</text>
-  <path class="edge" d="M1017 857 L1017 900 L1325 900 L1325 1008"/><text x="1100" y="891" class="label">session tools</text>
-  <path class="edge" d="M1495 857 L1495 915 L772 915"/><text x="1295" y="907" class="label">project memory</text>
-  <path class="edge" d="M1495 857 L1495 880 L515 880 L515 857"/><text x="1100" y="872" class="label">project skills</text>
-
-  <!-- Store to utility -->
-  <path class="thin" d="M512 1068 L512 1275 L1055 1275 L1055 1320"/>
-  <path class="thin" d="M772 1068 L772 1280 L1055 1280 L1055 1320"/>
-  <path class="thin" d="M1042 1068 L1042 1320"/>
-  <path class="thin" d="M1325 1068 L1325 1275 L1055 1275"/>
-
-  <!-- Config support: run under everything and branch upward, no diagonal web -->
-  <path class="thin" d="M725 1320 L725 1268 L1040 1268 L1040 501"/><text x="760" y="1260" class="label">backend config/env</text>
-  <path class="thin" d="M725 1320 L725 1278 L1092 1278 L1092 632"/><text x="820" y="1270" class="label">mcpServers shape</text>
-  <path class="thin" d="M725 1320 L725 1290 L1495 1290 L1495 857"/><text x="1320" y="1282" class="label">projection paths</text>
-
-  <!-- CLI side commands: left rail to avoid crossing main body -->
-  <path class="edge" d="M270 324 L105 324 L105 826 L930 826"/><text x="120" y="615" class="label">context-mcp command</text>
-  <path class="edge" d="M270 324 L125 324 L125 840 L1165 840"/><text x="140" y="650" class="label">fun-mcp command</text>
-  <path class="edge" d="M270 324 L145 324 L145 875 L1495 875 L1495 857"/><text x="160" y="690" class="label">native-materialize</text>
-  <path class="edge" d="M270 324 L165 324 L165 890 L1745 890 L1745 857"/><text x="180" y="730" class="label">skill pull</text>
-  <path class="edge" d="M270 324 L185 324 L185 1038 L420 1038"/><text x="200" y="780" class="label">observability</text>
-
-  <!-- IPC boundaries, mostly vertical -->
-  <path class="tcp" d="M270 324 L270 1180"/><text x="285" y="1160" class="tcpLabel">spawn __daemon</text>
-  <path class="tcp" d="M610 501 L610 1160 L525 1160 L525 1180"/><text x="535" y="1152" class="tcpLabel">TCP JSON line</text>
-  <path class="ipc" d="M685 656 L685 1165 L800 1165 L800 1180"/><text x="700" y="1148" class="ipcLabel">ACP stdio</text>
-  <path class="ipc" d="M1092 632 L1092 1180"/><text x="1107" y="1160" class="ipcLabel">mcpServers</text>
-  <path class="ipc" d="M1857 632 L1857 1160 L1105 1160 L1105 1180"/><text x="1500" y="1152" class="ipcLabel">stdio MCP</text>
-  <path class="ipc" d="M1252 857 L1252 1160 L1390 1160 L1390 1180"/><text x="1265" y="1148" class="ipcLabel">run_command</text>
-  <path class="ipc" d="M275 857 L275 1128 L1642 1128 L1642 1180"/><text x="880" y="1120" class="ipcLabel">git status</text>
-  <path class="net" d="M1745 857 L1745 1160 L1902 1160 L1902 1180"/><text x="1760" y="1148" class="label">HTTP(S) / local</text>
-
-  <!-- Legend -->
-  <rect x="1500" y="1310" width="620" height="72" fill="#ffffff" stroke="#cbd5e1" rx="12"/>
-  <line x1="1525" y1="1332" x2="1600" y2="1332" class="edge"/><text x="1615" y="1337" class="legend">in-process module call / channel</text>
-  <line x1="1525" y1="1357" x2="1600" y2="1357" class="ipc"/><text x="1615" y="1362" class="legend">child process or stdio JSON-RPC boundary</text>
-  <line x1="1840" y1="1332" x2="1915" y2="1332" class="tcp"/><text x="1930" y="1337" class="legend">daemon TCP boundary</text>
-  <line x1="1840" y1="1357" x2="1915" y2="1357" class="net"/><text x="1930" y="1362" class="legend">network / external source</text>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+ "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Generated by graphviz version 14.1.5 (20260411.2331)
+ -->
+<!-- Title: IotaLayeredModuleMap Pages: 1 -->
+<svg width="3649pt" height="973pt"
+ viewBox="0.00 0.00 3649.00 973.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 968.5)">
+<title>IotaLayeredModuleMap</title>
+<polygon fill="white" stroke="none" points="-4,4 -4,-968.5 3645.21,-968.5 3645.21,4 -4,4"/>
+<text xml:space="preserve" text-anchor="middle" x="1820.6" y="-947.2" font-family="Arial" font-size="14.00">iota&#45;sympantos layered module relationship map (dashed = IPC/process/network boundary)</text>
+<g id="clust1" class="cluster">
+<title>cluster_entry</title>
+<path fill="#f8fafc" stroke="#cbd5e1" d="M877.21,-833.25C877.21,-833.25 961.21,-833.25 961.21,-833.25 967.21,-833.25 973.21,-839.25 973.21,-845.25 973.21,-845.25 973.21,-920.75 973.21,-920.75 973.21,-926.75 967.21,-932.75 961.21,-932.75 961.21,-932.75 877.21,-932.75 877.21,-932.75 871.21,-932.75 865.21,-926.75 865.21,-920.75 865.21,-920.75 865.21,-845.25 865.21,-845.25 865.21,-839.25 871.21,-833.25 877.21,-833.25"/>
+<text xml:space="preserve" text-anchor="middle" x="919.21" y="-915.45" font-family="Arial" font-size="14.00">Entry Layer</text>
+</g>
+<g id="clust2" class="cluster">
+<title>cluster_presentation</title>
+<path fill="#f0f9ff" stroke="#bae6fd" d="M419.21,-454.25C419.21,-454.25 966.21,-454.25 966.21,-454.25 972.21,-454.25 978.21,-460.25 978.21,-466.25 978.21,-466.25 978.21,-782.25 978.21,-782.25 978.21,-788.25 972.21,-794.25 966.21,-794.25 966.21,-794.25 419.21,-794.25 419.21,-794.25 413.21,-794.25 407.21,-788.25 407.21,-782.25 407.21,-782.25 407.21,-466.25 407.21,-466.25 407.21,-460.25 413.21,-454.25 419.21,-454.25"/>
+<text xml:space="preserve" text-anchor="middle" x="692.71" y="-776.95" font-family="Arial" font-size="14.00">Presentation Layer</text>
+</g>
+<g id="clust3" class="cluster">
+<title>cluster_service</title>
+<path fill="#f7fee7" stroke="#d9f99d" d="M1273.21,-454.25C1273.21,-454.25 1433.21,-454.25 1433.21,-454.25 1439.21,-454.25 1445.21,-460.25 1445.21,-466.25 1445.21,-466.25 1445.21,-643.75 1445.21,-643.75 1445.21,-649.75 1439.21,-655.75 1433.21,-655.75 1433.21,-655.75 1273.21,-655.75 1273.21,-655.75 1267.21,-655.75 1261.21,-649.75 1261.21,-643.75 1261.21,-643.75 1261.21,-466.25 1261.21,-466.25 1261.21,-460.25 1267.21,-454.25 1273.21,-454.25"/>
+<text xml:space="preserve" text-anchor="middle" x="1353.21" y="-638.45" font-family="Arial" font-size="14.00">Service Orchestration Layer</text>
+</g>
+<g id="clust4" class="cluster">
+<title>cluster_protocol</title>
+<path fill="#fff7ed" stroke="#fed7aa" d="M168.21,-146.5C168.21,-146.5 925.21,-146.5 925.21,-146.5 931.21,-146.5 937.21,-152.5 937.21,-158.5 937.21,-158.5 937.21,-397 937.21,-397 937.21,-403 931.21,-409 925.21,-409 925.21,-409 168.21,-409 168.21,-409 162.21,-409 156.21,-403 156.21,-397 156.21,-397 156.21,-158.5 156.21,-158.5 156.21,-152.5 162.21,-146.5 168.21,-146.5"/>
+<text xml:space="preserve" text-anchor="middle" x="546.71" y="-391.7" font-family="Arial" font-size="14.00">Protocol Adapter Layer</text>
+</g>
+<g id="clust5" class="cluster">
+<title>cluster_context</title>
+<path fill="#fdf4ff" stroke="#f5d0fe" d="M2783.21,-152.75C2783.21,-152.75 3621.21,-152.75 3621.21,-152.75 3627.21,-152.75 3633.21,-158.75 3633.21,-164.75 3633.21,-164.75 3633.21,-403.25 3633.21,-403.25 3633.21,-409.25 3627.21,-415.25 3621.21,-415.25 3621.21,-415.25 2783.21,-415.25 2783.21,-415.25 2777.21,-415.25 2771.21,-409.25 2771.21,-403.25 2771.21,-403.25 2771.21,-164.75 2771.21,-164.75 2771.21,-158.75 2777.21,-152.75 2783.21,-152.75"/>
+<text xml:space="preserve" text-anchor="middle" x="3202.21" y="-397.95" font-family="Arial" font-size="14.00">Context Fabric Layer</text>
+</g>
+<g id="clust6" class="cluster">
+<title>cluster_store</title>
+<path fill="#f1f5f9" stroke="#cbd5e1" d="M1085.21,-152.75C1085.21,-152.75 1603.21,-152.75 1603.21,-152.75 1609.21,-152.75 1615.21,-158.75 1615.21,-164.75 1615.21,-164.75 1615.21,-240.25 1615.21,-240.25 1615.21,-246.25 1609.21,-252.25 1603.21,-252.25 1603.21,-252.25 1085.21,-252.25 1085.21,-252.25 1079.21,-252.25 1073.21,-246.25 1073.21,-240.25 1073.21,-240.25 1073.21,-164.75 1073.21,-164.75 1073.21,-158.75 1079.21,-152.75 1085.21,-152.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1344.21" y="-234.95" font-family="Arial" font-size="14.00">Store Layer</text>
+</g>
+<g id="clust7" class="cluster">
+<title>cluster_external</title>
+<path fill="#fef2f2" stroke="#fecaca" d="M1643.21,-152.75C1643.21,-152.75 2751.21,-152.75 2751.21,-152.75 2757.21,-152.75 2763.21,-158.75 2763.21,-164.75 2763.21,-164.75 2763.21,-240.25 2763.21,-240.25 2763.21,-246.25 2757.21,-252.25 2751.21,-252.25 2751.21,-252.25 1643.21,-252.25 1643.21,-252.25 1637.21,-252.25 1631.21,-246.25 1631.21,-240.25 1631.21,-240.25 1631.21,-164.75 1631.21,-164.75 1631.21,-158.75 1637.21,-152.75 1643.21,-152.75"/>
+<text xml:space="preserve" text-anchor="middle" x="2197.21" y="-234.95" font-family="Arial" font-size="14.00">External Process / Network Boundaries</text>
+</g>
+<g id="clust8" class="cluster">
+<title>cluster_config</title>
+<path fill="#ecfdf5" stroke="#bbf7d0" d="M936.21,-8C936.21,-8 1187.21,-8 1187.21,-8 1193.21,-8 1199.21,-14 1199.21,-20 1199.21,-20 1199.21,-95.5 1199.21,-95.5 1199.21,-101.5 1193.21,-107.5 1187.21,-107.5 1187.21,-107.5 936.21,-107.5 936.21,-107.5 930.21,-107.5 924.21,-101.5 924.21,-95.5 924.21,-95.5 924.21,-20 924.21,-20 924.21,-14 930.21,-8 936.21,-8"/>
+<text xml:space="preserve" text-anchor="middle" x="1061.71" y="-90.2" font-family="Arial" font-size="14.00">Configuration and Shared Utility Layer</text>
+</g>
+<!-- main -->
+<g id="node1" class="node">
+<title>main</title>
+<path fill="white" stroke="#475569" d="M952.71,-877.25C952.71,-877.25 885.71,-877.25 885.71,-877.25 879.71,-877.25 873.71,-871.25 873.71,-865.25 873.71,-865.25 873.71,-853.25 873.71,-853.25 873.71,-847.25 879.71,-841.25 885.71,-841.25 885.71,-841.25 952.71,-841.25 952.71,-841.25 958.71,-841.25 964.71,-847.25 964.71,-853.25 964.71,-853.25 964.71,-865.25 964.71,-865.25 964.71,-871.25 958.71,-877.25 952.71,-877.25"/>
+<text xml:space="preserve" text-anchor="middle" x="919.21" y="-862.3" font-family="Arial" font-size="11.00">main.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="919.21" y="-848.8" font-family="Arial" font-size="11.00">Tokio entrypoint</text>
+</g>
+<!-- cli -->
+<g id="node2" class="node">
+<title>cli</title>
+<path fill="white" stroke="#475569" d="M957.96,-738.75C957.96,-738.75 880.46,-738.75 880.46,-738.75 874.46,-738.75 868.46,-732.75 868.46,-726.75 868.46,-726.75 868.46,-714.75 868.46,-714.75 868.46,-708.75 874.46,-702.75 880.46,-702.75 880.46,-702.75 957.96,-702.75 957.96,-702.75 963.96,-702.75 969.96,-708.75 969.96,-714.75 969.96,-714.75 969.96,-726.75 969.96,-726.75 969.96,-732.75 963.96,-738.75 957.96,-738.75"/>
+<text xml:space="preserve" text-anchor="middle" x="919.21" y="-723.8" font-family="Arial" font-size="11.00">cli.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="919.21" y="-710.3" font-family="Arial" font-size="11.00">commands/output</text>
+</g>
+<!-- main&#45;&gt;cli -->
+<g id="edge1" class="edge">
+<title>main&#45;&gt;cli</title>
+<path fill="none" stroke="#334155" d="M919.21,-840.96C919.21,-817.27 919.21,-774.54 919.21,-747.19"/>
+<polygon fill="#334155" stroke="#334155" points="921.66,-747.41 919.21,-740.41 916.76,-747.41 921.66,-747.41"/>
+<text xml:space="preserve" text-anchor="middle" x="933.83" y="-804.75" font-family="Arial" font-size="10.00">cli::run</text>
+</g>
+<!-- tui -->
+<g id="node3" class="node">
+<title>tui</title>
+<path fill="white" stroke="#475569" d="M958.46,-600.25C958.46,-600.25 865.96,-600.25 865.96,-600.25 859.96,-600.25 853.96,-594.25 853.96,-588.25 853.96,-588.25 853.96,-576.25 853.96,-576.25 853.96,-570.25 859.96,-564.25 865.96,-564.25 865.96,-564.25 958.46,-564.25 958.46,-564.25 964.46,-564.25 970.46,-570.25 970.46,-576.25 970.46,-576.25 970.46,-588.25 970.46,-588.25 970.46,-594.25 964.46,-600.25 958.46,-600.25"/>
+<text xml:space="preserve" text-anchor="middle" x="912.21" y="-585.3" font-family="Arial" font-size="11.00">tui.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="912.21" y="-571.8" font-family="Arial" font-size="11.00">terminal runtime loop</text>
+</g>
+<!-- cli&#45;&gt;tui -->
+<g id="edge2" class="edge">
+<title>cli&#45;&gt;tui</title>
+<path fill="none" stroke="#334155" d="M918.32,-702.46C917.1,-678.77 914.91,-636.04 913.51,-608.69"/>
+<polygon fill="#334155" stroke="#334155" points="915.97,-608.77 913.16,-601.91 911.07,-609.03 915.97,-608.77"/>
+<text xml:space="preserve" text-anchor="middle" x="934.57" y="-666.25" font-family="Arial" font-size="10.00">iota / tui</text>
+</g>
+<!-- engine -->
+<g id="node9" class="node">
+<title>engine</title>
+<path fill="white" stroke="#475569" d="M1390.71,-498.25C1390.71,-498.25 1281.71,-498.25 1281.71,-498.25 1275.71,-498.25 1269.71,-492.25 1269.71,-486.25 1269.71,-486.25 1269.71,-474.25 1269.71,-474.25 1269.71,-468.25 1275.71,-462.25 1281.71,-462.25 1281.71,-462.25 1390.71,-462.25 1390.71,-462.25 1396.71,-462.25 1402.71,-468.25 1402.71,-474.25 1402.71,-474.25 1402.71,-486.25 1402.71,-486.25 1402.71,-492.25 1396.71,-498.25 1390.71,-498.25"/>
+<text xml:space="preserve" text-anchor="middle" x="1336.21" y="-483.3" font-family="Arial" font-size="11.00">engine.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1336.21" y="-469.8" font-family="Arial" font-size="11.00">IotaEngine orchestration</text>
+</g>
+<!-- cli&#45;&gt;engine -->
+<g id="edge3" class="edge">
+<title>cli&#45;&gt;engine</title>
+<path fill="none" stroke="#334155" d="M949.53,-702.41C1024.21,-659.69 1216.86,-549.51 1298.62,-502.75"/>
+<polygon fill="#334155" stroke="#334155" points="1299.54,-505.04 1304.4,-499.44 1297.11,-500.79 1299.54,-505.04"/>
+<text xml:space="preserve" text-anchor="middle" x="1227.3" y="-578.75" font-family="Arial" font-size="10.00">run / bench direct</text>
+</g>
+<!-- agent -->
+<g id="node10" class="node">
+<title>agent</title>
+<path fill="white" stroke="#475569" d="M1425.08,-600.25C1425.08,-600.25 1339.33,-600.25 1339.33,-600.25 1333.33,-600.25 1327.33,-594.25 1327.33,-588.25 1327.33,-588.25 1327.33,-576.25 1327.33,-576.25 1327.33,-570.25 1333.33,-564.25 1339.33,-564.25 1339.33,-564.25 1425.08,-564.25 1425.08,-564.25 1431.08,-564.25 1437.08,-570.25 1437.08,-576.25 1437.08,-576.25 1437.08,-588.25 1437.08,-588.25 1437.08,-594.25 1431.08,-600.25 1425.08,-600.25"/>
+<text xml:space="preserve" text-anchor="middle" x="1382.21" y="-585.3" font-family="Arial" font-size="11.00">agent.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1382.21" y="-571.8" font-family="Arial" font-size="11.00">daemon TCP plane</text>
+</g>
+<!-- cli&#45;&gt;agent -->
+<g id="edge4" class="edge">
+<title>cli&#45;&gt;agent</title>
+<path fill="none" stroke="#334155" d="M970.16,-715.83C1061.25,-708.08 1247.67,-688.64 1303.21,-655.75 1325.41,-642.6 1346.72,-622.44 1361.61,-606.71"/>
+<polygon fill="#334155" stroke="#334155" points="1363.18,-608.62 1366.15,-601.82 1359.59,-605.28 1363.18,-608.62"/>
+<text xml:space="preserve" text-anchor="middle" x="1314.48" y="-666.25" font-family="Arial" font-size="10.00">&#45;&#45;daemon client</text>
+</g>
+<!-- context_mcp -->
+<g id="node21" class="node">
+<title>context_mcp</title>
+<path fill="white" stroke="#475569" d="M3019.83,-353.5C3019.83,-353.5 2944.58,-353.5 2944.58,-353.5 2938.58,-353.5 2932.58,-347.5 2932.58,-341.5 2932.58,-341.5 2932.58,-329.5 2932.58,-329.5 2932.58,-323.5 2938.58,-317.5 2944.58,-317.5 2944.58,-317.5 3019.83,-317.5 3019.83,-317.5 3025.83,-317.5 3031.83,-323.5 3031.83,-329.5 3031.83,-329.5 3031.83,-341.5 3031.83,-341.5 3031.83,-347.5 3025.83,-353.5 3019.83,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2982.21" y="-338.55" font-family="Arial" font-size="11.00">context_mcp.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="2982.21" y="-325.05" font-family="Arial" font-size="11.00">iota&#45;context MCP</text>
+</g>
+<!-- cli&#45;&gt;context_mcp -->
+<g id="edge8" class="edge">
+<title>cli&#45;&gt;context_mcp</title>
+<path fill="none" stroke="#334155" d="M970.21,-719.08C1151.08,-716.46 1761.25,-705.57 1954.21,-675.75 2392.39,-608.03 2544.51,-655.44 2917.21,-415.25 2938.46,-401.55 2956.21,-378.67 2967.76,-361.1"/>
+<polygon fill="#334155" stroke="#334155" points="2969.81,-362.43 2971.51,-355.21 2965.68,-359.8 2969.81,-362.43"/>
+<text xml:space="preserve" text-anchor="middle" x="2743.01" y="-527.75" font-family="Arial" font-size="10.00">context&#45;mcp</text>
+</g>
+<!-- fun_mcp -->
+<g id="node22" class="node">
+<title>fun_mcp</title>
+<path fill="white" stroke="#475569" d="M3460.08,-353.5C3460.08,-353.5 3404.33,-353.5 3404.33,-353.5 3398.33,-353.5 3392.33,-347.5 3392.33,-341.5 3392.33,-341.5 3392.33,-329.5 3392.33,-329.5 3392.33,-323.5 3398.33,-317.5 3404.33,-317.5 3404.33,-317.5 3460.08,-317.5 3460.08,-317.5 3466.08,-317.5 3472.08,-323.5 3472.08,-329.5 3472.08,-329.5 3472.08,-341.5 3472.08,-341.5 3472.08,-347.5 3466.08,-353.5 3460.08,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="3432.21" y="-338.55" font-family="Arial" font-size="11.00">fun_mcp.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="3432.21" y="-325.05" font-family="Arial" font-size="11.00">iota&#45;fun MCP</text>
+</g>
+<!-- cli&#45;&gt;fun_mcp -->
+<g id="edge9" class="edge">
+<title>cli&#45;&gt;fun_mcp</title>
+<path fill="none" stroke="#334155" d="M970.24,-719.65C1222.21,-718.86 2335.17,-712.2 2676.21,-655.75 3000.75,-602.03 3120.92,-622.72 3376.21,-415.25 3394.55,-400.34 3409.66,-378 3419.54,-360.91"/>
+<polygon fill="#334155" stroke="#334155" points="3421.42,-362.57 3422.71,-355.27 3417.15,-360.17 3421.42,-362.57"/>
+<text xml:space="preserve" text-anchor="middle" x="3234.51" y="-527.75" font-family="Arial" font-size="10.00">fun&#45;mcp</text>
+</g>
+<!-- native_materializer -->
+<g id="node23" class="node">
+<title>native_materializer</title>
+<path fill="white" stroke="#475569" d="M3347.83,-353.5C3347.83,-353.5 3254.58,-353.5 3254.58,-353.5 3248.58,-353.5 3242.58,-347.5 3242.58,-341.5 3242.58,-341.5 3242.58,-329.5 3242.58,-329.5 3242.58,-323.5 3248.58,-317.5 3254.58,-317.5 3254.58,-317.5 3347.83,-317.5 3347.83,-317.5 3353.83,-317.5 3359.83,-323.5 3359.83,-329.5 3359.83,-329.5 3359.83,-341.5 3359.83,-341.5 3359.83,-347.5 3353.83,-353.5 3347.83,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="3301.21" y="-338.55" font-family="Arial" font-size="11.00">native_materializer.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="3301.21" y="-325.05" font-family="Arial" font-size="11.00">native projection</text>
+</g>
+<!-- cli&#45;&gt;native_materializer -->
+<g id="edge6" class="edge">
+<title>cli&#45;&gt;native_materializer</title>
+<path fill="none" stroke="#334155" d="M970.35,-719.22C1196.64,-716.61 2109.17,-703.29 2391.21,-655.75 2772.03,-591.55 2895.98,-615.5 3226.21,-415.25 3249.44,-401.16 3270.25,-378.03 3284.02,-360.47"/>
+<polygon fill="#334155" stroke="#334155" points="3285.89,-362.06 3288.2,-355.01 3282,-359.08 3285.89,-362.06"/>
+<text xml:space="preserve" text-anchor="middle" x="3051.18" y="-527.75" font-family="Arial" font-size="10.00">native&#45;materialize</text>
+</g>
+<!-- skill_registry_cache -->
+<g id="node24" class="node">
+<title>skill_registry_cache</title>
+<path fill="white" stroke="#475569" d="M3612.71,-353.5C3612.71,-353.5 3515.71,-353.5 3515.71,-353.5 3509.71,-353.5 3503.71,-347.5 3503.71,-341.5 3503.71,-341.5 3503.71,-329.5 3503.71,-329.5 3503.71,-323.5 3509.71,-317.5 3515.71,-317.5 3515.71,-317.5 3612.71,-317.5 3612.71,-317.5 3618.71,-317.5 3624.71,-323.5 3624.71,-329.5 3624.71,-329.5 3624.71,-341.5 3624.71,-341.5 3624.71,-347.5 3618.71,-353.5 3612.71,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="3564.21" y="-338.55" font-family="Arial" font-size="11.00">skill_registry_cache.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="3564.21" y="-325.05" font-family="Arial" font-size="11.00">skill pull/cache</text>
+</g>
+<!-- cli&#45;&gt;skill_registry_cache -->
+<g id="edge7" class="edge">
+<title>cli&#45;&gt;skill_registry_cache</title>
+<path fill="none" stroke="#334155" d="M970.2,-719.16C1263.96,-715.64 2734.12,-696.09 2931.21,-655.75 3195.37,-601.68 3273.1,-577.84 3488.21,-415.25 3509.62,-399.07 3530.54,-376.77 3544.99,-360.03"/>
+<polygon fill="#334155" stroke="#334155" points="3546.74,-361.75 3549.41,-354.84 3543.01,-358.58 3546.74,-361.75"/>
+<text xml:space="preserve" text-anchor="middle" x="3344.32" y="-527.75" font-family="Arial" font-size="10.00">skill pull</text>
+</g>
+<!-- event_store -->
+<g id="node25" class="node">
+<title>event_store</title>
+<path fill="white" stroke="#475569" d="M1316.96,-196.75C1316.96,-196.75 1239.46,-196.75 1239.46,-196.75 1233.46,-196.75 1227.46,-190.75 1227.46,-184.75 1227.46,-184.75 1227.46,-172.75 1227.46,-172.75 1227.46,-166.75 1233.46,-160.75 1239.46,-160.75 1239.46,-160.75 1316.96,-160.75 1316.96,-160.75 1322.96,-160.75 1328.96,-166.75 1328.96,-172.75 1328.96,-172.75 1328.96,-184.75 1328.96,-184.75 1328.96,-190.75 1322.96,-196.75 1316.96,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1278.21" y="-181.8" font-family="Arial" font-size="11.00">event_store.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1278.21" y="-168.3" font-family="Arial" font-size="11.00">executions/events</text>
+</g>
+<!-- cli&#45;&gt;event_store -->
+<g id="edge5" class="edge">
+<title>cli&#45;&gt;event_store</title>
+<path fill="none" stroke="#334155" d="M970.37,-718.57C1087.49,-715.09 1371.28,-701.98 1453.21,-655.75 1569.48,-590.13 1608.52,-559.56 1657.21,-435.25 1659.15,-430.28 1660.45,-427.48 1657.21,-423.25 1648.8,-412.31 1637.55,-424.39 1627.21,-415.25 1589.85,-382.24 1623.65,-342.98 1585.21,-311.25 1537.01,-271.46 1505.78,-306.04 1447.21,-284.25 1427.06,-276.75 1425.58,-267.11 1405.21,-260.25 1379.29,-251.52 1368.44,-264.91 1344.21,-252.25 1322.95,-241.15 1305.1,-220.31 1293.35,-203.81"/>
+<polygon fill="#334155" stroke="#334155" points="1295.54,-202.67 1289.55,-198.3 1291.5,-205.45 1295.54,-202.67"/>
+<text xml:space="preserve" text-anchor="middle" x="1676.07" y="-476.75" font-family="Arial" font-size="10.00">observability</text>
+</g>
+<!-- daemon_proc -->
+<g id="node29" class="node">
+<title>daemon_proc</title>
+<path fill="#fffbeb" stroke="#d97706" d="M1840.83,-196.75C1840.83,-196.75 1777.58,-196.75 1777.58,-196.75 1771.58,-196.75 1765.58,-190.75 1765.58,-184.75 1765.58,-184.75 1765.58,-172.75 1765.58,-172.75 1765.58,-166.75 1771.58,-160.75 1777.58,-160.75 1777.58,-160.75 1840.83,-160.75 1840.83,-160.75 1846.83,-160.75 1852.83,-166.75 1852.83,-172.75 1852.83,-172.75 1852.83,-184.75 1852.83,-184.75 1852.83,-190.75 1846.83,-196.75 1840.83,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1809.21" y="-181.8" font-family="Arial" font-size="11.00">iota __daemon</text>
+<text xml:space="preserve" text-anchor="middle" x="1809.21" y="-168.3" font-family="Arial" font-size="11.00">child process</text>
+</g>
+<!-- cli&#45;&gt;daemon_proc -->
+<g id="edge19" class="edge">
+<title>cli&#45;&gt;daemon_proc</title>
+<path fill="none" stroke="#d97706" stroke-dasharray="5,2" d="M970.33,-718.29C1175.65,-711.74 1929.21,-681.07 1929.21,-583.25 1929.21,-583.25 1929.21,-583.25 1929.21,-334.5 1929.21,-295.91 1912.23,-286.78 1884.21,-260.25 1878.72,-255.06 1875.06,-257.03 1869.21,-252.25 1852.19,-238.36 1836.51,-219.07 1825.44,-203.88"/>
+<polygon fill="#d97706" stroke="#d97706" points="1827.63,-202.73 1821.57,-198.45 1823.64,-205.58 1827.63,-202.73"/>
+<text xml:space="preserve" text-anchor="middle" x="1943.46" y="-476.75" font-family="Arial" font-size="10.00">spawn</text>
+</g>
+<!-- composer -->
+<g id="node4" class="node">
+<title>composer</title>
+<path fill="white" stroke="#475569" d="M597.58,-498.25C597.58,-498.25 532.83,-498.25 532.83,-498.25 526.83,-498.25 520.83,-492.25 520.83,-486.25 520.83,-486.25 520.83,-474.25 520.83,-474.25 520.83,-468.25 526.83,-462.25 532.83,-462.25 532.83,-462.25 597.58,-462.25 597.58,-462.25 603.58,-462.25 609.58,-468.25 609.58,-474.25 609.58,-474.25 609.58,-486.25 609.58,-486.25 609.58,-492.25 603.58,-498.25 597.58,-498.25"/>
+<text xml:space="preserve" text-anchor="middle" x="565.21" y="-483.3" font-family="Arial" font-size="11.00">tui/composer.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="565.21" y="-469.8" font-family="Arial" font-size="11.00">input editor</text>
+</g>
+<!-- tui&#45;&gt;composer -->
+<g id="edge11" class="edge">
+<title>tui&#45;&gt;composer</title>
+<path fill="none" stroke="#334155" d="M853.73,-564.4C787.7,-545.37 681.21,-514.68 617.73,-496.39"/>
+<polygon fill="#334155" stroke="#334155" points="618.69,-494.11 611.28,-494.53 617.33,-498.82 618.69,-494.11"/>
+</g>
+<!-- markdown -->
+<g id="node5" class="node">
+<title>markdown</title>
+<path fill="white" stroke="#475569" d="M730.58,-498.25C730.58,-498.25 653.83,-498.25 653.83,-498.25 647.83,-498.25 641.83,-492.25 641.83,-486.25 641.83,-486.25 641.83,-474.25 641.83,-474.25 641.83,-468.25 647.83,-462.25 653.83,-462.25 653.83,-462.25 730.58,-462.25 730.58,-462.25 736.58,-462.25 742.58,-468.25 742.58,-474.25 742.58,-474.25 742.58,-486.25 742.58,-486.25 742.58,-492.25 736.58,-498.25 730.58,-498.25"/>
+<text xml:space="preserve" text-anchor="middle" x="692.21" y="-483.3" font-family="Arial" font-size="11.00">tui/markdown.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="692.21" y="-469.8" font-family="Arial" font-size="11.00">markdown render</text>
+</g>
+<!-- tui&#45;&gt;markdown -->
+<g id="edge12" class="edge">
+<title>tui&#45;&gt;markdown</title>
+<path fill="none" stroke="#334155" d="M873.88,-563.83C835.99,-546.61 777.98,-520.24 737.75,-501.95"/>
+<polygon fill="#334155" stroke="#334155" points="739.22,-499.93 731.83,-499.26 737.19,-504.39 739.22,-499.93"/>
+</g>
+<!-- status -->
+<g id="node6" class="node">
+<title>status</title>
+<path fill="white" stroke="#475569" d="M854.08,-498.25C854.08,-498.25 786.33,-498.25 786.33,-498.25 780.33,-498.25 774.33,-492.25 774.33,-486.25 774.33,-486.25 774.33,-474.25 774.33,-474.25 774.33,-468.25 780.33,-462.25 786.33,-462.25 786.33,-462.25 854.08,-462.25 854.08,-462.25 860.08,-462.25 866.08,-468.25 866.08,-474.25 866.08,-474.25 866.08,-486.25 866.08,-486.25 866.08,-492.25 860.08,-498.25 854.08,-498.25"/>
+<text xml:space="preserve" text-anchor="middle" x="820.21" y="-483.3" font-family="Arial" font-size="11.00">tui/status_bar.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="820.21" y="-469.8" font-family="Arial" font-size="11.00">status bar</text>
+</g>
+<!-- tui&#45;&gt;status -->
+<g id="edge13" class="edge">
+<title>tui&#45;&gt;status</title>
+<path fill="none" stroke="#334155" d="M896.18,-563.83C881.01,-547.34 858.13,-522.48 841.45,-504.34"/>
+<polygon fill="#334155" stroke="#334155" points="843.61,-503.08 837.07,-499.58 840.01,-506.39 843.61,-503.08"/>
+</g>
+<!-- theme -->
+<g id="node7" class="node">
+<title>theme</title>
+<path fill="white" stroke="#475569" d="M958.33,-498.25C958.33,-498.25 910.08,-498.25 910.08,-498.25 904.08,-498.25 898.08,-492.25 898.08,-486.25 898.08,-486.25 898.08,-474.25 898.08,-474.25 898.08,-468.25 904.08,-462.25 910.08,-462.25 910.08,-462.25 958.33,-462.25 958.33,-462.25 964.33,-462.25 970.33,-468.25 970.33,-474.25 970.33,-474.25 970.33,-486.25 970.33,-486.25 970.33,-492.25 964.33,-498.25 958.33,-498.25"/>
+<text xml:space="preserve" text-anchor="middle" x="934.21" y="-483.3" font-family="Arial" font-size="11.00">tui/theme.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="934.21" y="-469.8" font-family="Arial" font-size="11.00">styles</text>
+</g>
+<!-- tui&#45;&gt;theme -->
+<g id="edge14" class="edge">
+<title>tui&#45;&gt;theme</title>
+<path fill="none" stroke="#334155" d="M916.04,-563.83C919.51,-548.06 924.66,-524.62 928.6,-506.74"/>
+<polygon fill="#334155" stroke="#334155" points="930.98,-507.31 930.09,-499.95 926.2,-506.26 930.98,-507.31"/>
+</g>
+<!-- state -->
+<g id="node8" class="node">
+<title>state</title>
+<path fill="white" stroke="#475569" d="M477.08,-498.25C477.08,-498.25 427.33,-498.25 427.33,-498.25 421.33,-498.25 415.33,-492.25 415.33,-486.25 415.33,-486.25 415.33,-474.25 415.33,-474.25 415.33,-468.25 421.33,-462.25 427.33,-462.25 427.33,-462.25 477.08,-462.25 477.08,-462.25 483.08,-462.25 489.08,-468.25 489.08,-474.25 489.08,-474.25 489.08,-486.25 489.08,-486.25 489.08,-492.25 483.08,-498.25 477.08,-498.25"/>
+<text xml:space="preserve" text-anchor="middle" x="452.21" y="-483.3" font-family="Arial" font-size="11.00">tui/state.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="452.21" y="-469.8" font-family="Arial" font-size="11.00">history state</text>
+</g>
+<!-- tui&#45;&gt;state -->
+<g id="edge15" class="edge">
+<title>tui&#45;&gt;state</title>
+<path fill="none" stroke="#334155" d="M853.78,-571.41C774.32,-557.55 628,-530.36 505.21,-498.25 502.63,-497.58 500,-496.85 497.36,-496.1"/>
+<polygon fill="#334155" stroke="#334155" points="498.27,-493.81 490.86,-494.18 496.88,-498.51 498.27,-493.81"/>
+</g>
+<!-- tui&#45;&gt;engine -->
+<g id="edge10" class="edge">
+<title>tui&#45;&gt;engine</title>
+<path fill="none" stroke="#334155" d="M970.74,-568.4C1005.67,-560.33 1050.75,-549.21 1090.21,-537.25 1105.24,-532.69 1108.34,-529.52 1123.46,-525.25 1168.62,-512.5 1220.14,-501.75 1261.17,-494.07"/>
+<polygon fill="#334155" stroke="#334155" points="1261.57,-496.48 1268.01,-492.8 1260.68,-491.67 1261.57,-496.48"/>
+<text xml:space="preserve" text-anchor="middle" x="1164.33" y="-527.75" font-family="Arial" font-size="10.00">spawn engine task</text>
+</g>
+<!-- acp_permission -->
+<g id="node14" class="node">
+<title>acp_permission</title>
+<path fill="white" stroke="#475569" d="M311.83,-203C311.83,-203 176.58,-203 176.58,-203 170.58,-203 164.58,-197 164.58,-191 164.58,-191 164.58,-166.5 164.58,-166.5 164.58,-160.5 170.58,-154.5 176.58,-154.5 176.58,-154.5 311.83,-154.5 311.83,-154.5 317.83,-154.5 323.83,-160.5 323.83,-166.5 323.83,-166.5 323.83,-191 323.83,-191 323.83,-197 317.83,-203 311.83,-203"/>
+<text xml:space="preserve" text-anchor="middle" x="244.21" y="-188.55" font-family="Arial" font-size="11.00">acp_permission.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="244.21" y="-175.05" font-family="Arial" font-size="11.00">auto&#45;approve iota_* (optionId)</text>
+<text xml:space="preserve" text-anchor="middle" x="244.21" y="-161.55" font-family="Arial" font-size="11.00">TUI channel / stdin fallback</text>
+</g>
+<!-- tui&#45;&gt;acp_permission -->
+<g id="edge16" class="edge">
+<title>tui&#45;&gt;acp_permission</title>
+<path fill="none" stroke="#334155" d="M935.47,-563.77C967.58,-537.62 1018.12,-487.82 986.21,-454.25 971.77,-439.07 630.55,-437.31 609.71,-435.25 549.13,-429.26 528.43,-442.92 474.21,-415.25 378.43,-366.37 299.2,-262.13 263.93,-210.31"/>
+<polygon fill="#334155" stroke="#334155" points="266.03,-209.05 260.09,-204.61 261.97,-211.79 266.03,-209.05"/>
+<text xml:space="preserve" text-anchor="middle" x="646.46" y="-425.75" font-family="Arial" font-size="10.00">approval channel</text>
+</g>
+<!-- tui&#45;&gt;event_store -->
+<g id="edge17" class="edge">
+<title>tui&#45;&gt;event_store</title>
+<path fill="none" stroke="#334155" d="M970.65,-574.09C996.3,-568.13 1024.9,-557.22 1044.21,-537.25 1080.93,-499.26 1055.39,-471.03 1077.96,-423.25 1115.31,-344.17 1118.87,-313.56 1188.21,-260.25 1196.79,-253.65 1202.15,-258.18 1211.21,-252.25 1231.03,-239.27 1248.98,-219.17 1261.3,-203.42"/>
+<polygon fill="#334155" stroke="#334155" points="1263.01,-205.22 1265.31,-198.17 1259.11,-202.25 1263.01,-205.22"/>
+<text xml:space="preserve" text-anchor="middle" x="1103.08" y="-425.75" font-family="Arial" font-size="10.00">queued/obs</text>
+</g>
+<!-- acp -->
+<g id="node11" class="node">
+<title>acp</title>
+<path fill="white" stroke="#475569" d="M782.46,-353.5C782.46,-353.5 683.96,-353.5 683.96,-353.5 677.96,-353.5 671.96,-347.5 671.96,-341.5 671.96,-341.5 671.96,-329.5 671.96,-329.5 671.96,-323.5 677.96,-317.5 683.96,-317.5 683.96,-317.5 782.46,-317.5 782.46,-317.5 788.46,-317.5 794.46,-323.5 794.46,-329.5 794.46,-329.5 794.46,-341.5 794.46,-341.5 794.46,-347.5 788.46,-353.5 782.46,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="733.21" y="-338.55" font-family="Arial" font-size="11.00">acp.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="733.21" y="-325.05" font-family="Arial" font-size="11.00">AcpClient JSON&#45;RPC</text>
+</g>
+<!-- engine&#45;&gt;acp -->
+<g id="edge22" class="edge">
+<title>engine&#45;&gt;acp</title>
+<path fill="none" stroke="#334155" d="M1269.28,-463.03C1238.67,-455.24 1202.04,-445.41 1169.46,-435.25 1154.46,-430.57 1151.65,-426.15 1136.21,-423.25 1101.58,-416.74 851.88,-428.43 819.21,-415.25 791.28,-403.99 766.77,-379.23 751.14,-360.46"/>
+<polygon fill="#334155" stroke="#334155" points="753.05,-358.93 746.74,-355.03 749.24,-362.01 753.05,-358.93"/>
+<text xml:space="preserve" text-anchor="middle" x="1214.83" y="-425.75" font-family="Arial" font-size="10.00">ensure_client/prompt</text>
+</g>
+<!-- runtime_event -->
+<g id="node15" class="node">
+<title>runtime_event</title>
+<path fill="white" stroke="#475569" d="M440.33,-196.75C440.33,-196.75 368.08,-196.75 368.08,-196.75 362.08,-196.75 356.08,-190.75 356.08,-184.75 356.08,-184.75 356.08,-172.75 356.08,-172.75 356.08,-166.75 362.08,-160.75 368.08,-160.75 368.08,-160.75 440.33,-160.75 440.33,-160.75 446.33,-160.75 452.33,-166.75 452.33,-172.75 452.33,-172.75 452.33,-184.75 452.33,-184.75 452.33,-190.75 446.33,-196.75 440.33,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="404.21" y="-181.8" font-family="Arial" font-size="11.00">runtime_event.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="404.21" y="-168.3" font-family="Arial" font-size="11.00">event mapping</text>
+</g>
+<!-- engine&#45;&gt;runtime_event -->
+<g id="edge29" class="edge">
+<title>engine&#45;&gt;runtime_event</title>
+<path fill="none" stroke="#334155" d="M1269.4,-473.51C1087.67,-457.88 597.89,-415.72 596.96,-415.25 504.05,-368.93 440.21,-254.98 415.55,-204.5"/>
+<polygon fill="#334155" stroke="#334155" points="417.82,-203.58 412.58,-198.33 413.41,-205.7 417.82,-203.58"/>
+<text xml:space="preserve" text-anchor="middle" x="626.58" y="-332" font-family="Arial" font-size="10.00">record events</text>
+</g>
+<!-- context -->
+<g id="node18" class="node">
+<title>context</title>
+<path fill="white" stroke="#475569" d="M3198.46,-359.75C3198.46,-359.75 3075.96,-359.75 3075.96,-359.75 3069.96,-359.75 3063.96,-353.75 3063.96,-347.75 3063.96,-347.75 3063.96,-323.25 3063.96,-323.25 3063.96,-317.25 3069.96,-311.25 3075.96,-311.25 3075.96,-311.25 3198.46,-311.25 3198.46,-311.25 3204.46,-311.25 3210.46,-317.25 3210.46,-323.25 3210.46,-323.25 3210.46,-347.75 3210.46,-347.75 3210.46,-353.75 3204.46,-359.75 3198.46,-359.75"/>
+<text xml:space="preserve" text-anchor="middle" x="3137.21" y="-345.3" font-family="Arial" font-size="11.00">context.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="3137.21" y="-331.8" font-family="Arial" font-size="11.00">context capsule</text>
+<text xml:space="preserve" text-anchor="middle" x="3137.21" y="-318.3" font-family="Arial" font-size="11.00">+ &lt;memory&#45;tools&gt; injection</text>
+</g>
+<!-- engine&#45;&gt;context -->
+<g id="edge23" class="edge">
+<title>engine&#45;&gt;context</title>
+<path fill="none" stroke="#334155" d="M1403.01,-475.54C1475.88,-470.46 1595.58,-459.11 1696.21,-435.25 1711.59,-431.6 1714.13,-426 1729.71,-423.25 1765.77,-416.87 3014,-428.33 3048.21,-415.25 3074.18,-405.32 3097.47,-384.02 3113.7,-366.07"/>
+<polygon fill="#334155" stroke="#334155" points="3115.14,-368.15 3117.93,-361.27 3111.47,-364.91 3115.14,-368.15"/>
+<text xml:space="preserve" text-anchor="middle" x="1767.96" y="-425.75" font-family="Arial" font-size="10.00">compose capsule</text>
+</g>
+<!-- skills -->
+<g id="node19" class="node">
+<title>skills</title>
+<path fill="white" stroke="#475569" d="M2925.83,-196.75C2925.83,-196.75 2874.58,-196.75 2874.58,-196.75 2868.58,-196.75 2862.58,-190.75 2862.58,-184.75 2862.58,-184.75 2862.58,-172.75 2862.58,-172.75 2862.58,-166.75 2868.58,-160.75 2874.58,-160.75 2874.58,-160.75 2925.83,-160.75 2925.83,-160.75 2931.83,-160.75 2937.83,-166.75 2937.83,-172.75 2937.83,-172.75 2937.83,-184.75 2937.83,-184.75 2937.83,-190.75 2931.83,-196.75 2925.83,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="2900.21" y="-181.8" font-family="Arial" font-size="11.00">skills.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="2900.21" y="-168.3" font-family="Arial" font-size="11.00">SkillRegistry</text>
+</g>
+<!-- engine&#45;&gt;skills -->
+<g id="edge24" class="edge">
+<title>engine&#45;&gt;skills</title>
+<path fill="none" stroke="#334155" d="M1401.29,-461.78C1430.89,-453.78 1466.34,-444.13 1498.21,-435.25 1516.91,-430.04 1521.12,-426.82 1540.21,-423.25 1578.37,-416.11 1588.63,-419.73 1627.21,-415.25 2043.59,-366.93 2147.15,-349.54 2561.21,-284.25 2622.27,-274.62 2637.01,-268.95 2698.21,-260.25 2730.52,-255.65 2740.13,-262.22 2771.21,-252.25 2807.2,-240.7 2844.44,-218.47 2869.6,-201.65"/>
+<polygon fill="#334155" stroke="#334155" points="2870.69,-203.87 2875.11,-197.92 2867.94,-199.82 2870.69,-203.87"/>
+<text xml:space="preserve" text-anchor="middle" x="2412.17" y="-332" font-family="Arial" font-size="10.00">load/match</text>
+</g>
+<!-- skill_runner -->
+<g id="node20" class="node">
+<title>skill_runner</title>
+<path fill="white" stroke="#475569" d="M2888.71,-353.5C2888.71,-353.5 2791.71,-353.5 2791.71,-353.5 2785.71,-353.5 2779.71,-347.5 2779.71,-341.5 2779.71,-341.5 2779.71,-329.5 2779.71,-329.5 2779.71,-323.5 2785.71,-317.5 2791.71,-317.5 2791.71,-317.5 2888.71,-317.5 2888.71,-317.5 2894.71,-317.5 2900.71,-323.5 2900.71,-329.5 2900.71,-329.5 2900.71,-341.5 2900.71,-341.5 2900.71,-347.5 2894.71,-353.5 2888.71,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="2840.21" y="-338.55" font-family="Arial" font-size="11.00">skill_runner.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="2840.21" y="-325.05" font-family="Arial" font-size="11.00">engine&#45;run MCP skills</text>
+</g>
+<!-- engine&#45;&gt;skill_runner -->
+<g id="edge25" class="edge">
+<title>engine&#45;&gt;skill_runner</title>
+<path fill="none" stroke="#334155" d="M1403.17,-464.11C1470.56,-449.12 1569.94,-427.78 1608.96,-423.25 1732.29,-408.93 1764.24,-422.15 1888.21,-415.25 2219.45,-396.82 2614.33,-359.11 2771.12,-343.5"/>
+<polygon fill="#334155" stroke="#334155" points="2771.08,-345.97 2777.8,-342.83 2770.59,-341.09 2771.08,-345.97"/>
+<text xml:space="preserve" text-anchor="middle" x="1650.58" y="-425.75" font-family="Arial" font-size="10.00">matched MCP skill</text>
+</g>
+<!-- engine&#45;&gt;event_store -->
+<g id="edge26" class="edge">
+<title>engine&#45;&gt;event_store</title>
+<path fill="none" stroke="#334155" d="M1319.25,-461.86C1305.63,-449 1285.34,-432.23 1264.21,-423.25 1252.69,-418.36 1216.77,-424.61 1208.46,-415.25 1162.68,-363.75 1180.4,-324.53 1205.21,-260.25 1206.58,-256.69 1235.37,-225.48 1256.38,-202.99"/>
+<polygon fill="#334155" stroke="#334155" points="1258.04,-204.8 1261.04,-198.01 1254.46,-201.45 1258.04,-204.8"/>
+<text xml:space="preserve" text-anchor="middle" x="1252.33" y="-332" font-family="Arial" font-size="10.00">events/timing/cache</text>
+</g>
+<!-- memory -->
+<g id="node26" class="node">
+<title>memory</title>
+<path fill="white" stroke="#475569" d="M1594.71,-196.75C1594.71,-196.75 1503.71,-196.75 1503.71,-196.75 1497.71,-196.75 1491.71,-190.75 1491.71,-184.75 1491.71,-184.75 1491.71,-172.75 1491.71,-172.75 1491.71,-166.75 1497.71,-160.75 1503.71,-160.75 1503.71,-160.75 1594.71,-160.75 1594.71,-160.75 1600.71,-160.75 1606.71,-166.75 1606.71,-172.75 1606.71,-172.75 1606.71,-184.75 1606.71,-184.75 1606.71,-190.75 1600.71,-196.75 1594.71,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1549.21" y="-181.8" font-family="Arial" font-size="11.00">memory.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1549.21" y="-168.3" font-family="Arial" font-size="11.00">memory SQLite/FTS</text>
+</g>
+<!-- engine&#45;&gt;memory -->
+<g id="edge27" class="edge">
+<title>engine&#45;&gt;memory</title>
+<path fill="none" stroke="#334155" d="M1361.98,-461.81C1378.35,-450.74 1400,-436.13 1419.21,-423.25 1499.69,-369.27 1546.27,-372.09 1587.21,-284.25 1599.66,-257.53 1583.73,-225.49 1568.85,-204"/>
+<polygon fill="#334155" stroke="#334155" points="1570.86,-202.6 1564.77,-198.36 1566.89,-205.47 1570.86,-202.6"/>
+<text xml:space="preserve" text-anchor="middle" x="1595.52" y="-332" font-family="Arial" font-size="10.00">recall/write</text>
+</g>
+<!-- session_ledger -->
+<g id="node28" class="node">
+<title>session_ledger</title>
+<path fill="white" stroke="#475569" d="M1447.83,-196.75C1447.83,-196.75 1372.58,-196.75 1372.58,-196.75 1366.58,-196.75 1360.58,-190.75 1360.58,-184.75 1360.58,-184.75 1360.58,-172.75 1360.58,-172.75 1360.58,-166.75 1366.58,-160.75 1372.58,-160.75 1372.58,-160.75 1447.83,-160.75 1447.83,-160.75 1453.83,-160.75 1459.83,-166.75 1459.83,-172.75 1459.83,-172.75 1459.83,-184.75 1459.83,-184.75 1459.83,-190.75 1453.83,-196.75 1447.83,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1410.21" y="-181.8" font-family="Arial" font-size="11.00">session_ledger.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1410.21" y="-168.3" font-family="Arial" font-size="11.00">sessions/handoff</text>
+</g>
+<!-- engine&#45;&gt;session_ledger -->
+<g id="edge28" class="edge">
+<title>engine&#45;&gt;session_ledger</title>
+<path fill="none" stroke="#334155" d="M1337.2,-461.96C1338.18,-429.01 1335.79,-356.51 1300.21,-311.25 1283.13,-289.53 1258.9,-307.65 1244.21,-284.25 1238.53,-275.22 1236.97,-268.08 1244.21,-260.25 1259.48,-243.71 1325.03,-262.23 1345.21,-252.25 1366.68,-241.62 1384.3,-220.54 1395.76,-203.83"/>
+<polygon fill="#334155" stroke="#334155" points="1397.63,-205.44 1399.44,-198.25 1393.54,-202.74 1397.63,-205.44"/>
+<text xml:space="preserve" text-anchor="middle" x="1379.33" y="-332" font-family="Arial" font-size="10.00">session/turn/handoff</text>
+</g>
+<!-- config -->
+<g id="node36" class="node">
+<title>config</title>
+<path fill="white" stroke="#475569" d="M1041.71,-52C1041.71,-52 944.71,-52 944.71,-52 938.71,-52 932.71,-46 932.71,-40 932.71,-40 932.71,-28 932.71,-28 932.71,-22 938.71,-16 944.71,-16 944.71,-16 1041.71,-16 1041.71,-16 1047.71,-16 1053.71,-22 1053.71,-28 1053.71,-28 1053.71,-40 1053.71,-40 1053.71,-46 1047.71,-52 1041.71,-52"/>
+<text xml:space="preserve" text-anchor="middle" x="993.21" y="-37.05" font-family="Arial" font-size="11.00">config.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="993.21" y="-23.55" font-family="Arial" font-size="11.00">nimia/env/MCP config</text>
+</g>
+<!-- engine&#45;&gt;config -->
+<g id="edge30" class="edge">
+<title>engine&#45;&gt;config</title>
+<path fill="none" stroke="#334155" d="M1269.31,-472.31C1210.18,-466.46 1121.56,-458.41 1044.21,-454.25 852.88,-443.96 372.31,-459.19 182.21,-435.25 143.27,-430.35 128.78,-437.14 96.21,-415.25 36.99,-375.47 25.08,-352.23 3.46,-284.25 -17.81,-217.41 80.03,-150.7 87.21,-146.5 229.34,-63.36 737.71,-41.73 924.08,-36.53"/>
+<polygon fill="#334155" stroke="#334155" points="924,-38.98 930.93,-36.34 923.86,-34.08 924,-38.98"/>
+<text xml:space="preserve" text-anchor="middle" x="45.83" y="-268.75" font-family="Arial" font-size="10.00">backend config/env</text>
+</g>
+<!-- utils -->
+<g id="node37" class="node">
+<title>utils</title>
+<path fill="white" stroke="#475569" d="M1178.83,-52C1178.83,-52 1097.58,-52 1097.58,-52 1091.58,-52 1085.58,-46 1085.58,-40 1085.58,-40 1085.58,-28 1085.58,-28 1085.58,-22 1091.58,-16 1097.58,-16 1097.58,-16 1178.83,-16 1178.83,-16 1184.83,-16 1190.83,-22 1190.83,-28 1190.83,-28 1190.83,-40 1190.83,-40 1190.83,-46 1184.83,-52 1178.83,-52"/>
+<text xml:space="preserve" text-anchor="middle" x="1138.21" y="-37.05" font-family="Arial" font-size="11.00">utils.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1138.21" y="-23.55" font-family="Arial" font-size="11.00">time/summary/lock</text>
+</g>
+<!-- engine&#45;&gt;utils -->
+<g id="edge31" class="edge">
+<title>engine&#45;&gt;utils</title>
+<path fill="none" stroke="#334155" d="M1269.29,-472.72C1210.14,-467.14 1121.51,-459.25 1044.21,-454.25 994.71,-451.05 192.62,-444 152.21,-415.25 101.16,-378.94 111.97,-345.78 100.21,-284.25 88.03,-220.57 94.64,-183.03 148.21,-146.5 182.37,-123.2 850.96,-130.34 892.21,-127.5 971.63,-122.03 999.04,-143.17 1070.21,-107.5 1091.94,-96.61 1110.34,-75.75 1122.5,-59.19"/>
+<polygon fill="#334155" stroke="#334155" points="1124.39,-60.76 1126.45,-53.63 1120.4,-57.92 1124.39,-60.76"/>
+<text xml:space="preserve" text-anchor="middle" x="124.21" y="-268.75" font-family="Arial" font-size="10.00">summarize</text>
+</g>
+<!-- agent&#45;&gt;engine -->
+<g id="edge18" class="edge">
+<title>agent&#45;&gt;engine</title>
+<path fill="none" stroke="#334155" d="M1374.19,-563.83C1366.81,-547.77 1355.76,-523.77 1347.49,-505.77"/>
+<polygon fill="#334155" stroke="#334155" points="1349.91,-505.18 1344.76,-499.84 1345.46,-507.23 1349.91,-505.18"/>
+<text xml:space="preserve" text-anchor="middle" x="1386.71" y="-527.75" font-family="Arial" font-size="10.00">EnginePool</text>
+</g>
+<!-- tcp -->
+<g id="node30" class="node">
+<title>tcp</title>
+<path fill="#fffbeb" stroke="#d97706" d="M1721.21,-196.75C1721.21,-196.75 1651.21,-196.75 1651.21,-196.75 1645.21,-196.75 1639.21,-190.75 1639.21,-184.75 1639.21,-184.75 1639.21,-172.75 1639.21,-172.75 1639.21,-166.75 1645.21,-160.75 1651.21,-160.75 1651.21,-160.75 1721.21,-160.75 1721.21,-160.75 1727.21,-160.75 1733.21,-166.75 1733.21,-172.75 1733.21,-172.75 1733.21,-184.75 1733.21,-184.75 1733.21,-190.75 1727.21,-196.75 1721.21,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1686.21" y="-181.8" font-family="Arial" font-size="11.00">127.0.0.1:47661</text>
+<text xml:space="preserve" text-anchor="middle" x="1686.21" y="-168.3" font-family="Arial" font-size="11.00">TCP JSON line</text>
+</g>
+<!-- agent&#45;&gt;tcp -->
+<g id="edge20" class="edge">
+<title>agent&#45;&gt;tcp</title>
+<path fill="none" stroke="#d97706" stroke-dasharray="5,2" d="M1420.75,-563.85C1438.08,-555.9 1458.75,-546.27 1477.21,-537.25 1549.52,-501.88 1561.13,-477.5 1638.21,-454.25 1675.02,-443.14 1784.55,-463.9 1810.21,-435.25 1832.69,-410.15 1789.08,-429.87 1772.21,-415.25 1755.59,-400.85 1711.63,-262.46 1693.84,-204.79"/>
+<polygon fill="#d97706" stroke="#d97706" points="1696.25,-204.31 1691.85,-198.34 1691.57,-205.75 1696.25,-204.31"/>
+<text xml:space="preserve" text-anchor="middle" x="1846.88" y="-425.75" font-family="Arial" font-size="10.00">listen/connect</text>
+</g>
+<!-- acp_wire -->
+<g id="node12" class="node">
+<title>acp_wire</title>
+<path fill="white" stroke="#475569" d="M559.83,-196.75C559.83,-196.75 496.58,-196.75 496.58,-196.75 490.58,-196.75 484.58,-190.75 484.58,-184.75 484.58,-184.75 484.58,-172.75 484.58,-172.75 484.58,-166.75 490.58,-160.75 496.58,-160.75 496.58,-160.75 559.83,-160.75 559.83,-160.75 565.83,-160.75 571.83,-166.75 571.83,-172.75 571.83,-172.75 571.83,-184.75 571.83,-184.75 571.83,-190.75 565.83,-196.75 559.83,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="528.21" y="-181.8" font-family="Arial" font-size="11.00">acp_wire.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="528.21" y="-168.3" font-family="Arial" font-size="11.00">line read/parse</text>
+</g>
+<!-- acp&#45;&gt;acp_wire -->
+<g id="edge32" class="edge">
+<title>acp&#45;&gt;acp_wire</title>
+<path fill="none" stroke="#334155" d="M706.34,-317.05C681.27,-301.16 642.53,-277.6 607.21,-260.25 598.61,-256.03 594.92,-257.92 587.21,-252.25 569.41,-239.16 553.85,-219.49 543.19,-203.94"/>
+<polygon fill="#334155" stroke="#334155" points="545.4,-202.84 539.48,-198.38 541.33,-205.56 545.4,-202.84"/>
+</g>
+<!-- acp_session -->
+<g id="node13" class="node">
+<title>acp_session</title>
+<path fill="white" stroke="#475569" d="M780.83,-203C780.83,-203 615.58,-203 615.58,-203 609.58,-203 603.58,-197 603.58,-191 603.58,-191 603.58,-166.5 603.58,-166.5 603.58,-160.5 609.58,-154.5 615.58,-154.5 615.58,-154.5 780.83,-154.5 780.83,-154.5 786.83,-154.5 792.83,-160.5 792.83,-166.5 792.83,-166.5 792.83,-191 792.83,-191 792.83,-197 786.83,-203 780.83,-203"/>
+<text xml:space="preserve" text-anchor="middle" x="698.21" y="-188.55" font-family="Arial" font-size="11.00">acp_session.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="698.21" y="-175.05" font-family="Arial" font-size="11.00">per&#45;backend mcpServers shape</text>
+<text xml:space="preserve" text-anchor="middle" x="698.21" y="-161.55" font-family="Arial" font-size="11.00">Gemini/ClaudeCode/Hermes/Codex</text>
+</g>
+<!-- acp&#45;&gt;acp_session -->
+<g id="edge33" class="edge">
+<title>acp&#45;&gt;acp_session</title>
+<path fill="none" stroke="#334155" d="M729.26,-317.05C723.48,-291.51 712.63,-243.52 705.41,-211.59"/>
+<polygon fill="#334155" stroke="#334155" points="707.83,-211.21 703.9,-204.92 703.05,-212.29 707.83,-211.21"/>
+</g>
+<!-- acp&#45;&gt;acp_permission -->
+<g id="edge34" class="edge">
+<title>acp&#45;&gt;acp_permission</title>
+<path fill="none" stroke="#334155" d="M671.56,-330.34C591.77,-323.04 449.96,-303.46 340.21,-252.25 316.61,-241.24 293.22,-223.76 275.44,-208.72"/>
+<polygon fill="#334155" stroke="#334155" points="277.2,-207 270.3,-204.29 274.01,-210.71 277.2,-207"/>
+</g>
+<!-- acp&#45;&gt;runtime_event -->
+<g id="edge35" class="edge">
+<title>acp&#45;&gt;runtime_event</title>
+<path fill="none" stroke="#334155" d="M671.55,-325.19C615.09,-314.48 531,-292.88 468.21,-252.25 448.89,-239.75 431.92,-219.87 420.31,-204.08"/>
+<polygon fill="#334155" stroke="#334155" points="422.31,-202.66 416.25,-198.39 418.32,-205.51 422.31,-202.66"/>
+</g>
+<!-- mcp_router -->
+<g id="node16" class="node">
+<title>mcp_router</title>
+<path fill="white" stroke="#475569" d="M917.08,-196.75C917.08,-196.75 837.33,-196.75 837.33,-196.75 831.33,-196.75 825.33,-190.75 825.33,-184.75 825.33,-184.75 825.33,-172.75 825.33,-172.75 825.33,-166.75 831.33,-160.75 837.33,-160.75 837.33,-160.75 917.08,-160.75 917.08,-160.75 923.08,-160.75 929.08,-166.75 929.08,-172.75 929.08,-172.75 929.08,-184.75 929.08,-184.75 929.08,-190.75 923.08,-196.75 917.08,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="877.21" y="-181.8" font-family="Arial" font-size="11.00">mcp_router.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="877.21" y="-168.3" font-family="Arial" font-size="11.00">ACP tool intercept</text>
+</g>
+<!-- acp&#45;&gt;mcp_router -->
+<g id="edge36" class="edge">
+<title>acp&#45;&gt;mcp_router</title>
+<path fill="none" stroke="#334155" d="M749.44,-317.05C775.51,-289.04 826.7,-234.03 855.75,-202.81"/>
+<polygon fill="#334155" stroke="#334155" points="857.24,-204.8 860.21,-198.01 853.65,-201.46 857.24,-204.8"/>
+</g>
+<!-- acp_backend -->
+<g id="node31" class="node">
+<title>acp_backend</title>
+<path fill="#fff1f2" stroke="#dc2626" d="M2091.46,-196.75C2091.46,-196.75 1896.96,-196.75 1896.96,-196.75 1890.96,-196.75 1884.96,-190.75 1884.96,-184.75 1884.96,-184.75 1884.96,-172.75 1884.96,-172.75 1884.96,-166.75 1890.96,-160.75 1896.96,-160.75 1896.96,-160.75 2091.46,-160.75 2091.46,-160.75 2097.46,-160.75 2103.46,-166.75 2103.46,-172.75 2103.46,-172.75 2103.46,-184.75 2103.46,-184.75 2103.46,-190.75 2097.46,-196.75 2091.46,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1994.21" y="-181.8" font-family="Arial" font-size="11.00">ACP backend process</text>
+<text xml:space="preserve" text-anchor="middle" x="1994.21" y="-168.3" font-family="Arial" font-size="11.00">Claude/Codex/Gemini/Hermes/OpenCode</text>
+</g>
+<!-- acp&#45;&gt;acp_backend -->
+<g id="edge37" class="edge">
+<title>acp&#45;&gt;acp_backend</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M790.17,-317.06C799.78,-314.71 809.72,-312.63 819.21,-311.25 936.34,-294.18 1774.84,-329.53 1884.21,-284.25 1924.25,-267.67 1958.26,-229.24 1977.45,-203.89"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="1979.37,-205.42 1981.56,-198.33 1975.43,-202.5 1979.37,-205.42"/>
+<text xml:space="preserve" text-anchor="middle" x="1960.73" y="-268.75" font-family="Arial" font-size="10.00">stdio JSON&#45;RPC</text>
+</g>
+<!-- mcp_sidecar -->
+<g id="node32" class="node">
+<title>mcp_sidecar</title>
+<path fill="#fff1f2" stroke="#dc2626" d="M2260.58,-196.75C2260.58,-196.75 2147.83,-196.75 2147.83,-196.75 2141.83,-196.75 2135.83,-190.75 2135.83,-184.75 2135.83,-184.75 2135.83,-172.75 2135.83,-172.75 2135.83,-166.75 2141.83,-160.75 2147.83,-160.75 2147.83,-160.75 2260.58,-160.75 2260.58,-160.75 2266.58,-160.75 2272.58,-166.75 2272.58,-172.75 2272.58,-172.75 2272.58,-184.75 2272.58,-184.75 2272.58,-190.75 2266.58,-196.75 2260.58,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="2204.21" y="-181.8" font-family="Arial" font-size="11.00">MCP sidecar process</text>
+<text xml:space="preserve" text-anchor="middle" x="2204.21" y="-168.3" font-family="Arial" font-size="11.00">iota context&#45;mcp/fun&#45;mcp</text>
+</g>
+<!-- acp_session&#45;&gt;mcp_sidecar -->
+<g id="edge38" class="edge">
+<title>acp_session&#45;&gt;mcp_sidecar</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M725.51,-203.45C746.65,-220.83 777.58,-242.63 809.21,-252.25 878.83,-273.42 2051.09,-277.87 2119.21,-252.25 2145.39,-242.4 2168.91,-220.53 2184.53,-203.19"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="2186.15,-205.05 2188.92,-198.17 2182.47,-201.82 2186.15,-205.05"/>
+<text xml:space="preserve" text-anchor="middle" x="1517.21" y="-268.75" font-family="Arial" font-size="10.00">mcpServers spawn by backend</text>
+</g>
+<!-- approval -->
+<g id="node27" class="node">
+<title>approval</title>
+<path fill="white" stroke="#475569" d="M1183.33,-196.75C1183.33,-196.75 1093.08,-196.75 1093.08,-196.75 1087.08,-196.75 1081.08,-190.75 1081.08,-184.75 1081.08,-184.75 1081.08,-172.75 1081.08,-172.75 1081.08,-166.75 1087.08,-160.75 1093.08,-160.75 1093.08,-160.75 1183.33,-160.75 1183.33,-160.75 1189.33,-160.75 1195.33,-166.75 1195.33,-172.75 1195.33,-172.75 1195.33,-184.75 1195.33,-184.75 1195.33,-190.75 1189.33,-196.75 1183.33,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="1138.21" y="-181.8" font-family="Arial" font-size="11.00">approval.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="1138.21" y="-168.3" font-family="Arial" font-size="11.00">approval policy/store</text>
+</g>
+<!-- acp_permission&#45;&gt;approval -->
+<g id="edge39" class="edge">
+<title>acp_permission&#45;&gt;approval</title>
+<path fill="none" stroke="#334155" d="M261.93,-203.46C281.65,-228.63 316.09,-266.11 356.21,-281.75 427.12,-309.4 971.33,-311.93 1041.21,-281.75 1077.53,-266.06 1106.55,-229.33 1123.07,-204.25"/>
+<polygon fill="#334155" stroke="#334155" points="1125.07,-205.69 1126.78,-198.47 1120.94,-203.04 1125.07,-205.69"/>
+</g>
+<!-- acp_permission&#45;&gt;acp_backend -->
+<g id="edge40" class="edge">
+<title>acp_permission&#45;&gt;acp_backend</title>
+<path fill="none" stroke="#16a34a" stroke-dasharray="5,2" d="M267.22,-203.35C285.2,-220.68 311.83,-242.47 340.21,-252.25 441.95,-287.32 1201.09,-262.71 1308.71,-261.79 1433.27,-260.73 1749.29,-285.99 1869.21,-252.25 1904.72,-242.26 1940.53,-219.62 1964.66,-202.09"/>
+<polygon fill="#16a34a" stroke="#16a34a" points="1966.07,-204.1 1970.24,-197.97 1963.16,-200.16 1966.07,-204.1"/>
+<text xml:space="preserve" text-anchor="middle" x="1277.21" y="-274.75" font-family="Arial" font-size="10.00">optionId: allow</text>
+<text xml:space="preserve" text-anchor="middle" x="1277.21" y="-262.75" font-family="Arial" font-size="10.00">(iota tools)</text>
+</g>
+<!-- mcp_router&#45;&gt;skills -->
+<g id="edge43" class="edge">
+<title>mcp_router&#45;&gt;skills</title>
+<path fill="none" stroke="#334155" d="M889.53,-197C902.83,-214.91 925.83,-241.11 953.21,-252.25 1046.76,-290.31 2673.62,-278.31 2771.21,-252.25 2807.85,-242.46 2845,-219.64 2869.95,-202"/>
+<polygon fill="#334155" stroke="#334155" points="2871.18,-204.14 2875.43,-198.06 2868.32,-200.16 2871.18,-204.14"/>
+<text xml:space="preserve" text-anchor="middle" x="1840.21" y="-268.75" font-family="Arial" font-size="10.00">iota_skill_search</text>
+</g>
+<!-- mcp_router&#45;&gt;memory -->
+<g id="edge42" class="edge">
+<title>mcp_router&#45;&gt;memory</title>
+<path fill="none" stroke="#334155" d="M889.54,-196.97C902.85,-214.86 925.86,-241.04 953.21,-252.25 1046.01,-290.32 1304.3,-258.27 1404.58,-255.79 1436.44,-255 1447.09,-265.22 1476.21,-252.25 1499.41,-241.91 1519.23,-220.61 1532.34,-203.58"/>
+<polygon fill="#334155" stroke="#334155" points="1534.07,-205.36 1536.29,-198.28 1530.14,-202.43 1534.07,-205.36"/>
+<text xml:space="preserve" text-anchor="middle" x="1359.21" y="-268.75" font-family="Arial" font-size="10.00">iota_memory_search</text>
+</g>
+<!-- mcp_client -->
+<g id="node17" class="node">
+<title>mcp_client</title>
+<path fill="white" stroke="#475569" d="M917.21,-353.5C917.21,-353.5 847.21,-353.5 847.21,-353.5 841.21,-353.5 835.21,-347.5 835.21,-341.5 835.21,-341.5 835.21,-329.5 835.21,-329.5 835.21,-323.5 841.21,-317.5 847.21,-317.5 847.21,-317.5 917.21,-317.5 917.21,-317.5 923.21,-317.5 929.21,-323.5 929.21,-329.5 929.21,-329.5 929.21,-341.5 929.21,-341.5 929.21,-347.5 923.21,-353.5 917.21,-353.5"/>
+<text xml:space="preserve" text-anchor="middle" x="882.21" y="-338.55" font-family="Arial" font-size="11.00">mcp_client.rs</text>
+<text xml:space="preserve" text-anchor="middle" x="882.21" y="-325.05" font-family="Arial" font-size="11.00">stdio MCP client</text>
+</g>
+<!-- mcp_client&#45;&gt;mcp_sidecar -->
+<g id="edge48" class="edge">
+<title>mcp_client&#45;&gt;mcp_sidecar</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M929.48,-329.49C981.89,-324.12 1068.99,-315.76 1144.21,-311.25 1335.51,-299.78 1816.81,-313.58 2006.21,-284.25 2057.79,-276.26 2073.18,-276.87 2119.21,-252.25 2143.27,-239.38 2166.56,-218.75 2182.66,-202.78"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="2184.01,-204.91 2187.19,-198.21 2180.52,-201.46 2184.01,-204.91"/>
+<text xml:space="preserve" text-anchor="middle" x="2124.74" y="-268.75" font-family="Arial" font-size="10.00">stdio MCP</text>
+</g>
+<!-- context&#45;&gt;skills -->
+<g id="edge44" class="edge">
+<title>context&#45;&gt;skills</title>
+<path fill="none" stroke="#334155" d="M3100.95,-310.83C3055.5,-281.15 2978.21,-230.68 2933.96,-201.79"/>
+<polygon fill="#334155" stroke="#334155" points="2935.36,-199.78 2928.16,-198 2932.68,-203.88 2935.36,-199.78"/>
+<text xml:space="preserve" text-anchor="middle" x="3075.53" y="-268.75" font-family="Arial" font-size="10.00">skill index</text>
+</g>
+<!-- context&#45;&gt;memory -->
+<g id="edge45" class="edge">
+<title>context&#45;&gt;memory</title>
+<path fill="none" stroke="#334155" d="M3063.64,-313.94C3058.45,-312.9 3053.26,-311.99 3048.21,-311.25 2697.59,-260.16 2602.29,-333.82 2251.46,-284.25 2208.23,-278.14 2199.49,-265.95 2156.21,-260.25 2126.84,-256.38 1650.54,-263.65 1623.21,-252.25 1599.32,-242.29 1578.9,-220.62 1565.61,-203.55"/>
+<polygon fill="#334155" stroke="#334155" points="1567.78,-202.36 1561.61,-198.24 1563.86,-205.31 1567.78,-202.36"/>
+<text xml:space="preserve" text-anchor="middle" x="2287.83" y="-268.75" font-family="Arial" font-size="10.00">memory buckets</text>
+</g>
+<!-- context&#45;&gt;acp_backend -->
+<g id="edge41" class="edge">
+<title>context&#45;&gt;acp_backend</title>
+<path fill="none" stroke="#7c3aed" stroke-dasharray="1,5" d="M3063.64,-313.98C3058.44,-312.93 3053.26,-312 3048.21,-311.25 2901.65,-289.4 2525.71,-320.19 2381.96,-284.25 2358.14,-278.3 2356.03,-266.17 2332.21,-260.25 2286.45,-248.88 2165.52,-265.28 2120.21,-252.25 2084.22,-241.91 2047.63,-219.2 2023.22,-201.94"/>
+<polygon fill="#7c3aed" stroke="#7c3aed" points="2024.7,-199.99 2017.59,-197.89 2021.84,-203.96 2024.7,-199.99"/>
+<text xml:space="preserve" text-anchor="middle" x="2417.58" y="-274.75" font-family="Arial" font-size="10.00">&lt;memory&#45;tools&gt;</text>
+<text xml:space="preserve" text-anchor="middle" x="2417.58" y="-262.75" font-family="Arial" font-size="10.00">in prompt</text>
+</g>
+<!-- git -->
+<g id="node34" class="node">
+<title>git</title>
+<path fill="#fff1f2" stroke="#dc2626" d="M2385.83,-196.75C2385.83,-196.75 2316.58,-196.75 2316.58,-196.75 2310.58,-196.75 2304.58,-190.75 2304.58,-184.75 2304.58,-184.75 2304.58,-172.75 2304.58,-172.75 2304.58,-166.75 2310.58,-160.75 2316.58,-160.75 2316.58,-160.75 2385.83,-160.75 2385.83,-160.75 2391.83,-160.75 2397.83,-166.75 2397.83,-172.75 2397.83,-172.75 2397.83,-184.75 2397.83,-184.75 2397.83,-190.75 2391.83,-196.75 2385.83,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="2351.21" y="-181.8" font-family="Arial" font-size="11.00">git status &#45;&#45;short</text>
+<text xml:space="preserve" text-anchor="middle" x="2351.21" y="-168.3" font-family="Arial" font-size="11.00">child process</text>
+</g>
+<!-- context&#45;&gt;git -->
+<g id="edge46" class="edge">
+<title>context&#45;&gt;git</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M3063.61,-314.17C3058.42,-313.08 3053.25,-312.09 3048.21,-311.25 2886.42,-284.41 2843.44,-300.01 2680.21,-284.25 2665.34,-282.81 2426.38,-259.3 2413.21,-252.25 2392.63,-241.24 2375.93,-220.4 2365.06,-203.87"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="2367.4,-202.98 2361.58,-198.37 2363.26,-205.6 2367.4,-202.98"/>
+<text xml:space="preserve" text-anchor="middle" x="2702.71" y="-268.75" font-family="Arial" font-size="10.00">Command</text>
+</g>
+<!-- skill_runner&#45;&gt;mcp_client -->
+<g id="edge47" class="edge">
+<title>skill_runner&#45;&gt;mcp_client</title>
+<path fill="none" stroke="#334155" d="M2779.22,-343.94C2626.72,-364.58 2216.39,-417.15 1872.21,-434.75 1714.19,-442.83 1316.11,-461.75 1160.21,-434.75 1075.26,-420.04 981.91,-381.8 927.88,-357.31"/>
+<polygon fill="#334155" stroke="#334155" points="928.96,-355.11 921.58,-354.43 926.92,-359.57 928.96,-355.11"/>
+</g>
+<!-- context_mcp&#45;&gt;skills -->
+<g id="edge52" class="edge">
+<title>context_mcp&#45;&gt;skills</title>
+<path fill="none" stroke="#334155" d="M2981.76,-317.21C2980.76,-301.64 2977.81,-278.48 2969.21,-260.25 2958.87,-238.35 2940.94,-217.71 2925.95,-202.8"/>
+<polygon fill="#334155" stroke="#334155" points="2927.97,-201.36 2921.24,-198.24 2924.56,-204.87 2927.97,-201.36"/>
+</g>
+<!-- context_mcp&#45;&gt;memory -->
+<g id="edge51" class="edge">
+<title>context_mcp&#45;&gt;memory</title>
+<path fill="none" stroke="#334155" d="M2939.37,-317.08C2932.08,-314.72 2924.5,-312.64 2917.21,-311.25 2561.19,-243.4 2461.13,-334.48 2102.21,-284.25 2058.65,-278.15 2049.8,-266.08 2006.21,-260.25 1985.11,-257.43 1642.82,-260.5 1623.21,-252.25 1599.35,-242.22 1578.93,-220.56 1565.62,-203.51"/>
+<polygon fill="#334155" stroke="#334155" points="1567.79,-202.32 1561.62,-198.21 1563.88,-205.27 1567.79,-202.32"/>
+</g>
+<!-- context_mcp&#45;&gt;session_ledger -->
+<g id="edge53" class="edge">
+<title>context_mcp&#45;&gt;session_ledger</title>
+<path fill="none" stroke="#334155" d="M2939.38,-317.02C2932.09,-314.67 2924.51,-312.61 2917.21,-311.25 2672.22,-265.71 2044.76,-301.97 1796.21,-284.25 1706.03,-277.82 1684.22,-268.64 1594.21,-260.25 1568.04,-257.81 1499.87,-263.68 1476.21,-252.25 1454.48,-241.76 1436.58,-220.65 1424.93,-203.91"/>
+<polygon fill="#334155" stroke="#334155" points="1427.1,-202.75 1421.17,-198.3 1423.03,-205.48 1427.1,-202.75"/>
+</g>
+<!-- tool_proc -->
+<g id="node33" class="node">
+<title>tool_proc</title>
+<path fill="#fff1f2" stroke="#dc2626" d="M2594.83,-196.75C2594.83,-196.75 2441.58,-196.75 2441.58,-196.75 2435.58,-196.75 2429.58,-190.75 2429.58,-184.75 2429.58,-184.75 2429.58,-172.75 2429.58,-172.75 2429.58,-166.75 2435.58,-160.75 2441.58,-160.75 2441.58,-160.75 2594.83,-160.75 2594.83,-160.75 2600.83,-160.75 2606.83,-166.75 2606.83,-172.75 2606.83,-172.75 2606.83,-184.75 2606.83,-184.75 2606.83,-190.75 2600.83,-196.75 2594.83,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="2518.21" y="-181.8" font-family="Arial" font-size="11.00">compiler/interpreter process</text>
+<text xml:space="preserve" text-anchor="middle" x="2518.21" y="-168.3" font-family="Arial" font-size="11.00">python/node/rustc/go/java/c++/zig</text>
+</g>
+<!-- fun_mcp&#45;&gt;tool_proc -->
+<g id="edge54" class="edge">
+<title>fun_mcp&#45;&gt;tool_proc</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M3395.14,-317.01C3388.93,-314.69 3382.47,-312.64 3376.21,-311.25 3111.09,-252.28 3031.12,-341.88 2765.71,-284.25 2737.84,-278.2 2733.9,-267.02 2706.21,-260.25 2670.21,-251.45 2658.02,-264.96 2623.21,-252.25 2593.11,-241.26 2563.5,-219.54 2543.44,-202.73"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="2545.08,-200.91 2538.16,-198.22 2541.89,-204.63 2545.08,-200.91"/>
+<text xml:space="preserve" text-anchor="middle" x="2796.46" y="-268.75" font-family="Arial" font-size="10.00">run_command</text>
+</g>
+<!-- native_materializer&#45;&gt;skills -->
+<g id="edge56" class="edge">
+<title>native_materializer&#45;&gt;skills</title>
+<path fill="none" stroke="#334155" d="M3255.99,-317.05C3178.95,-287.32 3023.13,-227.19 2945.82,-197.35"/>
+<polygon fill="#334155" stroke="#334155" points="2946.97,-195.17 2939.56,-194.94 2945.2,-199.74 2946.97,-195.17"/>
+</g>
+<!-- native_materializer&#45;&gt;memory -->
+<g id="edge55" class="edge">
+<title>native_materializer&#45;&gt;memory</title>
+<path fill="none" stroke="#334155" d="M3251.22,-317.01C3242.95,-314.69 3234.4,-312.64 3226.21,-311.25 3063.1,-283.51 2641.31,-329.61 2482.21,-284.25 2461.53,-278.36 2460.96,-265.87 2440.21,-260.25 2396.39,-248.38 1665.15,-269.61 1623.21,-252.25 1599.29,-242.35 1578.88,-220.67 1565.59,-203.59"/>
+<polygon fill="#334155" stroke="#334155" points="1567.76,-202.39 1561.59,-198.27 1563.84,-205.34 1567.76,-202.39"/>
+</g>
+<!-- network -->
+<g id="node35" class="node">
+<title>network</title>
+<path fill="#eff6ff" stroke="#2563eb" d="M2743.08,-196.75C2743.08,-196.75 2651.33,-196.75 2651.33,-196.75 2645.33,-196.75 2639.33,-190.75 2639.33,-184.75 2639.33,-184.75 2639.33,-172.75 2639.33,-172.75 2639.33,-166.75 2645.33,-160.75 2651.33,-160.75 2651.33,-160.75 2743.08,-160.75 2743.08,-160.75 2749.08,-160.75 2755.08,-166.75 2755.08,-172.75 2755.08,-172.75 2755.08,-184.75 2755.08,-184.75 2755.08,-190.75 2749.08,-196.75 2743.08,-196.75"/>
+<text xml:space="preserve" text-anchor="middle" x="2697.21" y="-181.8" font-family="Arial" font-size="11.00">HTTP(S) skill source</text>
+<text xml:space="preserve" text-anchor="middle" x="2697.21" y="-168.3" font-family="Arial" font-size="11.00">network/local source</text>
+</g>
+<!-- skill_registry_cache&#45;&gt;network -->
+<g id="edge57" class="edge">
+<title>skill_registry_cache&#45;&gt;network</title>
+<path fill="none" stroke="#2563eb" stroke-dasharray="5,2" d="M3513.53,-317.1C3505.15,-314.78 3496.5,-312.7 3488.21,-311.25 3246.35,-269.01 3179.54,-318.71 2936.46,-284.25 2890.67,-277.76 2880.77,-268.15 2835.21,-260.25 2803.48,-254.75 2791.89,-266.87 2763.21,-252.25 2741.84,-241.36 2724.01,-220.5 2712.28,-203.94"/>
+<polygon fill="#2563eb" stroke="#2563eb" points="2714.47,-202.8 2708.49,-198.4 2710.42,-205.56 2714.47,-202.8"/>
+<text xml:space="preserve" text-anchor="middle" x="2977.33" y="-268.75" font-family="Arial" font-size="10.00">reqwest/local copy</text>
+</g>
+<!-- event_store&#45;&gt;runtime_event -->
+<g id="edge58" class="edge">
+<title>event_store&#45;&gt;runtime_event</title>
+<path fill="none" stroke="#334155" d="M1269.85,-197.11C1257.51,-221.68 1231.87,-264.21 1195.21,-281.75 1123.94,-315.85 555.16,-316.48 484.21,-281.75 451.58,-265.78 428.43,-229.39 415.69,-204.43"/>
+<polygon fill="#334155" stroke="#334155" points="418.04,-203.64 412.74,-198.45 413.64,-205.81 418.04,-203.64"/>
+</g>
+<!-- event_store&#45;&gt;utils -->
+<g id="edge59" class="edge">
+<title>event_store&#45;&gt;utils</title>
+<path fill="none" stroke="#334155" d="M1261.32,-160.53C1236.2,-134.92 1188.93,-86.73 1160.84,-58.08"/>
+<polygon fill="#334155" stroke="#334155" points="1162.86,-56.64 1156.21,-53.36 1159.36,-60.07 1162.86,-56.64"/>
+</g>
+<!-- memory&#45;&gt;utils -->
+<g id="edge60" class="edge">
+<title>memory&#45;&gt;utils</title>
+<path fill="none" stroke="#334155" d="M1510.06,-160.26C1499.17,-155.6 1487.29,-150.69 1476.21,-146.5 1380.54,-110.32 1267.28,-74.31 1199.17,-53.38"/>
+<polygon fill="#334155" stroke="#334155" points="1199.95,-51.06 1192.54,-51.35 1198.52,-55.74 1199.95,-51.06"/>
+</g>
+<!-- approval&#45;&gt;utils -->
+<g id="edge61" class="edge">
+<title>approval&#45;&gt;utils</title>
+<path fill="none" stroke="#334155" d="M1138.21,-160.53C1138.21,-135.67 1138.21,-89.53 1138.21,-60.65"/>
+<polygon fill="#334155" stroke="#334155" points="1140.66,-60.79 1138.21,-53.79 1135.76,-60.79 1140.66,-60.79"/>
+</g>
+<!-- session_ledger&#45;&gt;utils -->
+<g id="edge62" class="edge">
+<title>session_ledger&#45;&gt;utils</title>
+<path fill="none" stroke="#334155" d="M1377.12,-160.39C1327.23,-134.2 1232.82,-84.66 1178.82,-56.32"/>
+<polygon fill="#334155" stroke="#334155" points="1180.16,-54.25 1172.82,-53.17 1177.88,-58.59 1180.16,-54.25"/>
+</g>
+<!-- tcp&#45;&gt;agent -->
+<g id="edge21" class="edge">
+<title>tcp&#45;&gt;agent</title>
+<path fill="none" stroke="#d97706" stroke-dasharray="5,2" d="M1688.01,-197.17C1691.54,-241.69 1693.9,-359.98 1627.21,-415.25 1603.9,-434.57 1517.28,-407.86 1491.21,-423.25 1439.6,-453.71 1454.57,-488.87 1419.21,-537.25 1414.17,-544.14 1408.37,-551.33 1402.88,-557.86"/>
+<polygon fill="#d97706" stroke="#d97706" points="1401.19,-556.07 1398.51,-562.98 1404.92,-559.25 1401.19,-556.07"/>
+<text xml:space="preserve" text-anchor="middle" x="1513.71" y="-425.75" font-family="Arial" font-size="10.00">JSON line</text>
+</g>
+<!-- mcp_sidecar&#45;&gt;context_mcp -->
+<g id="edge49" class="edge">
+<title>mcp_sidecar&#45;&gt;context_mcp</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M2201.88,-196.99C2199.78,-220.71 2200.13,-262.89 2225.21,-284.25 2283.77,-334.16 2841.66,-296.62 2917.21,-311.25 2921.8,-312.14 2926.51,-313.3 2931.19,-314.63"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="2930.15,-316.87 2937.56,-316.56 2931.58,-312.18 2930.15,-316.87"/>
+</g>
+<!-- mcp_sidecar&#45;&gt;fun_mcp -->
+<g id="edge50" class="edge">
+<title>mcp_sidecar&#45;&gt;fun_mcp</title>
+<path fill="none" stroke="#dc2626" stroke-dasharray="5,2" d="M2217.8,-197.04C2232.85,-214.68 2258.89,-240.99 2288.21,-252.25 2326.8,-267.08 2620.36,-249.21 2660.21,-260.25 2680.92,-265.99 2681.54,-278.32 2702.21,-284.25 2846.28,-325.62 3229.82,-279.01 3376.21,-311.25 3379.99,-312.08 3383.84,-313.16 3387.67,-314.39"/>
+<polygon fill="#dc2626" stroke="#dc2626" points="3386.6,-316.61 3394.02,-316.6 3388.22,-311.98 3386.6,-316.61"/>
+</g>
+<!-- config&#45;&gt;acp -->
+<g id="edge64" class="edge">
+<title>config&#45;&gt;acp</title>
+<path fill="none" stroke="#334155" d="M994.5,-52.31C996.52,-92.5 995.88,-193.18 945.21,-252.25 925.97,-274.67 856.79,-298.98 802.62,-315.31"/>
+<polygon fill="#334155" stroke="#334155" points="802.2,-312.88 796.2,-317.23 803.6,-317.58 802.2,-312.88"/>
+<text xml:space="preserve" text-anchor="middle" x="1017.14" y="-175.25" font-family="Arial" font-size="10.00">AcpBackend</text>
+</g>
+<!-- config&#45;&gt;acp_session -->
+<g id="edge63" class="edge">
+<title>config&#45;&gt;acp_session</title>
+<path fill="none" stroke="#334155" d="M957.08,-52.48C906.57,-76.92 814.36,-121.54 754.72,-150.4"/>
+<polygon fill="#334155" stroke="#334155" points="753.85,-148.1 748.61,-153.36 755.98,-152.51 753.85,-148.1"/>
+<text xml:space="preserve" text-anchor="middle" x="851.53" y="-118" font-family="Arial" font-size="10.00">AcpMcpServer</text>
+</g>
+</g>
 </svg>

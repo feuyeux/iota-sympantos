@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
+  <title id="title">iota-sympantos layered architecture and runtime flow</title>
+  <desc id="desc">Layered architecture and request links for the iota-sympantos Rust CLI and TUI ACP orchestrator.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f5fb; }
+      .title { font: 800 42px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #20142c; }
+      .subtitle { font: 500 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #5d5567; }
+      .section { font: 800 24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #261337; }
+      .label { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #24142f; }
+      .small { font: 500 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #574e60; }
+      .tiny { font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #665d70; }
+      .box { fill: #ffffff; stroke: #d8cfe3; stroke-width: 2; rx: 16; }
+      .box2 { fill: #fff7fb; stroke: #e4b7d3; stroke-width: 2; rx: 16; }
+      .box3 { fill: #f4fbff; stroke: #b7d5ea; stroke-width: 2; rx: 16; }
+      .box4 { fill: #f7fff7; stroke: #b9dcb8; stroke-width: 2; rx: 16; }
+      .box5 { fill: #fffaf0; stroke: #e4cf9f; stroke-width: 2; rx: 16; }
+      .band { fill: #fbfaff; stroke: #d9d0e3; stroke-width: 2; rx: 20; }
+      .boundary { fill: none; stroke: #b8adbf; stroke-width: 2; stroke-dasharray: 9 8; rx: 20; }
+      .arrow { stroke: #6d3a8f; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .arrow2 { stroke: #1f7895; stroke-width: 3; fill: none; marker-end: url(#arrow2); }
+      .arrow3 { stroke: #6b7d2b; stroke-width: 3; fill: none; marker-end: url(#arrow3); }
+      .dash { stroke: #9a8aa8; stroke-width: 2.5; fill: none; stroke-dasharray: 8 7; marker-end: url(#arrowGray); }
+      .pill { fill: #f0e6f8; stroke: #d5c0e8; stroke-width: 1.5; rx: 13; }
+      .pillText { font: 700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #56306e; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" fill="#6d3a8f"/></marker>
+    <marker id="arrow2" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" fill="#1f7895"/></marker>
+    <marker id="arrow3" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" fill="#6b7d2b"/></marker>
+    <marker id="arrowGray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" fill="#9a8aa8"/></marker>
+  </defs>
+
+  <rect class="bg" width="1800" height="1200"/>
+  <text x="80" y="82" class="title">iota-sympantos 分层架构 + 运行链路图</text>
+  <text x="82" y="118" class="subtitle">Rust CLI/TUI orchestrator for ACP backends, Context Fabric, MCP tools, SQLite stores, and daemon routing.</text>
+
+  <rect x="70" y="155" width="760" height="905" class="band"/>
+  <text x="100" y="198" class="section">Runtime Flow / 主链路</text>
+
+  <rect x="110" y="230" width="270" height="96" class="box2"/>
+  <text x="135" y="265" class="label">User Entry</text>
+  <text x="135" y="292" class="small">iota / iota tui</text>
+  <text x="135" y="316" class="small">iota run [backend]</text>
+
+  <rect x="505" y="230" width="270" height="96" class="box2"/>
+  <text x="530" y="265" class="label">Daemon Path</text>
+  <text x="530" y="292" class="small">iota run --daemon</text>
+  <text x="530" y="316" class="small">127.0.0.1:47661 TCP</text>
+
+  <rect x="110" y="385" width="270" height="112" class="box"/>
+  <text x="135" y="420" class="label">Presentation</text>
+  <text x="135" y="448" class="small">cli.rs: command routing</text>
+  <text x="135" y="472" class="small">tui.rs + tui/*: terminal UI</text>
+
+  <rect x="505" y="385" width="270" height="112" class="box"/>
+  <text x="530" y="420" class="label">agent.rs</text>
+  <text x="530" y="448" class="small">local daemon</text>
+  <text x="530" y="472" class="small">warm / prompt requests</text>
+
+  <rect x="210" y="555" width="455" height="122" class="box3"/>
+  <text x="240" y="592" class="label">IotaEngine / engine.rs</text>
+  <text x="240" y="621" class="small">client pool, turn lifecycle, idempotency</text>
+  <text x="240" y="646" class="small">context compose, skill dispatch, persistence</text>
+
+  <rect x="110" y="735" width="270" height="138" class="box4"/>
+  <text x="135" y="771" class="label">Context Fabric</text>
+  <text x="135" y="800" class="small">context.rs, memory recall</text>
+  <text x="135" y="824" class="small">skills.rs, skill_runner.rs</text>
+  <text x="135" y="848" class="small">context_mcp.rs, fun_mcp.rs</text>
+
+  <rect x="505" y="735" width="270" height="138" class="box3"/>
+  <text x="530" y="771" class="label">Protocol Adapter</text>
+  <text x="530" y="800" class="small">acp.rs, acp_wire.rs</text>
+  <text x="530" y="824" class="small">acp_session.rs, permission</text>
+  <text x="530" y="848" class="small">mcp_client.rs, mcp_router.rs</text>
+
+  <rect x="110" y="925" width="270" height="96" class="box5"/>
+  <text x="135" y="960" class="label">SQLite Stores</text>
+  <text x="135" y="988" class="small">event, memory, approval</text>
+  <text x="135" y="1012" class="small">session ledger</text>
+
+  <rect x="505" y="925" width="270" height="96" class="box5"/>
+  <text x="530" y="960" class="label">External Processes</text>
+  <text x="530" y="988" class="small">ACP backends via stdio</text>
+  <text x="530" y="1012" class="small">MCP sidecars, git, tools</text>
+
+  <path class="arrow" d="M245 326 L245 382"/>
+  <path class="arrow" d="M640 326 L640 382"/>
+  <path class="arrow" d="M380 441 L502 441"/>
+  <path class="arrow" d="M640 497 C640 540 625 584 670 608"/>
+  <path class="arrow" d="M245 497 C245 535 280 545 330 555"/>
+  <path class="arrow" d="M350 677 C295 700 255 714 245 735"/>
+  <path class="arrow" d="M530 677 C585 700 630 714 640 735"/>
+  <path class="arrow3" d="M245 873 L245 922"/>
+  <path class="arrow2" d="M640 873 L640 922"/>
+  <path class="dash" d="M505 973 C455 973 430 975 383 976"/>
+  <text x="395" y="716" class="tiny">prompt + capsule</text>
+  <text x="682" y="910" class="tiny">stdio JSON-RPC</text>
+
+  <rect x="890" y="155" width="840" height="905" class="band"/>
+  <text x="920" y="198" class="section">Layered Module Map / 分层模块</text>
+
+  <rect x="930" y="230" width="760" height="70" class="box2"/>
+  <text x="960" y="273" class="label">Entry Layer</text>
+  <text x="1210" y="273" class="small">main.rs -> cli::run()</text>
+
+  <rect x="930" y="330" width="760" height="96" class="box"/>
+  <text x="960" y="366" class="label">Presentation Layer</text>
+  <text x="960" y="395" class="small">cli.rs | tui.rs | tui/composer.rs | markdown.rs | status_bar.rs | theme.rs | state.rs</text>
+
+  <rect x="930" y="456" width="760" height="104" class="box3"/>
+  <text x="960" y="493" class="label">Service Orchestration Layer</text>
+  <text x="960" y="522" class="small">engine.rs: IotaEngine, ACP pool, execution lifecycle</text>
+  <text x="960" y="546" class="small">agent.rs: local daemon warm/prompt plane</text>
+
+  <rect x="930" y="590" width="360" height="170" class="box4"/>
+  <text x="960" y="627" class="label">Context Fabric Layer</text>
+  <text x="960" y="657" class="small">context.rs: capsule + budget</text>
+  <text x="960" y="681" class="small">memory.rs recall, skills.rs</text>
+  <text x="960" y="705" class="small">skill_runner.rs, mcp_client.rs</text>
+  <text x="960" y="729" class="small">context_mcp.rs, fun_mcp.rs</text>
+
+  <rect x="1330" y="590" width="360" height="170" class="box3"/>
+  <text x="1360" y="627" class="label">Protocol Adapter Layer</text>
+  <text x="1360" y="657" class="small">acp.rs, acp_wire.rs</text>
+  <text x="1360" y="681" class="small">acp_session.rs</text>
+  <text x="1360" y="705" class="small">acp_permission.rs</text>
+  <text x="1360" y="729" class="small">mcp_router.rs</text>
+
+  <rect x="930" y="795" width="360" height="138" class="box5"/>
+  <text x="960" y="832" class="label">Store Layer</text>
+  <text x="960" y="862" class="small">event_store.rs</text>
+  <text x="960" y="886" class="small">memory.rs, approval.rs</text>
+  <text x="960" y="910" class="small">session_ledger.rs</text>
+
+  <rect x="1330" y="795" width="360" height="138" class="box5"/>
+  <text x="1360" y="832" class="label">Configuration + Utility</text>
+  <text x="1360" y="862" class="small">config.rs: ~/.i6/nimia.yaml</text>
+  <text x="1360" y="886" class="small">backend env + commands</text>
+  <text x="1360" y="910" class="small">utils.rs helpers</text>
+
+  <rect x="930" y="970" width="760" height="54" class="boundary"/>
+  <text x="960" y="1004" class="label">Process Boundaries: TCP daemon | ACP stdio JSON-RPC | MCP stdio JSON-RPC | git status/tools</text>
+
+  <path class="arrow" d="M1310 300 L1310 328"/>
+  <path class="arrow" d="M1310 426 L1310 454"/>
+  <path class="arrow" d="M1160 560 L1110 588"/>
+  <path class="arrow" d="M1460 560 L1510 588"/>
+  <path class="arrow3" d="M1110 760 L1110 792"/>
+  <path class="arrow2" d="M1510 760 L1510 792"/>
+  <path class="dash" d="M1290 860 L1328 860"/>
+  <path class="dash" d="M1510 933 L1510 968"/>
+
+  <rect x="80" y="1085" width="1650" height="62" class="boundary"/>
+  <text x="105" y="1124" class="small">Key flow: user prompt -> CLI/TUI or daemon -> IotaEngine -> Context Fabric -> ACP backend -> MCP/tools -> RuntimeEvent -> SQLite stores -> streamed output.</text>
+
+  <rect x="80" y="1160" width="128" height="26" class="pill"/><text x="96" y="1178" class="pillText">purple: control</text>
+  <rect x="220" y="1160" width="122" height="26" class="pill"/><text x="236" y="1178" class="pillText">blue: protocol</text>
+  <rect x="354" y="1160" width="110" height="26" class="pill"/><text x="370" y="1178" class="pillText">green: context</text>
+  <rect x="476" y="1160" width="102" height="26" class="pill"/><text x="492" y="1178" class="pillText">gold: store</text>
+</svg>
