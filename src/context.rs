@@ -82,6 +82,16 @@ impl ContextEngine {
             input.cwd.display()
         ));
         capsule.push_str("</session>\n\n");
+        capsule.push_str("<memory-tools>\n");
+        capsule.push_str("You have access to the `iota_memory_write` MCP tool to persist information across sessions and backends.\n");
+        capsule.push_str("Call it proactively when you learn something worth remembering — user identity, preferences, project goals, domain facts, or procedures.\n");
+        capsule.push_str("Schema: { content: string, type: \"semantic\"|\"episodic\"|\"procedural\", facet?: \"identity\"|\"preference\"|\"strategic\"|\"domain\", scope: \"user\"|\"project\"|\"session\", scope_id: string, confidence?: 0-1, ttl_days?: int }\n");
+        capsule.push_str(&format!(
+            "scope_id values: user scope → \"local-user\", project scope → \"{}\", session scope → \"{}\"\n",
+            input.cwd.display(),
+            input.session_id,
+        ));
+        capsule.push_str("</memory-tools>\n\n");
         if let Some(model) = input.model.filter(|value| !value.trim().is_empty()) {
             capsule.push_str("<model>\n");
             capsule.push_str(&format!("You are currently using: {}\n", model.trim()));

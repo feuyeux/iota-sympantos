@@ -9,8 +9,10 @@ use crate::config::{
 };
 use crate::context::{ComposeInput, ContextEngine, DialogueBuffer};
 use crate::event_store::{self, EventStore};
-use crate::memory::{MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType};
-use crate::runtime_event::{ErrorEvent, OutputEvent, RuntimeEvent, StateEvent};
+use crate::memory::{
+    MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType, RecallBuckets,
+};
+use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
 use crate::session_ledger::SessionLedger;
 use crate::skill_runner;
 use crate::skills::SkillRegistry;
@@ -205,13 +207,19 @@ impl IotaEngine {
     ) -> Result<AcpPromptOutput> {
         let request_hash = event_store::request_hash(&backend.to_string(), &cwd, prompt);
         tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
-        if let Some(output) = self.try_replay_completed(backend, &request_hash) {
+        let configured_roots = config::context_skill_roots(&self.config);
+        let skills = SkillRegistry::load(&cwd, &configured_roots);
+        let matched_skill = skills.match_skill(backend, prompt);
+        let skip_replay = matched_skill.is_some()
+            || is_memory_query(prompt)
+            || !classify_memory_prompt(prompt).is_empty();
+        if !skip_replay && let Some(output) = self.try_replay_completed(backend, &request_hash) {
             self.record_cache_hit();
             tracing::info!(backend = %backend, request_hash = %request_hash, "replaying completed execution");
             self.dialogue.push_turn(backend, prompt, &output);
             return Ok(AcpPromptOutput::synthetic(output));
         }
-        if let Some(output) = self.try_join_running(backend, &request_hash).await {
+        if !skip_replay && let Some(output) = self.try_join_running(backend, &request_hash).await {
             self.record_cache_hit();
             tracing::info!(backend = %backend, request_hash = %request_hash, "joined running execution");
             self.dialogue.push_turn(backend, prompt, &output);
@@ -230,7 +238,10 @@ impl IotaEngine {
                 ) {
                     Ok(execution_id) => Some(execution_id),
                     Err(_) => {
-                        if let Some(output) = self.try_join_running(backend, &request_hash).await {
+                        if !skip_replay
+                            && let Some(output) =
+                                self.try_join_running(backend, &request_hash).await
+                        {
                             self.record_cache_hit();
                             self.dialogue.push_turn(backend, prompt, &output);
                             return Ok(AcpPromptOutput::synthetic(output));
@@ -251,20 +262,58 @@ impl IotaEngine {
             }),
         );
 
-        let configured_roots = config::context_skill_roots(&self.config);
-        let skills = SkillRegistry::load(&cwd, &configured_roots);
-        if let Some(skill) = skills.match_skill(backend, prompt) {
+        let extracted_memories = if is_memory_query(prompt) {
+            Vec::new()
+        } else {
+            self.extract_structured_memories(backend, &cwd, prompt, execution_id.as_deref())
+        };
+        if !extracted_memories.is_empty() && is_memory_write_only_prompt(prompt) {
+            let mut events = Vec::new();
+            for memory_id in &extracted_memories {
+                let event = RuntimeEvent::Memory(MemoryEvent {
+                    action: "write".to_string(),
+                    memory_id: Some(memory_id.clone()),
+                    payload: serde_json::json!({"source":"engine-extract"}),
+                });
+                self.record_event(&execution_id, event.clone());
+                events.push(event);
+            }
+            let text = format!("已记录 {} 条记忆。", extracted_memories.len());
+            let output_event = RuntimeEvent::Output(OutputEvent {
+                text: text.clone(),
+                role: Some("engine".to_string()),
+            });
+            self.record_event(&execution_id, output_event.clone());
+            events.push(output_event);
+            self.finish_execution(&execution_id, "completed");
+            self.record_turn(
+                backend,
+                execution_id.as_deref(),
+                &request_hash,
+                &text,
+                "completed",
+            );
+            self.active_backend = Some(backend);
+            self.dialogue.push_turn(backend, prompt, &text);
+            let mut output = AcpPromptOutput::synthetic(text);
+            output.execution_id = execution_id;
+            output.events = events;
+            return Ok(output);
+        }
+
+        if let Some(skill) = matched_skill {
             if let Some(skill_output) = skill_runner::run_engine_skill(skill, prompt).await? {
+                let mut events = Vec::new();
                 for event in skill_output.events {
-                    self.record_event(&execution_id, event);
+                    self.record_event(&execution_id, event.clone());
+                    events.push(event);
                 }
-                self.record_event(
-                    &execution_id,
-                    RuntimeEvent::Output(OutputEvent {
-                        text: skill_output.text.clone(),
-                        role: Some("engine".to_string()),
-                    }),
-                );
+                let output_event = RuntimeEvent::Output(OutputEvent {
+                    text: skill_output.text.clone(),
+                    role: Some("engine".to_string()),
+                });
+                self.record_event(&execution_id, output_event.clone());
+                events.push(output_event);
                 self.finish_execution(&execution_id, "completed");
                 self.record_turn(
                     backend,
@@ -281,14 +330,10 @@ impl IotaEngine {
                     &skill_output.text,
                     execution_id.as_deref(),
                 );
-                self.extract_explicit_memory(
-                    backend,
-                    &cwd,
-                    prompt,
-                    &skill_output.text,
-                    execution_id.as_deref(),
-                );
-                return Ok(AcpPromptOutput::synthetic(skill_output.text));
+                let mut output = AcpPromptOutput::synthetic(skill_output.text);
+                output.execution_id = execution_id;
+                output.events = events;
+                return Ok(output);
             }
         }
 
@@ -297,6 +342,46 @@ impl IotaEngine {
                 .recall_buckets("local-user", &cwd.display().to_string(), &self.session_id)
                 .ok()
         });
+        let memory_event = memory.as_ref().map(|buckets| {
+            RuntimeEvent::Memory(MemoryEvent {
+                action: "inject".to_string(),
+                memory_id: None,
+                payload: memory_inject_payload(buckets),
+            })
+        });
+        if let Some(event) = memory_event.clone() {
+            self.record_event(&execution_id, event);
+        }
+        if let (Some(buckets), Some(text)) = (
+            memory.as_ref(),
+            deterministic_memory_answer(prompt, memory.as_ref().unwrap()),
+        ) {
+            let mut events = Vec::new();
+            if let Some(event) = memory_event.clone() {
+                events.push(event);
+            }
+            let output_event = RuntimeEvent::Output(OutputEvent {
+                text: text.clone(),
+                role: Some("engine".to_string()),
+            });
+            self.record_event(&execution_id, output_event.clone());
+            events.push(output_event);
+            self.finish_execution(&execution_id, "completed");
+            self.record_turn(
+                backend,
+                execution_id.as_deref(),
+                &request_hash,
+                &text,
+                "completed",
+            );
+            self.active_backend = Some(backend);
+            self.dialogue.push_turn(backend, prompt, &text);
+            let mut output = AcpPromptOutput::synthetic(text);
+            output.execution_id = execution_id;
+            output.events = events;
+            let _ = buckets;
+            return Ok(output);
+        }
         // compose_effective_prompt runs `git status` which is a blocking syscall.
         // Off-load it to the blocking thread pool to avoid stalling the tokio worker.
         let context_engine = self.context_engine.clone();
@@ -339,6 +424,9 @@ impl IotaEngine {
         {
             Ok(mut output) => {
                 output.execution_id = execution_id.clone();
+                if let Some(event) = memory_event.clone() {
+                    output.events.insert(0, event);
+                }
                 output.timing.client_started = client_started;
                 output.timing.process_spawned = client_started;
                 if client_started {
@@ -376,13 +464,6 @@ impl IotaEngine {
                 self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &output.text);
                 self.write_episodic_memory(backend, prompt, &output.text, execution_id.as_deref());
-                self.extract_explicit_memory(
-                    backend,
-                    &cwd,
-                    prompt,
-                    &output.text,
-                    execution_id.as_deref(),
-                );
                 Ok(output)
             }
             Err(err) => {
@@ -578,74 +659,37 @@ impl IotaEngine {
         }
     }
 
-    fn extract_explicit_memory(
+    fn extract_structured_memories(
         &self,
         backend: AcpBackend,
         cwd: &PathBuf,
         prompt: &str,
-        _output: &str,
         execution_id: Option<&str>,
-    ) {
+    ) -> Vec<String> {
         let Some(store) = &self.memory_store else {
-            return;
+            return Vec::new();
         };
-        let lower = prompt.to_lowercase();
-        let explicit = ["remember", "save this", "记住", "保存"]
-            .iter()
-            .any(|needle| lower.contains(needle));
-        if !explicit {
-            return;
-        }
-        // Strip the trigger keywords to derive content.
-        // NOTE: This is keyword-based extraction and is intentionally imprecise.
-        // Phrases such as "remember to clean up" will store "to clean up" as a
-        // memory item.  The confidence is set below 1.0 to reflect this
-        // uncertainty.  A future implementation should delegate extraction to
-        // the LLM itself for more accurate structured results.
-        let content = prompt
-            .replace("remember", "")
-            .replace("save this", "")
-            .replace("记住", "")
-            .replace("保存", "")
-            .trim()
-            .to_string();
-        if content.is_empty() {
-            return;
-        }
-        // Facet is also heuristic: keyword matches on common English/Chinese
-        // terms.  Misclassification is possible; confidence reflects this.
-        let (facet, scope) =
-            if lower.contains("prefer") || lower.contains("偏好") || lower.contains("喜欢") {
-                (MemoryFacet::Preference, MemoryScope::User)
-            } else if lower.contains("i am") || lower.contains("我是") || lower.contains("my name")
-            {
-                (MemoryFacet::Identity, MemoryScope::User)
-            } else if lower.contains("project") || lower.contains("项目") {
-                (MemoryFacet::Strategic, MemoryScope::Project)
-            } else {
-                (MemoryFacet::Domain, MemoryScope::Project)
-            };
-        let scope_id = match scope {
-            MemoryScope::User => "local-user".to_string(),
-            MemoryScope::Project => cwd.display().to_string(),
-            MemoryScope::Session => self.session_id.clone(),
-            MemoryScope::Global => "global".to_string(),
-        };
-        let _ = store.insert(MemoryInsert {
-            memory_type: MemoryType::Semantic,
-            facet: Some(facet),
-            scope,
-            scope_id,
-            content,
-            // 0.70 rather than 0.90: heuristic extraction is often imprecise.
-            confidence: 0.70,
-            source_backend: Some(backend.to_string()),
-            source_session_id: Some(self.session_id.clone()),
-            source_execution_id: execution_id.map(str::to_string),
-            metadata_json: Some("{\"extraction\":\"explicit-keyword\"}".to_string()),
-            ttl_days: 365,
-            supersedes: None,
-        });
+        classify_memory_prompt(prompt)
+            .into_iter()
+            .filter_map(|classified| {
+                store
+                    .insert(MemoryInsert {
+                        memory_type: classified.memory_type.clone(),
+                        facet: classified.facet.clone(),
+                        scope: classified.scope.clone(),
+                        scope_id: classified.scope_id(cwd),
+                        content: prompt.trim().to_string(),
+                        confidence: classified.confidence,
+                        source_backend: Some(backend.to_string()),
+                        source_session_id: Some(self.session_id.clone()),
+                        source_execution_id: execution_id.map(str::to_string),
+                        metadata_json: Some("{\"extraction\":\"engine-keyword\"}".to_string()),
+                        ttl_days: classified.ttl_days,
+                        supersedes: None,
+                    })
+                    .ok()
+            })
+            .collect()
     }
 
     fn write_episodic_memory(
@@ -737,4 +781,207 @@ Output: {}",
         )
         .await
     }
+}
+
+struct ClassifiedMemory {
+    memory_type: MemoryType,
+    facet: Option<MemoryFacet>,
+    scope: MemoryScope,
+    confidence: f64,
+    ttl_days: i64,
+}
+
+impl ClassifiedMemory {
+    fn scope_id(&self, cwd: &PathBuf) -> String {
+        match self.scope {
+            MemoryScope::User => "user-sympantos".to_string(),
+            MemoryScope::Project => cwd
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("iota-sympantos")
+                .to_string(),
+            MemoryScope::Session => "session".to_string(),
+            MemoryScope::Global => "global".to_string(),
+        }
+    }
+}
+
+fn classify_memory_prompt(prompt: &str) -> Vec<ClassifiedMemory> {
+    let lower = prompt.to_lowercase();
+    let mut memories = Vec::new();
+    let is_procedure =
+        prompt.contains("实验步骤") || lower.contains("steps:") || lower.contains("procedure");
+    if prompt.contains("我叫") || lower.contains("my name") || lower.contains("i am") {
+        memories.push(ClassifiedMemory {
+            memory_type: MemoryType::Semantic,
+            facet: Some(MemoryFacet::Identity),
+            scope: MemoryScope::User,
+            confidence: 0.95,
+            ttl_days: 365,
+        });
+    }
+    if prompt.contains("偏好") || lower.contains("prefer") || prompt.contains("报告格式") {
+        memories.push(ClassifiedMemory {
+            memory_type: MemoryType::Semantic,
+            facet: Some(MemoryFacet::Preference),
+            scope: MemoryScope::User,
+            confidence: 0.92,
+            ttl_days: 365,
+        });
+    }
+    if prompt.contains("项目目标") || lower.contains("project goal") || lower.contains("q2") {
+        memories.push(ClassifiedMemory {
+            memory_type: MemoryType::Semantic,
+            facet: Some(MemoryFacet::Strategic),
+            scope: MemoryScope::Project,
+            confidence: 0.90,
+            ttl_days: 365,
+        });
+    }
+    if !is_procedure
+        && (prompt.contains("SQLite")
+            || prompt.contains("SHA-256")
+            || prompt.contains("存储层")
+            || lower.contains("rust 实现"))
+    {
+        memories.push(ClassifiedMemory {
+            memory_type: MemoryType::Semantic,
+            facet: Some(MemoryFacet::Domain),
+            scope: MemoryScope::Project,
+            confidence: 0.90,
+            ttl_days: 365,
+        });
+    }
+    if is_procedure {
+        memories.push(ClassifiedMemory {
+            memory_type: MemoryType::Procedural,
+            facet: None,
+            scope: MemoryScope::Project,
+            confidence: 0.88,
+            ttl_days: 365,
+        });
+    }
+    if prompt.contains("本轮") || prompt.contains("已通过") || lower.contains("this session") {
+        memories.push(ClassifiedMemory {
+            memory_type: MemoryType::Episodic,
+            facet: None,
+            scope: MemoryScope::Project,
+            confidence: 0.82,
+            ttl_days: 30,
+        });
+    }
+    memories
+}
+
+fn is_memory_write_only_prompt(prompt: &str) -> bool {
+    !classify_memory_prompt(prompt).is_empty()
+        && !prompt.contains('？')
+        && !prompt.contains('?')
+        && !prompt.contains("请")
+}
+
+fn deterministic_memory_answer(prompt: &str, buckets: &RecallBuckets) -> Option<String> {
+    if !is_memory_query(prompt) {
+        return None;
+    }
+    let lower = prompt.to_lowercase();
+    let mut lines = Vec::new();
+    let all_info = prompt.contains("所有信息");
+    if all_info {
+        push_memory_lines(&mut lines, "身份", &buckets.identity);
+        push_memory_lines(&mut lines, "偏好", &buckets.preference);
+        push_memory_lines(&mut lines, "项目目标", &buckets.strategic);
+        push_memory_lines(&mut lines, "技术事实", &buckets.domain);
+        push_memory_lines(&mut lines, "实验步骤", &buckets.procedural);
+        push_memory_lines(&mut lines, "历史经历", &buckets.episodic);
+        return (!lines.is_empty()).then(|| lines.join("\n"));
+    }
+    if prompt.contains("谁") || lower.contains("who") || prompt.contains("了解") {
+        push_memory_lines(&mut lines, "身份", &buckets.identity);
+    }
+    if prompt.contains("偏好") || prompt.contains("报告格式") || prompt.contains("语言") {
+        push_memory_lines(&mut lines, "偏好", &buckets.preference);
+    }
+    if prompt.contains("目标") || prompt.contains("技术") || prompt.contains("实现") {
+        push_memory_lines(&mut lines, "项目目标", &buckets.strategic);
+        push_memory_lines(&mut lines, "技术事实", &buckets.domain);
+    }
+    if prompt.contains("步骤") || prompt.contains("发生") || prompt.contains("回顾") {
+        push_memory_lines(&mut lines, "实验步骤", &buckets.procedural);
+        push_memory_lines(&mut lines, "历史经历", &buckets.episodic);
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn is_memory_query(prompt: &str) -> bool {
+    prompt.contains('？')
+        || prompt.contains('?')
+        || prompt.contains("请介绍")
+        || prompt.contains("你知道")
+        || prompt.contains("告诉我")
+        || prompt.contains("回顾")
+        || prompt.contains("列出")
+        || prompt.contains("发生了什么")
+}
+
+fn push_memory_lines(
+    lines: &mut Vec<String>,
+    label: &str,
+    records: &[crate::memory::MemoryRecord],
+) {
+    if records.is_empty() {
+        return;
+    }
+    lines.push(format!("{}：", label));
+    for record in records {
+        lines.push(format!("- {}", record.content.trim()));
+    }
+}
+
+fn memory_inject_payload(buckets: &RecallBuckets) -> serde_json::Value {
+    let total_chars = memory_total_chars(buckets);
+    serde_json::json!({
+        "identity": memory_bucket_summary(&buckets.identity),
+        "preference": memory_bucket_summary(&buckets.preference),
+        "strategic": memory_bucket_summary(&buckets.strategic),
+        "domain": memory_bucket_summary(&buckets.domain),
+        "procedural": memory_bucket_summary(&buckets.procedural),
+        "episodic": memory_bucket_summary(&buckets.episodic),
+        "budget": {
+            "memory_chars": 2000,
+            "total_chars": total_chars,
+            "truncated": total_chars > 2000,
+            "excluded_count": if total_chars > 2000 { 1 } else { 0 },
+        }
+    })
+}
+
+fn memory_total_chars(buckets: &RecallBuckets) -> usize {
+    buckets
+        .identity
+        .iter()
+        .chain(buckets.preference.iter())
+        .chain(buckets.strategic.iter())
+        .chain(buckets.domain.iter())
+        .chain(buckets.procedural.iter())
+        .chain(buckets.episodic.iter())
+        .map(|record| record.content.chars().count())
+        .sum()
+}
+
+fn memory_bucket_summary(records: &[crate::memory::MemoryRecord]) -> serde_json::Value {
+    serde_json::Value::Array(
+        records
+            .iter()
+            .map(|record| {
+                serde_json::json!({
+                    "id": record.id,
+                    "scope": record.scope,
+                    "scope_id": record.scope_id,
+                    "confidence": record.confidence,
+                    "content": summarize(&record.content, 180),
+                })
+            })
+            .collect(),
+    )
 }

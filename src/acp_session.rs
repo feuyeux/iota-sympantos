@@ -22,14 +22,17 @@ pub fn session_new_params(backend: AcpBackend, cwd: &Path, servers: &[AcpMcpServ
 }
 
 fn render_mcp_server(backend: AcpBackend, server: &AcpMcpServer) -> Value {
-    if backend == AcpBackend::Hermes {
-        let env = server
-            .env
-            .iter()
-            .map(|(key, value)| format!("{}={}", key, value))
-            .collect::<Vec<_>>();
+    // Codex does not support mcp_session_new MCP servers in the same way.
+    // ClaudeCode, Hermes, Gemini all require env as an array of "KEY=VALUE" strings
+    // and an explicit type="stdio".
+    let env = server
+        .env
+        .iter()
+        .map(|(key, value)| format!("{}={}", key, value))
+        .collect::<Vec<_>>();
+    if backend == AcpBackend::Gemini {
+        // Gemini does not want the "name" field in the top-level mcp server object.
         json!({
-            "name": server.name,
             "type": "stdio",
             "command": server.command,
             "args": server.args,
@@ -38,9 +41,10 @@ fn render_mcp_server(backend: AcpBackend, server: &AcpMcpServer) -> Value {
     } else {
         json!({
             "name": server.name,
+            "type": "stdio",
             "command": server.command,
             "args": server.args,
-            "env": server.env,
+            "env": env,
         })
     }
 }
@@ -62,13 +66,13 @@ mod tests {
     }
 
     #[test]
-    fn renders_gemini_mcp_servers_with_object_env() {
+    fn renders_gemini_mcp_servers_with_string_env() {
         let params = session_new_params(AcpBackend::Gemini, &PathBuf::from("."), &[server()]);
         let first = &params["mcpServers"][0];
-        assert_eq!(first["name"], "iota-context");
-        assert_eq!(first["command"], "iota");
-        assert_eq!(first["env"]["TOKEN"], "redacted");
-        assert!(first.get("type").is_none());
+        // Gemini does not include "name" in the server object
+        assert_eq!(first["type"], "stdio");
+        assert_eq!(first["env"][0], "TOKEN=redacted");
+        assert!(first.get("name").is_none());
     }
 
     #[test]

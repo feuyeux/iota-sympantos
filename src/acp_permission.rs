@@ -48,9 +48,12 @@ pub async fn answer_permission_request(
     params: Value,
     execution_id: Option<&str>,
 ) -> Result<ApprovalDecisionEvent> {
+    tracing::debug!("[acp-permission] params={}", params);
     let tool_name = params
         .get("toolName")
         .or_else(|| params.get("name"))
+        .or_else(|| params.get("tool"))
+        .or_else(|| params.get("toolCall").and_then(|tc| tc.get("title")))
         .and_then(Value::as_str)
         .unwrap_or("tool")
         .to_string();
@@ -58,6 +61,47 @@ pub async fn answer_permission_request(
     // Read the channel once to avoid holding the lock across .await points and
     // to prevent double-locking (tokio::sync::RwLock is not reentrant).
     let tui_tx: Option<mpsc::Sender<ApprovalRequest>> = approval_lock().read().await.clone();
+
+    // iota's own MCP tools are internal infrastructure — auto-approve without prompting.
+    // Tool names may arrive as "iota_memory_write" or "mcp__iota-context__iota_memory_write".
+    let is_iota_tool = tool_name.starts_with("iota_")
+        || tool_name.contains("__iota_")
+        || tool_name.starts_with("mcp__iota-");
+    if is_iota_tool {
+        tracing::debug!(tool = %tool_name, "[acp-permission] auto-approved iota tool");
+        // Claude-code expects a response with optionId (not just {approved: true}).
+        // Pick "allow_always" from the offered options if available, else "allow_once".
+        let option_id = params
+            .get("options")
+            .and_then(Value::as_array)
+            .and_then(|opts| {
+                // Prefer "allow" (allow_once) over "allow_always" to avoid
+                // claude-code prompting for a second confirmation when persisting
+                // the "always allow" setting.
+                opts.iter()
+                    .find(|o| o.get("optionId").and_then(Value::as_str) == Some("allow"))
+                    .or_else(|| {
+                        opts.iter().find(|o| {
+                            o.get("optionId")
+                                .and_then(Value::as_str)
+                                .map(|s| s.starts_with("allow"))
+                                == Some(true)
+                        })
+                    })
+                    .and_then(|o| o.get("optionId").and_then(Value::as_str))
+            })
+            .unwrap_or("allow");
+        tracing::debug!(option_id, "[acp-permission] sending optionId");
+        send_response(stdin, id.clone(), json!({ "optionId": option_id })).await?;
+        return Ok(ApprovalDecisionEvent {
+            request_id: id
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| id.to_string()),
+            approved: true,
+            reason: Some("auto-approved iota tool".to_string()),
+        });
+    }
 
     let approved = if let Some(tx) = tui_tx.clone() {
         let (reply_tx, reply_rx) = oneshot::channel();

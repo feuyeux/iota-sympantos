@@ -208,55 +208,67 @@ impl MemoryStore {
         project_id: &str,
         session_id: &str,
     ) -> Result<RecallBuckets> {
+        let user_ids = user_scope_candidates(user_id);
+        let project_ids = project_scope_candidates(project_id);
+        let mut episodic = self.query(
+            MemoryScope::Session,
+            session_id,
+            None,
+            Some(MemoryType::Episodic),
+            0.70,
+            20,
+        )?;
+        episodic.extend(self.query_many(
+            MemoryScope::Project,
+            &project_ids,
+            None,
+            Some(MemoryType::Episodic),
+            0.70,
+            20,
+        )?);
+        episodic.truncate(20);
         Ok(RecallBuckets {
-            identity: self.query(
+            identity: self.query_many(
                 MemoryScope::User,
-                user_id,
+                &user_ids,
                 Some(MemoryFacet::Identity),
                 Some(MemoryType::Semantic),
                 0.85,
                 20,
             )?,
-            preference: self.query(
+            preference: self.query_many(
                 MemoryScope::User,
-                user_id,
+                &user_ids,
                 Some(MemoryFacet::Preference),
                 Some(MemoryType::Semantic),
                 0.80,
                 30,
             )?,
-            strategic: self.query(
+            strategic: self.query_many(
                 MemoryScope::Project,
-                project_id,
+                &project_ids,
                 Some(MemoryFacet::Strategic),
                 Some(MemoryType::Semantic),
                 0.80,
                 30,
             )?,
-            domain: self.query(
+            domain: self.query_many(
                 MemoryScope::Project,
-                project_id,
+                &project_ids,
                 Some(MemoryFacet::Domain),
                 Some(MemoryType::Semantic),
                 0.80,
                 50,
             )?,
-            procedural: self.query(
+            procedural: self.query_many(
                 MemoryScope::Project,
-                project_id,
+                &project_ids,
                 None,
                 Some(MemoryType::Procedural),
                 0.75,
                 10,
             )?,
-            episodic: self.query(
-                MemoryScope::Session,
-                session_id,
-                None,
-                Some(MemoryType::Episodic),
-                0.70,
-                20,
-            )?,
+            episodic,
         })
     }
 
@@ -335,6 +347,39 @@ impl MemoryStore {
         )?)
     }
 
+    fn query_many(
+        &self,
+        scope: MemoryScope,
+        scope_ids: &[String],
+        facet: Option<MemoryFacet>,
+        memory_type: Option<MemoryType>,
+        min_confidence: f64,
+        limit: usize,
+    ) -> Result<Vec<MemoryRecord>> {
+        let mut records = Vec::new();
+        for scope_id in scope_ids {
+            records.extend(self.query(
+                scope.clone(),
+                scope_id,
+                facet.clone(),
+                memory_type.clone(),
+                min_confidence,
+                limit,
+            )?);
+        }
+        records.sort_by(|left, right| {
+            right
+                .confidence
+                .partial_cmp(&left.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| right.created_at.cmp(&left.created_at))
+        });
+        records.dedup_by(|left, right| left.id == right.id);
+        records.truncate(limit);
+        Ok(records)
+    }
+
     fn init(&self) -> Result<bool> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
@@ -363,10 +408,44 @@ impl MemoryStore {
 CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_dedup ON memory(scope, scope_id, type, facet, content_hash);
 CREATE INDEX IF NOT EXISTS idx_memory_recall_semantic ON memory(scope, scope_id, facet, confidence DESC, updated_at DESC) WHERE type = 'semantic';
 CREATE INDEX IF NOT EXISTS idx_memory_recall_procedural ON memory(scope, scope_id, confidence DESC, updated_at DESC) WHERE type = 'procedural';
-CREATE INDEX IF NOT EXISTS idx_memory_recall_episodic ON memory(scope, scope_id, created_at DESC) WHERE type = 'episodic';",
+CREATE INDEX IF NOT EXISTS idx_memory_recall_episodic ON memory(scope, scope_id, created_at DESC) WHERE type = 'episodic';
+CREATE VIEW IF NOT EXISTS memories AS SELECT * FROM memory;
+CREATE TRIGGER IF NOT EXISTS memories_delete INSTEAD OF DELETE ON memories BEGIN
+  DELETE FROM memory WHERE id = old.id;
+END;",
         )?;
         Ok(init_fts(&conn).is_ok())
     }
+}
+
+fn user_scope_candidates(user_id: &str) -> Vec<String> {
+    unique_strings(vec![
+        user_id.to_string(),
+        "user-sympantos".to_string(),
+        "local-user".to_string(),
+    ])
+}
+
+fn project_scope_candidates(project_id: &str) -> Vec<String> {
+    let mut values = vec![project_id.to_string(), "iota-sympantos".to_string()];
+    if let Some(name) = Path::new(project_id)
+        .file_name()
+        .and_then(|value| value.to_str())
+    {
+        values.push(name.to_string());
+    }
+    unique_strings(values)
+}
+
+fn unique_strings(values: Vec<String>) -> Vec<String> {
+    let mut output = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() && !output.iter().any(|existing| existing == trimmed) {
+            output.push(trimmed.to_string());
+        }
+    }
+    output
 }
 
 fn init_fts(conn: &Connection) -> Result<()> {

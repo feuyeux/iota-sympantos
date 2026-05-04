@@ -68,83 +68,116 @@ fn handle_request(request: &Value) -> Value {
 fn tool_descriptions() -> Vec<Value> {
     TOOLS.iter().map(|(name, language)| json!({
         "name": name,
-        "description": format!("Execute a small {} function or script with iota guardrails", language),
-        "inputSchema": {"type":"object","properties":{"source":{"type":"string"},"timeout_ms":{"type":"integer"}},"required":["source"]}
+        "description": format!("Execute the configured pet-generator {} function with iota guardrails", language),
+        "inputSchema": {"type":"object","properties":{"timeout_ms":{"type":"integer"}},"required":[]}
     })).collect()
 }
 
 fn run_tool(name: &str, args: &Value) -> Result<String> {
-    let source = args
-        .get("source")
-        .and_then(Value::as_str)
-        .context("source is required")?;
     let timeout_ms = args
         .get("timeout_ms")
         .and_then(Value::as_u64)
         .unwrap_or(10_000)
         .min(60_000);
     match name {
-        "fun.python" => run_interpreter(
-            "python3",
-            &[OsString::from("-c"), OsString::from(source)],
-            timeout_ms,
-        ),
-        "fun.typescript" => run_interpreter(
-            "node",
-            &[OsString::from("-e"), OsString::from(source)],
-            timeout_ms,
-        ),
-        "fun.rust" => run_rust(source, timeout_ms),
-        "fun.go" => run_go(source, timeout_ms),
-        "fun.java" => run_java(source, timeout_ms),
-        "fun.cpp" => run_cpp(source, timeout_ms),
-        "fun.zig" => run_zig(source, timeout_ms),
+        "fun.python" => run_python(timeout_ms),
+        "fun.typescript" => run_typescript(timeout_ms),
+        "fun.rust" => run_rust(timeout_ms),
+        "fun.go" => run_go(timeout_ms),
+        "fun.java" => run_java(timeout_ms),
+        "fun.cpp" => run_cpp(timeout_ms),
+        "fun.zig" => run_zig(timeout_ms),
         _ => Err(anyhow!("unknown tool {}", name)),
     }
 }
 
-fn run_rust(source: &str, timeout_ms: u64) -> Result<String> {
-    let dir = cache_dir("rust", source, compiler_version("rustc", &["--version"]))?;
-    let src = dir.join("main.rs");
-    let bin = executable_path(&dir, "main");
-    write_source(&src, source)?;
-    if !bin.exists() {
-        run_command(
-            "rustc",
-            &[
-                src.as_os_str().to_os_string(),
-                OsString::from("-o"),
-                bin.as_os_str().to_os_string(),
-            ],
-            Some(&dir),
-            timeout_ms,
-        )?;
-    }
-    run_command(bin.as_os_str(), &[], Some(&dir), timeout_ms)
-}
-
-fn run_go(source: &str, timeout_ms: u64) -> Result<String> {
-    let dir = cache_dir("go", source, compiler_version("go", &["version"]))?;
-    let src = dir.join("main.go");
-    write_source(&src, source)?;
-    run_command(
-        "go",
-        &[OsString::from("run"), src.as_os_str().to_os_string()],
-        Some(&dir),
+fn run_python(timeout_ms: u64) -> Result<String> {
+    let script = fun_root()?.join("python").join("random_number.py");
+    ensure_file(&script)?;
+    let source = format!(
+        "import importlib.util; spec = importlib.util.spec_from_file_location('random_number', r'{}'); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); print(module.random_number())",
+        script.display()
+    );
+    run_interpreter(
+        "python3",
+        &[OsString::from("-c"), OsString::from(source)],
         timeout_ms,
     )
 }
 
-fn run_java(source: &str, timeout_ms: u64) -> Result<String> {
-    let dir = cache_dir("java", source, compiler_version("javac", &["-version"]))?;
-    let src = dir.join("Main.java");
-    let class = dir.join("Main.class");
-    write_source(&src, source)?;
+fn run_typescript(timeout_ms: u64) -> Result<String> {
+    let cwd = fun_root()?.join("typescript");
+    let runner = cwd.join("runner.js");
+    ensure_file(&runner)?;
+    ensure_file(&cwd.join("randomColor.ts"))?;
+    run_command("node", &[runner.into_os_string()], Some(&cwd), timeout_ms)
+}
+
+fn run_rust(timeout_ms: u64) -> Result<String> {
+    let cwd = fun_root()?.join("rust");
+    let sources = [cwd.join("runner.rs"), cwd.join("random_material.rs")];
+    ensure_files(&sources)?;
+    let bin = cached_binary_path("rust", &sources)?;
+    if !bin.exists() {
+        run_command(
+            "rustc",
+            &[
+                OsString::from("runner.rs"),
+                OsString::from("-o"),
+                bin.as_os_str().to_os_string(),
+            ],
+            Some(&cwd),
+            timeout_ms,
+        )?;
+    }
+    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
+}
+
+fn run_go(timeout_ms: u64) -> Result<String> {
+    let cwd = fun_root()?.join("go");
+    let sources = [cwd.join("random_shape.go"), cwd.join("runner.go")];
+    ensure_files(&sources)?;
+    let bin = cached_binary_path("go", &sources)?;
+    if !bin.exists() {
+        run_command(
+            "go",
+            &[
+                OsString::from("build"),
+                OsString::from("-o"),
+                bin.as_os_str().to_os_string(),
+                OsString::from("random_shape.go"),
+                OsString::from("runner.go"),
+            ],
+            Some(&cwd),
+            timeout_ms,
+        )?;
+    }
+    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
+}
+
+fn run_java(timeout_ms: u64) -> Result<String> {
+    let cwd = fun_root()?.join("java");
+    let sources = [
+        cwd.join("RandomAnimal.java"),
+        cwd.join("RandomAnimalRunner.java"),
+    ];
+    ensure_files(&sources)?;
+    let class_dir = cached_class_dir_path("java", &sources)?;
+    let class = class_dir.join("RandomAnimalRunner.class");
     if !class.exists() {
+        fs::create_dir_all(&class_dir)
+            .with_context(|| format!("Failed to create {}", class_dir.display()))?;
         run_command(
             "javac",
-            &[src.as_os_str().to_os_string()],
-            Some(&dir),
+            &[
+                OsString::from("-encoding"),
+                OsString::from("UTF-8"),
+                OsString::from("-d"),
+                class_dir.as_os_str().to_os_string(),
+                OsString::from("RandomAnimal.java"),
+                OsString::from("RandomAnimalRunner.java"),
+            ],
+            Some(&cwd),
             timeout_ms,
         )?;
     }
@@ -152,51 +185,65 @@ fn run_java(source: &str, timeout_ms: u64) -> Result<String> {
         "java",
         &[
             OsString::from("-cp"),
-            dir.as_os_str().to_os_string(),
-            OsString::from("Main"),
+            class_dir.as_os_str().to_os_string(),
+            OsString::from("RandomAnimalRunner"),
         ],
-        Some(&dir),
+        Some(&cwd),
         timeout_ms,
     )
 }
 
-fn run_cpp(source: &str, timeout_ms: u64) -> Result<String> {
+fn run_cpp(timeout_ms: u64) -> Result<String> {
+    let cwd = fun_root()?.join("cpp");
+    let sources = [
+        cwd.join("random_action.cpp"),
+        cwd.join("random_action_runner.cpp"),
+    ];
+    ensure_files(&sources)?;
     let compiler = if command_available("clang++") {
         "clang++"
     } else {
         "g++"
     };
-    let dir = cache_dir("cpp", source, compiler_version(compiler, &["--version"]))?;
-    let src = dir.join("main.cpp");
-    let bin = executable_path(&dir, "main");
-    write_source(&src, source)?;
+    let bin = cached_binary_path("cpp", &sources)?;
     if !bin.exists() {
         run_command(
             compiler,
             &[
-                src.as_os_str().to_os_string(),
+                OsString::from("random_action_runner.cpp"),
                 OsString::from("-std=c++17"),
                 OsString::from("-O2"),
                 OsString::from("-o"),
                 bin.as_os_str().to_os_string(),
             ],
-            Some(&dir),
+            Some(&cwd),
             timeout_ms,
         )?;
     }
-    run_command(bin.as_os_str(), &[], Some(&dir), timeout_ms)
+    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
 }
 
-fn run_zig(source: &str, timeout_ms: u64) -> Result<String> {
-    let dir = cache_dir("zig", source, compiler_version("zig", &["version"]))?;
-    let src = dir.join("main.zig");
-    write_source(&src, source)?;
-    run_command(
-        "zig",
-        &[OsString::from("run"), src.as_os_str().to_os_string()],
-        Some(&dir),
-        timeout_ms,
-    )
+fn run_zig(timeout_ms: u64) -> Result<String> {
+    let cwd = fun_root()?.join("zig");
+    let sources = [cwd.join("runner.zig"), cwd.join("random_size.zig")];
+    ensure_files(&sources)?;
+    let bin = cached_binary_path("zig", &sources)?;
+    if !bin.exists() {
+        run_command(
+            "zig",
+            &[
+                OsString::from("build-exe"),
+                OsString::from("runner.zig"),
+                OsString::from("-O"),
+                OsString::from("ReleaseFast"),
+                OsString::from("-lc"),
+                OsString::from(format!("-femit-bin={}", bin.display())),
+            ],
+            Some(&cwd),
+            timeout_ms,
+        )?;
+    }
+    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
 }
 
 fn run_interpreter(command: &str, args: &[OsString], timeout_ms: u64) -> Result<String> {
@@ -285,55 +332,93 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
     }
 }
 
-fn write_source(path: &Path, source: &str) -> Result<()> {
-    fs::write(path, source).with_context(|| format!("Failed to write {}", path.display()))
+fn fun_root() -> Result<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("skills").join("pet-generator").join("iota-fun"));
+        candidates.push(
+            cwd.join("iota-skill")
+                .join("pet-generator")
+                .join("iota-fun"),
+        );
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        for ancestor in exe.ancestors().take(8) {
+            candidates.push(
+                ancestor
+                    .join("skills")
+                    .join("pet-generator")
+                    .join("iota-fun"),
+            );
+            candidates.push(
+                ancestor
+                    .join("iota-skill")
+                    .join("pet-generator")
+                    .join("iota-fun"),
+            );
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|path| path.is_dir())
+        .context("Failed to locate pet-generator iota-fun directory")
 }
 
-fn cache_dir(language: &str, source: &str, compiler_version: Option<String>) -> Result<PathBuf> {
+fn ensure_files(paths: &[PathBuf]) -> Result<()> {
+    for path in paths {
+        ensure_file(path)?;
+    }
+    Ok(())
+}
+
+fn ensure_file(path: &Path) -> Result<()> {
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err(anyhow!("Fun source file not found: {}", path.display()))
+    }
+}
+
+fn cached_binary_path(language: &str, sources: &[PathBuf]) -> Result<PathBuf> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    cached_path(language, sources, suffix)
+}
+
+fn cached_class_dir_path(language: &str, sources: &[PathBuf]) -> Result<PathBuf> {
+    cached_path(language, sources, "-classes")
+}
+
+fn cached_path(language: &str, sources: &[PathBuf], suffix: &str) -> Result<PathBuf> {
     let home = dirs::home_dir().context("Failed to get home directory")?;
     let mut hasher = Sha256::new();
+    hasher.update(b"v3");
+    hasher.update(std::env::consts::OS.as_bytes());
+    hasher.update(std::env::consts::ARCH.as_bytes());
     hasher.update(language.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(source.as_bytes());
-    hasher.update(b"\0");
-    if let Some(version) = compiler_version {
-        hasher.update(version.as_bytes());
+    for source in sources {
+        let metadata = source
+            .metadata()
+            .with_context(|| format!("Failed to stat {}", source.display()))?;
+        hasher.update(source.to_string_lossy().as_bytes());
+        hasher.update(metadata.len().to_string().as_bytes());
+        if let Ok(modified) = metadata.modified() {
+            if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+                hasher.update(duration.as_millis().to_string().as_bytes());
+            }
+        }
     }
-    let dir = home
-        .join(".i6")
-        .join("fun-cache")
-        .join(language)
-        .join(hex::encode(hasher.finalize()));
+    let dir = home.join(".i6").join("iota-fun");
     fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
-    Ok(dir)
-}
-
-fn compiler_version(command: &str, args: &[&str]) -> Option<String> {
-    Command::new(command)
-        .args(args)
-        .output()
-        .ok()
-        .map(|output| {
-            let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-            text.push_str(&String::from_utf8_lossy(&output.stderr));
-            text
-        })
+    let hash = hex::encode(hasher.finalize());
+    Ok(dir.join(format!("iota-fun-{}-{}{}", language, &hash[..16], suffix)))
 }
 
 fn command_available(command: &str) -> bool {
     Command::new(command).arg("--version").output().is_ok()
 }
 
-fn executable_path(dir: &Path, name: &str) -> PathBuf {
-    if cfg!(windows) {
-        dir.join(format!("{}.exe", name))
-    } else {
-        dir.join(name)
-    }
-}
-
 fn trim_output(value: &str) -> String {
-    value.chars().take(64 * 1024).collect()
+    value.trim().chars().take(64 * 1024).collect()
 }
 
 fn ok(id: Value, result: Value) -> Value {

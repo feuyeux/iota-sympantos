@@ -89,6 +89,7 @@ pub struct SkillOutput {
 impl SkillRegistry {
     pub fn load(workspace: &Path, configured_roots: &[PathBuf]) -> Self {
         let mut roots = Vec::new();
+        roots.push(workspace.join("skills"));
         roots.push(workspace.join(".iota").join("skills"));
         roots.extend(configured_roots.iter().cloned());
         if let Some(home) = dirs::home_dir() {

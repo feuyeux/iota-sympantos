@@ -314,6 +314,7 @@ impl EventStore {
         Ok(events)
     }
 
+    #[allow(dead_code)]
     pub fn events_since(
         &self,
         execution_id: &str,

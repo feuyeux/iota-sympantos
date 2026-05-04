@@ -88,6 +88,7 @@ pub struct AcpRunOptions {
     pub prompt: String,
     pub show_native: bool,
     pub use_daemon: bool,
+    pub trace: bool,
     pub trace_timing: bool,
     pub timeout_ms: u64,
 }
@@ -168,6 +169,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
     let mut cwd = std::env::current_dir().context("Failed to get current directory")?;
     let mut show_native = false;
     let mut use_daemon = false;
+    let mut trace = false;
     let mut trace_timing = false;
     let mut timeout_ms = DEFAULT_TIMEOUT_MS;
     let mut prompt_parts = Vec::new();
@@ -192,6 +194,9 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
             }
             "-d" | "--daemon" | "--require-daemon" => {
                 use_daemon = true;
+            }
+            "--trace" => {
+                trace = true;
             }
             "--trace-timing" => {
                 trace_timing = true;
@@ -238,6 +243,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
         prompt,
         show_native,
         use_daemon,
+        trace,
         trace_timing,
         timeout_ms,
     })
@@ -245,7 +251,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
 
 pub fn print_acp_help() {
     println!(
-        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon; starts it silently if needed\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 30000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --daemon --trace-timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
+        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon; starts it silently if needed\n      --trace            Print normalized skill/tool trace events to stderr\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 30000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --daemon --trace-timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
     );
 }
 
@@ -642,6 +648,11 @@ async fn send_request(
         params,
     };
     let mut line = serde_json::to_vec(&request).context("Failed to serialize ACP request")?;
+    tracing::debug!(
+        method = method,
+        "[acp =>] {}",
+        String::from_utf8_lossy(&line)
+    );
     line.push(b'\n');
     stdin
         .write_all(line.as_slice())

@@ -27,7 +27,7 @@ pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<Skil
             .unwrap_or("iota-fun");
         let (command, args) = server_command(server);
         for tool in &skill.metadata.execution.tools {
-            let arguments = json!({"source": prompt});
+            let arguments = tool_arguments();
             let call_id = format!("skill:{}:{}", skill.metadata.name, tool.label());
             events.push(RuntimeEvent::ToolCall(ToolCallEvent {
                 id: call_id,
@@ -45,7 +45,7 @@ pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<Skil
                     format!("skill:{}:{}", skill.metadata.name, tool.label()),
                     tool.name.clone(),
                     tool.label().to_string(),
-                    json!({"source": prompt}),
+                    tool_arguments(),
                 )
             })
             .collect::<Vec<_>>();
@@ -75,9 +75,6 @@ pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<Skil
     }
     if text.contains("{{tool_results}}") {
         text = text.replace("{{tool_results}}", &render_tool_results(&tool_outputs));
-    } else if !tool_outputs.is_empty() {
-        text.push_str("\n");
-        text.push_str(&render_tool_results(&tool_outputs));
     }
 
     events.push(RuntimeEvent::ToolResult(ToolResultEvent {
@@ -112,7 +109,55 @@ fn render_tool_results(results: &[Value]) -> String {
 }
 
 fn render_tool_result(result: &Value) -> String {
-    serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
+    let text = extract_mcp_text(result).unwrap_or_else(|| {
+        serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
+    });
+    if result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        format!("ERROR: {}", concise_error(&text))
+    } else {
+        text
+    }
+}
+
+fn concise_error(text: &str) -> String {
+    text.lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("tool failed")
+        .to_string()
+}
+
+fn extract_mcp_text(result: &Value) -> Option<String> {
+    if let Some(text) = result.as_str() {
+        let text = text.trim();
+        return (!text.is_empty()).then(|| text.to_string());
+    }
+    if let Some(content) = result.get("content").and_then(Value::as_array) {
+        let text = content
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    if let Some(error) = result.get("error").and_then(Value::as_str) {
+        let error = error.trim();
+        return (!error.is_empty()).then(|| error.to_string());
+    }
+    None
+}
+
+fn tool_arguments() -> Value {
+    json!({})
 }
 
 async fn run_sequential(
@@ -132,37 +177,12 @@ async fn run_batch(
     args: Vec<String>,
     calls: Vec<(String, String, String, Value)>,
 ) -> Vec<(String, String, String, bool, Value)> {
-    let tool_calls = calls
-        .iter()
-        .map(|(_, tool, _, arguments)| McpToolCall {
-            name: tool.clone(),
-            arguments: arguments.clone(),
-        })
-        .collect::<Vec<_>>();
-    let batch =
-        mcp_client::call_stdio_batch(&command, &args, &BTreeMap::new(), tool_calls, 10_000).await;
-
-    match batch {
-        Ok(results) => calls
-            .into_iter()
-            .zip(results.into_iter())
-            .map(|((call_id, tool, alias, _), result)| {
-                (call_id, tool, alias, result.ok, result.content)
-            })
-            .collect(),
-        Err(err) => calls
-            .into_iter()
-            .map(|(call_id, tool, alias, _)| {
-                (
-                    call_id,
-                    tool,
-                    alias,
-                    false,
-                    json!({"error": err.to_string()}),
-                )
-            })
-            .collect(),
-    }
+    let futures = calls.into_iter().map(|(call_id, tool, alias, arguments)| {
+        let command = command.clone();
+        let args = args.clone();
+        async move { run_one_tool(&command, &args, call_id, tool, alias, arguments).await }
+    });
+    futures_util::future::join_all(futures).await
 }
 
 async fn run_one_tool(

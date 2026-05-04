@@ -12,6 +12,7 @@ use crate::config::{self, NimiaConfig};
 use crate::engine::IotaEngine;
 use crate::event_store::EventStore;
 use crate::memory::MemoryStore;
+use crate::runtime_event::RuntimeEvent;
 use crate::skills::SkillRegistry;
 use crate::{context_mcp, fun_mcp, native_materializer, skill_registry_cache, tui};
 
@@ -37,6 +38,9 @@ pub async fn run() -> Result<()> {
                         .await;
                     engine.shutdown().await;
                     let output = result?;
+                    if options.trace {
+                        print_trace_events(&output.events);
+                    }
                     if options.trace_timing {
                         print_route_timing("direct", options.backend, Some(&output.timing));
                     }
@@ -130,6 +134,51 @@ fn print_route_timing(
             "timing": timing,
         })
     );
+}
+
+fn print_trace_events(events: &[RuntimeEvent]) {
+    for event in events {
+        match event {
+            RuntimeEvent::ToolCall(call) if call.id.starts_with("skill:") => {
+                eprintln!("[{}] call {} args={}", call.id, call.name, call.arguments);
+            }
+            RuntimeEvent::ToolResult(result) if result.id.starts_with("skill:") => {
+                eprintln!(
+                    "[{}] result {} ok={} value={}",
+                    result.id,
+                    result.name,
+                    result.ok,
+                    trace_result_value(&result.result)
+                );
+            }
+            RuntimeEvent::Output(output) if output.role.as_deref() == Some("engine") => {
+                eprintln!("[skill:output] {} bytes", output.text.len());
+            }
+            RuntimeEvent::Memory(memory) => {
+                eprintln!(
+                    "[memory:{}] id={} payload={}",
+                    memory.action,
+                    memory.memory_id.as_deref().unwrap_or("-"),
+                    memory.payload
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn trace_result_value(value: &serde_json::Value) -> String {
+    if let Some(content) = value.get("content").and_then(serde_json::Value::as_array) {
+        let text = content
+            .iter()
+            .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\\n");
+        if !text.is_empty() {
+            return text;
+        }
+    }
+    value.to_string()
 }
 
 fn print_help() {

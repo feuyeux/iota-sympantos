@@ -264,18 +264,61 @@ fn call_tool(
 }
 
 fn tools() -> Vec<Value> {
-    [
-        ("iota_memory_search", "Search unified iota memory"),
-        ("iota_memory_write", "Write unified iota memory"),
-        ("iota_skill_search", "Search skill index"),
-        ("iota_skill_load", "Load a full skill body"),
-        ("iota_session_summary", "Read session summary"),
-        ("iota_handoff_publish", "Publish handoff"),
-        ("iota_handoff_read", "Read handoff"),
+    vec![
+        json!({
+            "name": "iota_memory_search",
+            "description": "Search unified iota memory by keyword. Returns matching records across all types and scopes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search keyword"},
+                    "limit": {"type": "integer", "description": "Max results (default 20)"}
+                }
+            }
+        }),
+        json!({
+            "name": "iota_memory_write",
+            "description": "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id: use \"local-user\" for user scope, the cwd path for project scope, iota_session_id for session scope.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["content", "type", "scope", "scope_id"],
+                "properties": {
+                    "content":    {"type": "string"},
+                    "type":       {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
+                    "facet":      {"type": "string", "enum": ["identity", "preference", "strategic", "domain"]},
+                    "scope":      {"type": "string", "enum": ["user", "project", "session", "global"]},
+                    "scope_id":   {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "ttl_days":   {"type": "integer"}
+                }
+            }
+        }),
+        json!({
+            "name": "iota_skill_search",
+            "description": "Search available iota skill index for the current backend.",
+            "inputSchema": {"type": "object", "properties": {"backend": {"type": "string"}}}
+        }),
+        json!({
+            "name": "iota_skill_load",
+            "description": "Load the full body of a named iota skill.",
+            "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}
+        }),
+        json!({
+            "name": "iota_session_summary",
+            "description": "Read summary of the current iota session.",
+            "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}}}
+        }),
+        json!({
+            "name": "iota_handoff_publish",
+            "description": "Publish a handoff summary when switching backends.",
+            "inputSchema": {"type": "object", "additionalProperties": true}
+        }),
+        json!({
+            "name": "iota_handoff_read",
+            "description": "Read the latest handoff for this session.",
+            "inputSchema": {"type": "object", "additionalProperties": true}
+        }),
     ]
-    .into_iter()
-    .map(|(name, description)| json!({"name":name,"description":description,"inputSchema":{"type":"object","additionalProperties":true}}))
-    .collect()
 }
 
 fn ok(id: Value, result: Value) -> Value {
