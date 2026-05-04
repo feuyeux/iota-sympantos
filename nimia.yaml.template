@@ -69,3 +69,39 @@ hermes:
     name: MiniMax-M2.7
     base_url: https://api.minimaxi.com/anthropic
     api_key: <api-key>
+
+
+context_engine:
+  enabled: true
+  injection: auto
+  memory_db: ~/.i6/context/memory.sqlite
+  skill_roots:
+    - ~/.i6/skills
+    - ./.iota/skills
+  native_overlays: false
+  budgets:
+    memory_chars: 2000
+    skills_chars: 1200
+    dialogue_chars: 1500
+    workspace_chars: 800
+  mcp:
+    command: iota
+    args: ["context-mcp"]
+  fun:
+    command: iota
+    args: ["fun-mcp"]
+
+context_engine_backend:
+  gemini:
+    mcp_session_new: true
+  opencode:
+    mcp_session_new: true
+    always_send_empty_mcp_servers: true
+  hermes:
+    mcp_session_new: true
+    mcp_env_shape: string_array
+    override_home: false
+  claude-code:
+    mcp_session_new: try
+  codex:
+    mcp_session_new: try

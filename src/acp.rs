@@ -6,10 +6,39 @@ use std::fmt;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command as TokioCommand};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, timeout};
+
+use crate::approval::{self, ApprovalStore};
+use crate::mcp_router;
+use crate::acp_session::{AcpMcpServer, session_new_params};
+use crate::runtime_event::{self, RuntimeEvent};
+
+// ── TUI approval channel ─────────────────────────────────────────────────────
+
+/// A pending approval request forwarded to the TUI.
+pub struct ApprovalRequest {
+    /// Human-readable tool name shown in the overlay.
+    pub tool_name: String,
+    /// Full params for storage.
+    #[allow(dead_code)]
+    pub params: Value,
+    /// Reply with `true` = approved, `false` = denied.
+    pub reply: oneshot::Sender<bool>,
+}
+
+/// When the TUI is active it installs a sender here; `answer_permission_request`
+/// uses it instead of blocking stdin.
+static TUI_APPROVAL_TX: OnceLock<mpsc::Sender<ApprovalRequest>> = OnceLock::new();
+
+/// Call once before starting the TUI event loop.
+pub fn install_tui_approval_channel(tx: mpsc::Sender<ApprovalRequest>) {
+    let _ = TUI_APPROVAL_TX.set(tx);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AcpBackend {
@@ -107,6 +136,28 @@ pub struct AcpPromptTiming {
 pub struct AcpPromptOutput {
     pub text: String,
     pub timing: AcpPromptTiming,
+    pub backend_session_id: Option<String>,
+    pub events: Vec<RuntimeEvent>,
+}
+
+impl AcpPromptOutput {
+    pub fn synthetic(text: String) -> Self {
+        Self {
+            text,
+            backend_session_id: None,
+            events: Vec::new(),
+            timing: AcpPromptTiming {
+                client_started: false,
+                process_spawned: false,
+                process_spawn_ms: None,
+                init_ms: None,
+                session_reused: false,
+                session_new_ms: None,
+                prompt_ms: 0,
+                total_ms: 0,
+            },
+        }
+    }
 }
 
 struct AcpSessionResolution {
@@ -246,11 +297,14 @@ async fn read_prompt_events_for_id<R>(
     show_native: bool,
     timeout_ms: u64,
     expected_prompt_id: &str,
-) -> Result<String>
+    stream_tx: Option<&mpsc::Sender<String>>,
+    execution_id: Option<&str>,
+) -> Result<(String, Vec<RuntimeEvent>)>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut output = String::new();
+    let mut events = Vec::new();
     let mut streamed = false;
     let timeout_message = format!("ACP prompt timed out after {}ms", timeout_ms);
     loop {
@@ -260,6 +314,11 @@ where
         let message = parse_message_line(&line, show_native)?;
 
         if let Some(error) = &message.error {
+            events.push(runtime_event::map_acp_error(
+                error.message.clone(),
+                error.code,
+                error.data.clone(),
+            ));
             bail!(format_acp_error(error));
         }
 
@@ -278,11 +337,18 @@ where
             continue;
         };
 
+        if let Some(event) = runtime_event::map_acp_event(method, message.params.as_ref()) {
+            events.push(event);
+        }
+
         match method {
             "session/update" | "session_update" => {
                 if let Some(text) = text_from_session_update(message.params.as_ref()) {
                     streamed = true;
                     output.push_str(&text);
+                    if let Some(tx) = stream_tx {
+                        let _ = tx.try_send(text);
+                    }
                 }
             }
             "session/complete" | "session_complete" => {
@@ -294,16 +360,26 @@ where
                 break;
             }
             "session/request_permission" | "request_permission" | "permission/request" => {
-                answer_permission_request(stdin, &message).await?;
+                let decision = answer_permission_request(stdin, &message, execution_id).await?;
+                events.push(RuntimeEvent::ApprovalDecision(decision));
             }
             _ => {
+                if let (Some(id), Some(result)) = (
+                    message.id.clone(),
+                    mcp_router::try_intercept_tool_call(method, message.params.as_ref()),
+                ) {
+                    let result = result.unwrap_or_else(|err| json!({"content":[{"type":"text","text":err.to_string()}],"isError":true}));
+                    send_response(stdin, id, result).await?;
+                    continue;
+                }
+
                 if show_native {
                     eprintln!("[acp native] {}", line);
                 }
             }
         }
     }
-    Ok(output)
+    Ok((output, events))
 }
 
 pub struct AcpClient {
@@ -317,6 +393,9 @@ pub struct AcpClient {
     timeout_ms: u64,
     prompt_counter: u64,
     startup_timing: AcpStartupTiming,
+    mcp_servers: Vec<AcpMcpServer>,
+    /// When set, each streamed output chunk is forwarded to the TUI.
+    pub stream_tx: Option<mpsc::Sender<String>>,
 }
 
 impl AcpClient {
@@ -325,6 +404,7 @@ impl AcpClient {
         cwd: PathBuf,
         env: BTreeMap<String, String>,
         command_override: Option<(String, Vec<String>)>,
+        mcp_servers: Vec<AcpMcpServer>,
         show_native: bool,
         timeout_ms: u64,
     ) -> Result<Self> {
@@ -424,13 +504,16 @@ impl AcpClient {
                 process_spawn_ms,
                 init_ms,
             },
+            mcp_servers,
+            stream_tx: None,
         })
     }
 
-    pub async fn prompt_with_cwd_timed(
+    pub async fn prompt_with_cwd_timed_for_execution(
         &mut self,
         cwd: &PathBuf,
         prompt: &str,
+        execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
         let total_started = Instant::now();
         self.prompt_counter += 1;
@@ -448,26 +531,33 @@ impl AcpClient {
                 }),
             )
             .await?;
-            let text = read_prompt_events_for_id(
+            let stream_tx = self.stream_tx.clone();
+            let (text, events) = read_prompt_events_for_id(
                 &mut self.lines,
                 &mut self.stdin,
                 self.show_native,
                 self.timeout_ms,
                 &id,
+                stream_tx.as_ref(),
+                execution_id,
             )
             .await?;
             Ok::<_, anyhow::Error>((
                 text,
+                events,
                 session.reused,
                 session.session_new_ms,
                 elapsed_ms(prompt_started),
+                session.session_id,
             ))
         })
         .await
         .unwrap_or_else(|_| Err(anyhow!("ACP prompt timed out after {}ms", self.timeout_ms)))?;
-        let (text, session_reused, session_new_ms, prompt_ms) = result;
+        let (text, events, session_reused, session_new_ms, prompt_ms, backend_session_id) = result;
         Ok(AcpPromptOutput {
             text,
+            backend_session_id: Some(backend_session_id),
+            events,
             timing: AcpPromptTiming {
                 client_started: false,
                 process_spawned: false,
@@ -501,7 +591,7 @@ impl AcpClient {
             &mut self.stdin,
             session_request_id.clone(),
             "session/new",
-            session_new_params(self.backend, &self.cwd),
+            session_new_params(self.backend, &self.cwd, &self.mcp_servers),
         )
         .await?;
         let session_result = wait_for_response(
@@ -740,12 +830,13 @@ fn is_terminal_result(result: &Value) -> bool {
     result.get("stopReason").and_then(Value::as_str).is_some() || extract_text(result).is_some()
 }
 
-fn session_new_params(_backend: AcpBackend, cwd: &PathBuf) -> Value {
-    let cwd = cwd.display().to_string();
-    json!({ "cwd": cwd, "mcpServers": [] })
-}
 
-async fn answer_permission_request(stdin: &mut ChildStdin, message: &AcpWireMessage) -> Result<()> {
+
+async fn answer_permission_request(
+    stdin: &mut ChildStdin,
+    message: &AcpWireMessage,
+    execution_id: Option<&str>,
+) -> Result<runtime_event::ApprovalDecisionEvent> {
     let id = message
         .id
         .clone()
@@ -766,9 +857,69 @@ async fn answer_permission_request(stdin: &mut ChildStdin, message: &AcpWireMess
                 .or_else(|| params.get("name"))
                 .and_then(Value::as_str)
         })
-        .unwrap_or("tool");
-    let approved = prompt_yes_no(&format!("Approve ACP tool request '{}'? ", tool_name)).await?;
-    send_response(stdin, id, json!({ "approved": approved })).await
+        .unwrap_or("tool")
+        .to_string();
+
+    let params = message.params.clone().unwrap_or(Value::Null);
+
+    let approved = if let Some(tx) = TUI_APPROVAL_TX.get() {
+        // TUI mode: send to overlay and await user decision.
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let req = ApprovalRequest {
+            tool_name: tool_name.clone(),
+            params: params.clone(),
+            reply: reply_tx,
+        };
+        if tx.send(req).await.is_ok() {
+            reply_rx.await.unwrap_or(false)
+        } else {
+            false
+        }
+    } else {
+        // CLI mode: block on stdin as before.
+        let store = ApprovalStore::open_default().ok();
+        let persisted_id = if let Some(store) = &store {
+            store
+                .record_request(execution_id, "acp", &tool_name, &params)
+                .ok()
+        } else {
+            None
+        };
+        let dimensions = approval::classify_operation(&tool_name, &params);
+        let policy = approval::default_decision(&dimensions);
+        let result = prompt_yes_no(&format!(
+            "Approve ACP tool request '{}' [{}]? ",
+            tool_name, policy.reason
+        ))
+        .await?;
+        if let (Some(store), Some(request_id)) = (&store, persisted_id.as_deref()) {
+            let _ = store.record_decision(request_id, result, "interactive user decision");
+        }
+        result
+    };
+
+    // Persist the decision when in TUI mode too.
+    if TUI_APPROVAL_TX.get().is_some() {
+        if let Ok(store) = ApprovalStore::open_default() {
+            if let Ok(request_id) = store.record_request(execution_id, "acp", &tool_name, &params) {
+                let _ = store.record_decision(&request_id, approved, "tui user decision");
+            }
+        }
+    }
+
+    send_response(stdin, id.clone(), json!({ "approved": approved })).await?;
+    Ok(runtime_event::ApprovalDecisionEvent {
+        request_id: id
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| id.to_string()),
+        approved,
+        reason: Some(if TUI_APPROVAL_TX.get().is_some() {
+            "tui user decision".to_string()
+        } else {
+            "interactive user decision".to_string()
+        }),
+    })
 }
 
 async fn prompt_yes_no(message: &str) -> Result<bool> {

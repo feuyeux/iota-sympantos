@@ -1,100 +1,88 @@
 # AGENTS.md
 
-## Project Overview
+## 语言约束
 
-iota-sympantos is a lightweight Rust CLI that orchestrates multiple AI coding assistant backends through the ACP (Agent Control Protocol). It provides both single-shot and interactive TUI modes for sending prompts to backends like Claude Code, Codex, Gemini CLI, Hermes, and OpenCode.
+本文档及所有代码注释、提交信息、产出物 **只能使用中文或英文**，禁止使用韩语及其他语言。
 
+---
 
-## Codex Operating Identity
+## 项目概述
 
-This repository is maintained by Codex as the coding agent in this workspace. When acting on tasks here, operate as Codex: make concrete code/doc changes, run local verification, preserve unrelated user changes, and keep ACP/backend details grounded in the current Rust code.
+iota-sympantos 是一个轻量级 Rust CLI，通过 ACP（Agent Control Protocol）协议编排多个 AI 编程助手后端。支持单次执行和交互式 TUI 两种模式，支持 Claude Code、Codex、Gemini CLI、Hermes、OpenCode 五个后端。
 
-Do not describe yourself as one of the five runtime backends. Claude Code, Codex, Gemini CLI, Hermes, and OpenCode are target backends orchestrated by iota-sympantos; the working agent editing this repository is Codex.
+---
 
-## Cross-Platform Requirement
+## 源码结构
 
-**All code, configuration, and path handling must work on Windows, macOS, and Linux.** This is a hard constraint for every change:
-
-- Use `dirs::home_dir()` for home directory resolution; never hardcode `~`, `%USERPROFILE%`, or `$HOME` in runtime code.
-- `normalize_command()` rewrites `"npx"` to `"npx.cmd"` on Windows. Always use `"npx"` in config/code.
-- Path separators: use `Path`/`PathBuf` for filesystem operations, never string-concatenate with `\` or `/`.
-- Backend home directories differ per OS (e.g., Hermes uses `~/AppData/Local/hermes` on Windows, `~/.hermes` on Unix). Never assume a fixed path — let each backend resolve its own default home.
-- Process spawning: `Stdio::piped()` and `kill_on_drop(true)` work cross-platform via tokio. No platform-specific process management.
-- Config paths in `nimia.yaml` use `~/` prefix which is expanded by `expand_home_path()` at runtime. Do not use Windows-only or Unix-only path formats in the template.
-- Test manually on Windows (primary dev platform) before submitting; CI covers Linux.
-
-## Workspace Structure
-
-```text
+```
 iota-sympantos/
 ├── src/
-│   ├── main.rs          # thin binary entrypoint
-│   ├── cli.rs           # command dispatch for default TUI, check/run/bench, daemon routing
-│   ├── tui.rs           # interactive loop over lazily warmed ACP clients
-│   ├── engine.rs        # ACP runtime orchestration, warm pool, benchmarks
-│   ├── agent.rs         # local daemon for cross-CLI ACP client reuse + internal warm control plane
-│   ├── app.rs           # future app-facing read model/projection entrypoint
-│   ├── config.rs        # nimia.yaml schema, config loading, env translation
-│   └── acp.rs           # ACP JSON-RPC 2.0 protocol driver + timing instrumentation
+│   ├── main.rs              # 程序入口
+│   ├── cli.rs               # 命令分发（run/check/tui/bench 等）
+│   ├── tui.rs               # 交互式 TUI 主循环
+│   ├── tui/
+│   │   ├── composer.rs      # 多行输入组件（kill buffer/Ctrl+R/word motion）
+│   │   ├── markdown.rs      # markdown 渲染（pulldown-cmark）
+│   │   ├── status_bar.rs    # 底部状态栏（后端·模型 / 快捷键提示）
+│   │   ├── theme.rs         # ratatui 颜色主题（洋红主色）
+│   │   └── state.rs         # TUI 状态
+│   ├── engine.rs            # ACP 运行时编排，客户端池
+│   ├── acp.rs              # ACP JSON-RPC 2.0 协议驱动
+│   ├── agent.rs            # 内部 daemon（127.0.0.1:47661）
+│   ├── config.rs           # nimia.yaml 配置解析
+│   ├── runtime_event.rs    # 统一事件类型（Output/ToolCall/Approval 等）
+│   ├── event_store.rs      # SQLite 事件持久化
+│   ├── memory.rs           # MemoryStore（6 桶分类体系）
+│   ├── context.rs          # ContextEngine + capsule 组装 + budget
+│   ├── skills.rs           # SkillRegistry（分布式加载 + trigger 匹配）
+│   ├── skill_runner.rs     # engine-run skill 执行
+│   ├── mcp_client.rs       # engine 侧 MCP 客户端
+│   ├── mcp_router.rs       # MCP 工具调用拦截路由
+│   ├── context_mcp.rs      # iota-context MCP sidecar（stdio）
+│   ├── fun_mcp.rs         # iota-fun 7 语言 MCP server（stdio）
+│   ├── approval.rs         # ApprovalStore + policy
+│   ├── session_ledger.rs  # SessionLedger + 后端切换 handoff
+│   └── native_materializer.rs # 原生文件投影（可选）
 ├── doc/
-│   └── acp-runtime.md   # runtime process model, daemon control plane, benchmarks
-├── Cargo.toml           # Rust 2024 edition, tokio async runtime
-└── ~/.i6/nimia.yaml     # User config resolved through dirs::home_dir()
+│   ├── plan-0504.md        # Context Fabric 完整规划
+│   └── plan-0504-plus.md  # Context Fabric 增强版规划
+├── Cargo.toml
+└── ~/.i6/nimia.yaml       # 唯一配置来源
 ```
 
-## Source Of Truth
+---
 
-Use current code first — runtime responsibilities are split across `cli`, `tui`, `engine`, `agent`, `config`, and `acp` modules. Then refer to `~/.i6/nimia.yaml` for runtime configuration semantics.
+## ACP 协议流程
 
-If code and this document diverge, prefer the current code and update this file to match.
-
-## Architecture
-
-### ACP Protocol Flow
-
-Every backend is an external process launched via `npx` (or `hermes acp`). The JSON-RPC 2.0 protocol over newline-delimited stdin/stdout follows:
+每个后端都是通过 `npx`（或 `hermes acp`）启动的外部进程，协议为基于 stdin/stdout 的换行分隔 JSON-RPC 2.0：
 
 ```
-initialize → session/new → session/prompt → stream session/update events → session/complete
+initialize → session/new → session/prompt → 流式 session/update → session/complete
 ```
 
-Two execution paths exist:
+执行路径：
+- **直接路径**：`IotaEngine::prompt_in_cwd`，按需启动并复用 ACP 客户端
+- **Daemon 路径**：通过 `IotaEngine` 经内部 daemon（`--daemon` / `-d`）路由
 
-- **`IotaEngine::prompt_in_cwd`** — runtime path: lazily starts one ACP client per backend+cwd and reuses it until engine shutdown. `iota run` uses an in-process engine by default and does not probe the daemon. Adding `--daemon` or `-d` routes through the daemon, silently starts it if needed, and the first request warms the required backend client.
-- **`AcpClient`** — persistent: used by `IotaEngine` to keep backend subprocesses alive and reuse ACP `sessionId` for repeated prompts in the same cwd.
+---
 
-### Daemon & Warm Control Plane
+## 后端适配器
 
-The daemon is an internal helper started automatically by `--daemon` / `-d`. It listens on `127.0.0.1:47661` (override with `IOTA_DAEMON_ADDR`) and accepts two JSON request types over TCP:
-
-- **Prompt request**: `{"backend", "cwd", "prompt", "timeout_ms", "trace_timing"}` — dispatches through `IotaEngine::prompt_in_cwd_timed`, returns `{"ok", "text", "timing"}`.
-- **Warm request**: `{"request_type": "warm", "cwd", "backends"}` — starts ACP clients without sending a model prompt, returns `{"ok", "warmed"}`.
-
-There are no user-facing `daemon` or `warm` commands. Warm requests remain an internal control-plane message; `check --daemon` can prewarm enabled backends, and `run --daemon` warms the selected backend as part of the prompt request.
-
-### ACP Timing Instrumentation
-
-`AcpPromptTiming` tracks per-prompt phase latencies: `process_spawn_ms`, `init_ms`, `session_new_ms`, `prompt_ms`, `total_ms`, plus boolean flags `client_started`, `process_spawned`, `session_reused`. Use `--trace-timing` on `iota run` to emit this as JSON to stderr. Use `--daemon` / `-d` to route through the daemon during benchmarks.
-
-### Backend Adapters
-
-| Backend | Command | Aliases |
-|---|---|---|
+| 后端 | 命令 | 别名 |
+|------|------|------|
 | Claude Code | `npx` | `claude`, `claudecode` |
 | Codex | `npx` | `codex` |
 | Gemini CLI | `npx` | `gemini`, `gemini-cli` |
 | Hermes Agent | `hermes acp` | `hermes` |
 | OpenCode | `npx` | `opencode`, `open-code` |
 
-All backends are ACP-only. Backend name resolution is handled by `AcpBackend::parse()` in `acp.rs`.
+---
 
-### Configuration
+## 配置（nimia.yaml）
 
-Config is read **only** from `~/.i6/nimia.yaml`. No project-level config, env-var discovery, or auto-detection is performed.
+配置**仅**从 `~/.i6/nimia.yaml` 读取，无项目级配置或自动发现。
 
-#### `model` key handling in `nimia.yaml`
-
-`nimia.yaml` does not expose a generic `env` section anymore. Each backend declares model and credential data under `model`:
+### `model` 字段处理
 
 ```yaml
 model:
@@ -104,121 +92,138 @@ model:
   api_key: <api-key>
 ```
 
-At runtime, `backend_process_env()` renders this model config into the process environment expected by each backend:
+运行时通过 `backend_process_env()` 将 model 配置映射为各后端所需的环境变量：
+- `claude-code`：api_key → `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN`；base_url → `ANTHROPIC_BASE_URL`；name → `ANTHROPIC_MODEL`
+- `codex`：api_key → `OPENAI_API_KEY` + `ROUTER_API_KEY`；base_url → `OPENAI_BASE_URL`；name → `OPENAI_MODEL`
+- `gemini`：api_key → `GEMINI_API_KEY`；name → `GEMINI_MODEL`
+- `hermes`：api_key/base_url/name/provider → provider 原生环境变量
+- `opencode`：name → `OPENCODE_MODEL`
 
-- `claude-code`: `api_key` -> `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN`; `base_url` -> `ANTHROPIC_BASE_URL`; `name` -> `ANTHROPIC_MODEL`
-- `codex`: `api_key` -> `OPENAI_API_KEY` + `ROUTER_API_KEY`; `base_url` -> `OPENAI_BASE_URL`; `name` -> `OPENAI_MODEL`
-- `gemini`: `api_key` -> `GEMINI_API_KEY`; `name` -> `GEMINI_MODEL`
-- `hermes`: `api_key`, `base_url`, `name`, `provider` -> provider-native env vars; see Hermes special handling below
-- `opencode`: `name` -> `OPENCODE_MODEL`
+### Hermes 特殊处理
 
-### Hermes Special Handling
+Hermes 使用自己的默认 `HERMES_HOME`（Windows 上 `~/AppData/Local/hermes`，Unix 上 `~/.hermes`）。**不要覆盖 `HERMES_HOME`**。
 
-Hermes uses its own default `HERMES_HOME` (typically `~/AppData/Local/hermes` on Windows, `~/.hermes` on Unix) which contains a full `config.yaml`, `.env`, state database, skills, and logs. **Do not override `HERMES_HOME`** — Hermes requires the complete configuration and state tree in its home directory; pointing it to a bare directory breaks initialization.
+nimia.yaml 中的 hermes 配置映射为 Hermes 通过 `os.getenv()` 读取的 provider 原生环境变量：
+- `provider` → `HERMES_INFERENCE_PROVIDER`
+- `name` → `HERMES_MODEL`
+- api_key + base_url → `render_hermes_provider_env()` 解析的 provider 相关变量
 
-Instead, nimia.yaml's `api_key`, `base_url`, `model`, and `provider` for Hermes are translated directly into provider-native environment variables that Hermes reads via `os.getenv()`:
+---
 
-- `provider` -> `HERMES_INFERENCE_PROVIDER`
-- `name` -> `HERMES_MODEL`
-- `api_key` + `base_url` -> provider-specific env vars resolved by `render_hermes_provider_env()`:
-  - `minimax-cn`: `MINIMAX_CN_API_KEY`, `MINIMAX_CN_BASE_URL`
-  - `minimax`: `MINIMAX_API_KEY`, `MINIMAX_BASE_URL`
-  - `anthropic`: `ANTHROPIC_API_KEY`, `ANTHROPIC_TOKEN`, `ANTHROPIC_BASE_URL`
-  - fallback: `OPENAI_API_KEY`, `OPENAI_BASE_URL`
-
-The `home` field in nimia.yaml's hermes section is intentionally **ignored** (not mapped to `HERMES_HOME`). Hermes reads credentials from process environment variables and its own `.env` file; no `.env` or `config.yaml` is written by iota-sympantos.
-
-Note: Hermes's `load_hermes_dotenv(override=True)` means its `.env` values take precedence over process env vars. If the API key in `~/.hermes/.env` differs from nimia.yaml, the `.env` value wins.
-
-### Windows `npx` Normalization
-
-`normalize_command()` rewrites `"npx"` to `"npx.cmd"` on Windows. Always use `"npx"` in config/code; normalization is applied in `config.rs` before backend process launch.
-
-## Build & Run
+## CLI 命令
 
 ```bash
-cargo build                          # debug build (all platforms)
-cargo build --release                # release build
-cargo build --offline                # no network (all deps in Cargo.lock)
+iota                     # 进入 TUI（默认）
+iota check [--daemon|-d] # 输出合并的 JSON 后端信息
+iota run <backend> ...   # 单次执行
+iota run --daemon ...    # 经 daemon 路由，自动静默启动
+iota bench-cold [轮次] [--daemon]
+iota bench-warm [轮次] [--daemon]
+iota context-mcp         # 启动 iota-context MCP sidecar（stdio）
+iota fun-mcp            # 启动 iota-fun 7 语言 MCP server（stdio）
+iota native-materialize  # 将 memory/skill 投影到原生文件
+iota skill pull <源> [名称]
+iota __daemon           # 内部 daemon 入口
 ```
 
-```powershell
-# Windows
-target\debug\iota.exe
-target\debug\iota.exe check
-target\debug\iota.exe check --daemon
-target\debug\iota.exe run codex --timeout-ms 20000 "your prompt"
-target\debug\iota.exe run --daemon --trace-timing claude-code --timeout-ms 30000 "say hello"
-```
+---
 
-```bash
-# macOS / Linux
-target/debug/iota
-target/debug/iota check
-target/debug/iota check --daemon
-target/debug/iota run codex --timeout-ms 20000 "your prompt"
-target/debug/iota run --daemon --trace-timing claude-code --timeout-ms 30000 "say hello"
-```
+## TUI 功能（已完成）
 
-If the default daemon port `47661` is unavailable, set `IOTA_DAEMON_ADDR` before daemon-routed commands:
+| 功能 | 文件 | 状态 |
+|------|------|------|
+| 多行输入（Shift+Enter 换行） | `tui/composer.rs` | ✅ |
+| Unicode grapheme 光标 | `tui/composer.rs` | ✅ |
+| Kill buffer（Ctrl+K/Ctrl+Y） | `tui/composer.rs` | ✅ |
+| Ctrl+U/Ctrl+W 词删除 | `tui/composer.rs` | ✅ |
+| Alt+B/Alt+F 词间移动 | `tui/composer.rs` | ✅ |
+| Ctrl+R 增量历史搜索 | `tui/composer.rs` | ✅ |
+| Markdown 渲染 | `tui/markdown.rs` | ✅ |
+| 状态栏（洋红主色，后端·模型） | `tui/status_bar.rs` | ✅ |
+| 运行指示器（spinner + 耗时） | `tui.rs` | ✅ |
+| Ctrl+T 全屏 pager | `tui.rs` | ✅ |
+| ? 帮助浮层 | `tui.rs` | ✅ |
+| 二次 Ctrl+C 退出确认 | `tui.rs` | ✅ |
+| Esc 中断运行中任务 | `tui.rs` | ✅ |
+| Tab 队列（运行时缓存输入） | `tui.rs` | ✅ |
+| 浮层枚举（None/Help/Pager/QuitConfirm） | `tui.rs` | ✅ |
 
-```powershell
-$env:IOTA_DAEMON_ADDR = '127.0.0.1:50100'
-```
+### TUI 仍缺失功能
 
-No formal test suite exists in this repository. Use `cargo build`, `iota check`, `iota run --help`, and focused direct/daemon manual runs.
+| 功能 | 优先级 | 说明 |
+|------|--------|------|
+| 恐慌钩子（崩溃前恢复终端） | P0 | 暂无 `set_panic_hook()` |
+| 错误路径终端恢复 | P0 | `?` 提前返回会跳过清理 |
+| is-terminal 检查 | P0 | 未检查 stdin/stdout 是否为终端 |
+| Engine turn 移出主任务 | P0 | 阻塞绘制循环 |
+| Approval 浮层 | P1 | `session/request_permission` 被静默丢弃 |
+| 帧率限制器（120 FPS） | P1 | 无 MIN_FRAME_MS 节流 |
+| 流式输出（增量渲染） | P3 | 仍等待完整文本一次性渲染 |
+| 鼠标滚轮 | P2 | 事件未处理 |
+| 光标隐藏 | P2 | 光标在 TUI 上闪烁 |
+| 键盘增强标志 | P2 | Shift+Enter 在部分终端可能失效 |
+| Ctrl+D / EOF 处理 | P2 | 清理路径可能被跳过 |
+| 窗口标题（OSC） | P3 | 未实现 |
+| 外部编辑器（Ctrl+X） | P3 | 未实现 |
 
-## Development Workflow
+---
 
-1. Make changes in the module that owns the behavior: `cli.rs` for command dispatch, `tui.rs` for interactive UI, `engine.rs` for process orchestration, `agent.rs` for daemon/internal warm control plane, `config.rs` for config/env translation, and `acp.rs` for wire protocol/timing.
-2. `cargo build` to verify compilation.
-3. Test manually via `target\debug\iota.exe run <backend> "ping"`.
-4. Use `--show-native` to debug ACP wire messages.
-5. Use `--trace-timing` to verify daemon hot path and phase latencies.
+## Context Fabric 实现状态（对照 plan-0504 / plan-0504-plus）
 
-## Codex Tooling Notes
+| Phase | 内容 | 文件 | 状态 |
+|-------|------|------|-------|
+| 1 | RuntimeEvent 归一化 | `runtime_event.rs` | ✅ |
+| 1 | EventStore SQLite 持久化 | `event_store.rs` | ✅ |
+| 1 | Execution idempotency + lock + fencing | `event_store.rs` | ✅ |
+| 2 | Context Capsule + budget | `context.rs` | ✅ |
+| 3 | MemoryStore（6 桶分类） | `memory.rs` | ✅ |
+| 3 | 6 桶 Recall 查询 | `memory.rs` | ✅ |
+| 3 | DialogueBuffer | `context.rs` | ✅ |
+| 4 | SkillRegistry 分布式加载 | `skills.rs` | ✅ |
+| 4 | Skill trigger 匹配 | `skills.rs` | ✅ |
+| 4b | Engine-run skill execution | `skill_runner.rs` | ✅ |
+| 4b | 7 种 fn 引擎（iota-fun MCP） | `fun_mcp.rs` | ✅ |
+| 4b | MCP client | `mcp_client.rs` | ✅ |
+| 5a | MCP sidecar（iota-context） | `context_mcp.rs` | ✅ |
+| 5a | ACP mcpServers 注入 | `acp.rs` | ✅ |
+| 5b | MCP response channel / 拦截 | `mcp_router.rs` | ✅ |
+| 6 | Approval 归一化 + 持久化 | `approval.rs` | ✅ |
+| 7 | SessionLedger + handoff | `session_ledger.rs` | ✅ |
+| 8 | Native materializer | `native_materializer.rs` | ✅ |
+| 9 | Config 扩展（context_engine） | `config.rs` | ✅ |
 
-- `apply_patch` is a FREEFORM tool. Do not call it with JSON such as `{ "input": "..." }`.
-- When using `apply_patch`, the tool message body must be the raw unified diff text, beginning with `*** Begin Patch` and ending with `*** End Patch`.
-- If the environment or tool bridge keeps wrapping `apply_patch` as JSON and patching fails repeatedly, stop after one failed retry. Use a scoped fallback edit method only for the requested file, then verify with a read command and `git diff`.
-- Do not leave the turn stuck in repeated tool-call attempts; preserve progress and report the fallback clearly.
+**所有 Phase 均已实现。**
 
+---
 
-## Adding a New Backend
+## 跨平台要求
 
-1. Add a variant to `AcpBackend` enum in `acp.rs`.
-2. Implement `parse()`, `command()`, and `Display` arms.
-3. Add to `ALL_BACKENDS`.
-4. Add a field to `NimiaConfig` and `BackendConfig` in `config.rs`.
-5. Add a case in `backend_config()`, `backend_home_env_key()`, and `backend_process_env()`.
-6. Add a backend section to `nimia.yaml.template`.
+**所有代码、配置、路径处理必须同时支持 Windows/macOS/Linux：**
 
-## Current Architecture Constraints
+- 使用 `dirs::home_dir()` 解析 home 目录，绝不硬编码 `~`、`%USERPROFILE%` 或 `$HOME`
+- `normalize_command()` 在 Windows 上将 `"npx"` 重写为 `"npx.cmd"`
+- 文件系统操作使用 `Path`/`PathBuf`，绝不字符串拼接 `\` 或 `/`
+- 后端 home 目录因操作系统而异（如 Hermes 在 Windows 上为 `~/AppData/Local/hermes`）
+- 进程启动使用 `Stdio::piped()` 和 `kill_on_drop(true)`（tokio 跨平台）
+- 配置文件模板中路径使用 `~/` 前缀，由 `expand_home_path()` 在运行时展开
+- 在 Windows（主要开发平台）上手动测试后再提交；CI 覆盖 Linux
 
-- **Cross-platform first**: every feature, path, command, and env var mapping must work on Windows, macOS, and Linux. See "Cross-Platform Requirement" above.
-- All backend protocol events use ACP JSON-RPC 2.0 over stdin/stdout; do not add vendor SDK dependencies.
-- Backend credentials are resolved through `nimia.yaml` env translation; do not add alternative credential discovery mechanisms.
-- `session/request_permission` events are handled interactively in TUI mode.
-- PowerShell scripts that invoke this tool must use single quotes or `${var}` braces around variables followed by colons to avoid scope resolution bugs.
+---
 
-## Review Focus
+## 安全要求
 
-When reviewing code, pay extra attention to:
+- 绝不提交 API 密钥、Token、密码或任何敏感信息
+- `nimia.yaml` 包含后端凭据，禁止提交到版本控制
+- 文档和调试输出中保持敏感信息打码
+- `--show-native` 可能暴露敏感协议内容，仅用于本地调试
 
-- ACP protocol message ordering and `sessionId` lifecycle
-- Backend env var translation correctness in `backend_process_env()`
-- Hermes provider-native env var mapping (not intermediate HERMES_API_KEY variables)
-- Never override HERMES_HOME; Hermes requires its full default home directory
-- Windows command normalization edge cases
-- Error handling in JSON-RPC stream parsing
-- Permission request handling in both single-shot and TUI modes
-- Daemon prompt/internal warm request dispatch in `agent.rs`
-- `AcpPromptTiming` accuracy — `Instant`-based measurements must not double-count phases
-- `IOTA_DAEMON_ADDR` consistency: auto-started daemon and daemon-routed commands must read the same address
+---
 
-## Security
+## 新增后端步骤
 
-- Never commit API keys, tokens, passwords, or secrets.
-- `nimia.yaml` contains backend credentials; it must not be committed to version control.
-- Keep examples redacted in docs and debug output.
-- `--show-native` may expose sensitive wire content; use only for local debugging.
+1. 在 `acp.rs` 的 `AcpBackend` 枚举中添加变体
+2. 实现 `parse()`、`command()`、`Display` 分支
+3. 加入 `ALL_BACKENDS`
+4. 在 `config.rs` 的 `NimiaConfig` 和 `BackendConfig` 中添加字段
+5. 在 `backend_config()`、`backend_home_env_key()`、`backend_process_env()` 中添加分支
+6. 在 `nimia.yaml.template` 中添加后端配置段

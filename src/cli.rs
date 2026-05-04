@@ -6,7 +6,9 @@ use crate::acp;
 use crate::agent::{self, DaemonPromptRequest};
 use crate::config::{self, NimiaConfig};
 use crate::engine::IotaEngine;
-use crate::tui;
+use crate::memory::MemoryStore;
+use crate::skills::SkillRegistry;
+use crate::{context_mcp, fun_mcp, native_materializer, skill_registry_cache, tui};
 
 pub async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -39,10 +41,23 @@ pub async fn run() -> Result<()> {
                     return Ok(());
                 }
             }
+            "context-mcp" => {
+                return context_mcp::run_stdio();
+            }
+            "fun-mcp" => {
+                return fun_mcp::run_stdio();
+            }
+            "native-materialize" => {
+                return run_native_materialize(&args[1..]);
+            }
+            "skill" => {
+                return run_skill_command(&args[1..]).await;
+            }
             "__daemon" => {
                 let config = config::read_config()?;
                 let daemon_addr = agent::daemon_addr();
-                return agent::run_daemon(config, &daemon_addr, acp::DEFAULT_TIMEOUT_MS, false).await;
+                return agent::run_daemon(config, &daemon_addr, acp::DEFAULT_TIMEOUT_MS, false)
+                    .await;
             }
             "check" => {
                 let use_daemon = has_daemon_flag(&args[1..]);
@@ -110,16 +125,129 @@ fn print_route_timing(
 
 fn print_help() {
     println!(
-        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench-cold [rounds] [--daemon|-d]\n  iota bench-warm [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
+        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench-cold [rounds] [--daemon|-d]\n  iota bench-warm [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota context-mcp\n  iota fun-mcp\n  iota native-materialize --dry-run <path> <content>\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
     );
 }
 
+async fn run_skill_command(args: &[String]) -> Result<()> {
+    match args.first().map(String::as_str) {
+        Some("pull") => {
+            let source = args
+                .get(1)
+                .context("skill pull requires a source path or URL")?;
+            let name = args.get(2).map(String::as_str);
+            let path = skill_registry_cache::pull_skill(source, name).await?;
+            println!(
+                "{}",
+                serde_json::json!({"path": path.display().to_string()})
+            );
+            Ok(())
+        }
+        _ => anyhow::bail!("Usage: iota skill pull <source> [name]"),
+    }
+}
+
+fn run_native_materialize(args: &[String]) -> Result<()> {
+    let dry_run = args.iter().any(|arg| arg == "--dry-run");
+    let backend = args
+        .windows(2)
+        .find_map(|pair| (pair[0] == "--backend").then_some(pair[1].as_str()))
+        .map(acp::AcpBackend::parse)
+        .transpose()?;
+    let positional = args
+        .iter()
+        .enumerate()
+        .filter(|(index, arg)| {
+            arg.as_str() != "--dry-run"
+                && arg.as_str() != "--all"
+                && arg.as_str() != "--backend"
+                && index
+                    .checked_sub(1)
+                    .is_none_or(|prev| args[prev] != "--backend")
+        })
+        .map(|(_, arg)| arg)
+        .collect::<Vec<_>>();
+    let body = positional
+        .get(1)
+        .map(|value| value.as_str())
+        .unwrap_or("iota native overlay");
+    if args.iter().any(|arg| arg == "--all") {
+        let backend = backend.context("native-materialize --all requires --backend <name>")?;
+        let workspace = positional
+            .first()
+            .map(std::path::PathBuf::from)
+            .unwrap_or(std::env::current_dir()?);
+        let config = config::read_config()?;
+        let roots = config::context_skill_roots(&config);
+        let skills = SkillRegistry::load(&workspace, &roots);
+        let memory = config::context_memory_db_path(&config)
+            .ok()
+            .and_then(|path| MemoryStore::open(&path).ok());
+        let previews = native_materializer::dry_run_backend_projection(
+            backend,
+            &workspace,
+            memory.as_ref(),
+            Some(&skills),
+        )?;
+        if dry_run {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "previews": previews.iter().map(|preview| serde_json::json!({
+                        "path": preview.path.display().to_string(),
+                        "changed": preview.changed,
+                        "content": preview.content,
+                    })).collect::<Vec<_>>()
+                })
+            );
+        } else {
+            let changed = previews
+                .iter()
+                .map(|preview| native_materializer::apply(&preview.path, &preview.content))
+                .collect::<Result<Vec<_>>>()?;
+            println!("{}", serde_json::json!({"changed": changed}));
+        }
+        return Ok(());
+    }
+    let path = if let Some(backend) = backend {
+        let workspace = positional
+            .first()
+            .map(std::path::PathBuf::from)
+            .unwrap_or(std::env::current_dir()?);
+        native_materializer::backend_memory_path(backend, &workspace)?
+            .context("native materialization for this backend is deferred")?
+    } else {
+        positional
+            .first()
+            .map(std::path::PathBuf::from)
+            .context("native-materialize requires a target path or --backend <name>")?
+    };
+    if dry_run {
+        let preview = native_materializer::dry_run(&path, body)?;
+        println!(
+            "{}",
+            serde_json::json!({
+                "path": preview.path.display().to_string(),
+                "changed": preview.changed,
+                "content": preview.content,
+            })
+        );
+    } else {
+        let changed = native_materializer::apply(&path, body)?;
+        println!(
+            "{}",
+            serde_json::json!({"path": path.display().to_string(), "changed": changed})
+        );
+    }
+    Ok(())
+}
 
 async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Result<()> {
     let request = DaemonPromptRequest {
         backend: options.backend.to_string(),
         cwd: options.cwd.display().to_string(),
         prompt: options.prompt.clone(),
+        execution_id: None,
         timeout_ms: Some(options.timeout_ms),
         trace_timing: options.trace_timing,
     };
@@ -217,9 +345,9 @@ async fn wait_for_daemon(addr: &str) -> Result<()> {
 }
 
 fn has_daemon_flag(args: &[String]) -> bool {
-    args.iter().any(|arg| arg == "--daemon" || arg == "-d" || arg == "--require-daemon")
+    args.iter()
+        .any(|arg| arg == "--daemon" || arg == "-d" || arg == "--require-daemon")
 }
-
 
 fn parse_rounds(args: &[String]) -> Option<usize> {
     args.iter()
@@ -335,6 +463,7 @@ async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) -> Result<()>
                 backend: backend.to_string(),
                 cwd: cwd.display().to_string(),
                 prompt: "ping".to_string(),
+                execution_id: None,
                 timeout_ms: Some(acp::DEFAULT_TIMEOUT_MS),
                 trace_timing: false,
             };
@@ -353,7 +482,9 @@ async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) -> Result<()>
                         "{} daemon round {} failed: {}",
                         backend,
                         round,
-                        response.error.unwrap_or_else(|| "unknown daemon error".to_string())
+                        response
+                            .error
+                            .unwrap_or_else(|| "unknown daemon error".to_string())
                     );
                 }
                 Err(err) => eprintln!("{} daemon round {} failed: {}", backend, round, err),
@@ -388,4 +519,3 @@ async fn run_warm_benchmark(config: NimiaConfig, rounds: usize) -> Result<()> {
     engine.shutdown().await;
     Ok(())
 }
-

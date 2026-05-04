@@ -1,0 +1,201 @@
+#![allow(dead_code)]
+
+use anyhow::{Context, Result};
+use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ApprovalDimension {
+    Shell,
+    FileOutsideWorkspace,
+    Network,
+    McpExternal,
+    PrivilegeEscalation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalPolicyDecision {
+    pub approved: bool,
+    pub reason: String,
+}
+
+#[derive(Clone)]
+pub struct ApprovalStore {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl ApprovalStore {
+    pub fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
+        }
+        let conn = Connection::open(path)
+            .with_context(|| format!("Failed to open approval store {}", path.display()))?;
+        let store = Self {
+            conn: Arc::new(Mutex::new(conn)),
+        };
+        store.init()?;
+        Ok(store)
+    }
+
+    pub fn default_path() -> Result<PathBuf> {
+        let home = dirs::home_dir().context("Failed to get home directory")?;
+        Ok(home.join(".i6").join("context").join("approvals.sqlite"))
+    }
+
+    pub fn open_default() -> Result<Self> {
+        Self::open(&Self::default_path()?)
+    }
+
+    pub fn record_request(
+        &self,
+        execution_id: Option<&str>,
+        backend: &str,
+        tool_name: &str,
+        payload: &Value,
+    ) -> Result<String> {
+        let request_id = Uuid::new_v4().to_string();
+        let payload_json = serde_json::to_string(payload)?;
+        let conn = self.conn.lock().expect("approval store mutex poisoned");
+        conn.execute(
+            "INSERT INTO approval_requests (request_id, execution_id, backend, tool_name, payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![request_id, execution_id, backend, tool_name, payload_json, now_ts()],
+        )?;
+        Ok(request_id)
+    }
+
+    pub fn record_decision(&self, request_id: &str, approved: bool, reason: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("approval store mutex poisoned");
+        conn.execute(
+            "INSERT INTO approval_decisions (request_id, approved, reason, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![request_id, approved, reason, now_ts()],
+        )?;
+        Ok(())
+    }
+
+    fn init(&self) -> Result<()> {
+        let conn = self.conn.lock().expect("approval store mutex poisoned");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS approval_requests (
+  request_id TEXT PRIMARY KEY,
+  execution_id TEXT,
+  backend TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS approval_decisions (
+  request_id TEXT NOT NULL,
+  approved INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(request_id) REFERENCES approval_requests(request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_approval_decisions_order ON approval_decisions(request_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_execution ON approval_requests(execution_id, created_at);",
+        )?;
+        let _ = conn.execute("ALTER TABLE approval_requests ADD COLUMN execution_id TEXT", []);
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_approval_requests_execution ON approval_requests(execution_id, created_at)",
+            [],
+        );
+        Ok(())
+    }
+}
+
+pub fn classify_operation(tool_name: &str, payload: &serde_json::Value) -> Vec<ApprovalDimension> {
+    let mut dimensions = Vec::new();
+    let normalized = tool_name.to_lowercase();
+    let payload_text = payload.to_string().to_lowercase();
+    if normalized.contains("shell") || normalized.contains("bash") || normalized.contains("exec") {
+        dimensions.push(ApprovalDimension::Shell);
+    }
+    if payload_text.contains("http://")
+        || payload_text.contains("https://")
+        || normalized.contains("network")
+    {
+        dimensions.push(ApprovalDimension::Network);
+    }
+    if normalized.starts_with("mcp") || normalized.contains("external") {
+        dimensions.push(ApprovalDimension::McpExternal);
+    }
+    if payload_text.contains("..")
+        || payload_text.contains("/etc/")
+        || payload_text.contains("c:\\\\windows")
+    {
+        dimensions.push(ApprovalDimension::FileOutsideWorkspace);
+    }
+    if payload_text.contains("sudo")
+        || payload_text.contains("administrator")
+        || payload_text.contains("privilege")
+    {
+        dimensions.push(ApprovalDimension::PrivilegeEscalation);
+    }
+    dimensions
+}
+
+pub fn default_decision(dimensions: &[ApprovalDimension]) -> ApprovalPolicyDecision {
+    if dimensions.is_empty() {
+        return ApprovalPolicyDecision {
+            approved: false,
+            reason: "manual approval required".to_string(),
+        };
+    }
+    ApprovalPolicyDecision {
+        approved: false,
+        reason: format!("manual approval required for {:?}", dimensions),
+    }
+}
+
+fn now_ts() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::OptionalExtension;
+    use serde_json::json;
+
+    #[test]
+    fn records_request_with_execution_id_before_decision() {
+        let store = ApprovalStore::open(Path::new(":memory:")).unwrap();
+        let request_id = store
+            .record_request(Some("exec-1"), "codex", "shell", &json!({"command":"echo hi"}))
+            .unwrap();
+        store
+            .record_decision(&request_id, true, "test decision")
+            .unwrap();
+
+        let conn = store.conn.lock().expect("approval store mutex poisoned");
+        let execution_id = conn
+            .query_row(
+                "SELECT execution_id FROM approval_requests WHERE request_id = ?1",
+                params![request_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .unwrap()
+            .flatten();
+        assert_eq!(execution_id.as_deref(), Some("exec-1"));
+
+        let approved = conn
+            .query_row(
+                "SELECT approved FROM approval_decisions WHERE request_id = ?1",
+                params![request_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(approved, 1);
+    }
+}

@@ -173,3 +173,64 @@ iota (no args) → tui::run()
 | HTTP API | app.rs | 接入 IotaEngine，类似 agent.rs 但用 HTTP |
 | 并行 prompt | engine.rs | 替换 Mutex 为 per-backend lock 或 actor |
 | 持久化 session | acp.rs | session resume protocol (ACP spec 扩展) |
+
+
+## Module Growth Plan
+
+The current repository is still small enough to keep top-level modules, but the Context Fabric work is adding persistent stores, protocol adapters, MCP servers, skill execution, and TUI components. New code should follow these boundaries before doing a directory split.
+
+### Near-term Layout Rules
+
+- Keep `engine.rs` as the orchestration facade only. It may coordinate context, memory, skills, events, ledger, and ACP clients, but detailed store queries and protocol parsing must stay in their owning modules.
+- Keep `acp.rs` protocol-focused. It may parse ACP wire messages and return `RuntimeEvent`s, but it must not open SQLite stores or know about `IotaEngine`.
+- Keep persistent storage modules independent: `event_store.rs`, `memory.rs`, `approval.rs`, and `session_ledger.rs` must not depend on CLI, TUI, ACP client state, or daemon internals.
+- Keep MCP surfaces separate: `context_mcp.rs` is the backend-callable sidecar, `mcp_client.rs` is the engine-side client, `mcp_router.rs` is the ACP interception router, and `fun_mcp.rs` is the deterministic function tool server.
+- Keep TUI code under `src/tui/` when it is display/input state. The top-level `tui.rs` should remain the runtime loop and composition point.
+
+### Future Directory Split
+
+When a top-level file crosses roughly 600-800 lines or starts exposing unrelated public APIs, split by domain instead of by utility type:
+
+```text
+src/
+  protocol/
+    mod.rs          # re-export AcpBackend, AcpClient, timing types
+    acp.rs          # JSON-RPC process driver
+    mcp_client.rs   # stdio MCP client
+    mcp_router.rs   # backend tool-call interception
+  context/
+    mod.rs          # ContextEngine facade
+    capsule.rs      # prompt composition and budgets
+    memory.rs       # MemoryStore and recall
+    skills.rs       # SkillRegistry and SKILL.md parsing
+    skill_runner.rs # engine-run deterministic skills
+    materialize.rs  # native projections
+  store/
+    mod.rs
+    events.rs
+    approvals.rs
+    sessions.rs
+  service/
+    mod.rs
+    engine.rs
+    agent.rs
+  ui/
+    cli.rs
+    tui.rs
+    tui/...
+```
+
+This split should be mechanical: move code without changing behavior, add `pub use` re-exports for stable call sites, then clean imports in a separate commit. Avoid moving code in the same change that modifies ACP/event/memory semantics.
+
+### Dependency Direction After Split
+
+```text
+ui -> service -> protocol
+ui -> service -> context -> store
+service -> context, protocol, store
+protocol -> runtime_event, approval policy types only when needed
+store -> runtime_event or plain data models
+config -> no project modules except backend enum type during the current flat phase
+```
+
+The main rule is that source-of-truth stores stay below orchestration. Protocol code emits facts; service code decides what to persist; UI code never talks to SQLite directly except for explicit inspection commands.

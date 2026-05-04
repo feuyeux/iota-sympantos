@@ -31,6 +31,8 @@ pub struct DaemonPromptRequest {
     pub backend: String,
     pub cwd: String,
     pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
@@ -227,7 +229,12 @@ async fn handle_prompt(
         engine.set_timeout_ms(timeout_ms);
     }
     match engine
-        .prompt_in_cwd_timed(backend, cwd, &request.prompt)
+        .prompt_in_cwd_timed_with_execution_id(
+            backend,
+            cwd,
+            &request.prompt,
+            request.execution_id.as_deref(),
+        )
         .await
     {
         Ok(output) => DaemonPromptResponse {
