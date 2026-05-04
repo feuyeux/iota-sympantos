@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::sync::OnceLock;
 use tokio::io::AsyncWriteExt;
 use tokio::process::ChildStdin;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::approval::{self, ApprovalStore};
 use crate::runtime_event::ApprovalDecisionEvent;
@@ -21,12 +21,25 @@ pub struct ApprovalRequest {
 }
 
 /// When the TUI is active it installs a sender here; permission handling uses it
-/// instead of blocking stdin.
-static TUI_APPROVAL_TX: OnceLock<mpsc::Sender<ApprovalRequest>> = OnceLock::new();
+/// instead of blocking stdin.  Uses tokio::sync::RwLock so the channel can be
+/// replaced when the TUI restarts within the same process, and reads never block
+/// the tokio worker thread.
+static TUI_APPROVAL_TX: OnceLock<RwLock<Option<mpsc::Sender<ApprovalRequest>>>> = OnceLock::new();
 
-/// Call once before starting the TUI event loop.
+fn approval_lock() -> &'static RwLock<Option<mpsc::Sender<ApprovalRequest>>> {
+    TUI_APPROVAL_TX.get_or_init(|| RwLock::new(None))
+}
+
+/// Install (or replace) the approval channel.  Call before starting the TUI event loop.
 pub fn install_tui_approval_channel(tx: mpsc::Sender<ApprovalRequest>) {
-    let _ = TUI_APPROVAL_TX.set(tx);
+    // Use blocking_write so this can be called from sync context (e.g. TUI setup).
+    *approval_lock().blocking_write() = Some(tx);
+}
+
+/// Remove the approval channel (e.g. when the TUI exits).
+#[allow(dead_code)]
+pub fn uninstall_tui_approval_channel() {
+    *approval_lock().blocking_write() = None;
 }
 
 pub async fn answer_permission_request(
@@ -42,7 +55,11 @@ pub async fn answer_permission_request(
         .unwrap_or("tool")
         .to_string();
 
-    let approved = if let Some(tx) = TUI_APPROVAL_TX.get() {
+    // Read the channel once to avoid holding the lock across .await points and
+    // to prevent double-locking (tokio::sync::RwLock is not reentrant).
+    let tui_tx: Option<mpsc::Sender<ApprovalRequest>> = approval_lock().read().await.clone();
+
+    let approved = if let Some(tx) = tui_tx.clone() {
         let (reply_tx, reply_rx) = oneshot::channel();
         let req = ApprovalRequest {
             tool_name: tool_name.clone(),
@@ -76,7 +93,8 @@ pub async fn answer_permission_request(
         result
     };
 
-    if TUI_APPROVAL_TX.get().is_some() {
+    let via_tui = tui_tx.is_some();
+    if via_tui {
         if let Ok(store) = ApprovalStore::open_default() {
             if let Ok(request_id) = store.record_request(execution_id, "acp", &tool_name, &params) {
                 let _ = store.record_decision(&request_id, approved, "tui user decision");
@@ -91,7 +109,7 @@ pub async fn answer_permission_request(
             .map(str::to_string)
             .unwrap_or_else(|| id.to_string()),
         approved,
-        reason: Some(if TUI_APPROVAL_TX.get().is_some() {
+        reason: Some(if via_tui {
             "tui user decision".to_string()
         } else {
             "interactive user decision".to_string()

@@ -120,6 +120,10 @@ impl SkillRegistry {
         self.skills.clear();
         self.diagnostics.clear();
         let roots = self.roots.clone();
+        // Iterate roots in *reverse* priority order so that higher-priority roots
+        // (lower index, e.g. workspace at index 0) are processed last and their
+        // entries win on BTreeMap::insert collision.  The `priority` field stored
+        // on each Skill reflects the original index (0 = highest priority).
         for (priority, root) in roots.iter().enumerate().rev() {
             if !root.exists() {
                 continue;
@@ -223,6 +227,12 @@ pub fn render_template(skill: &Skill, prompt: &str) -> String {
 }
 
 fn collect_skill_files(root: &Path) -> Result<Vec<PathBuf>> {
+    collect_skill_files_depth(root, 0)
+}
+
+const MAX_SKILL_DIR_DEPTH: usize = 8;
+
+fn collect_skill_files_depth(root: &Path, depth: usize) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !root.exists() {
         return Ok(files);
@@ -231,7 +241,9 @@ fn collect_skill_files(root: &Path) -> Result<Vec<PathBuf>> {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            files.extend(collect_skill_files(&path)?);
+            if depth < MAX_SKILL_DIR_DEPTH {
+                files.extend(collect_skill_files_depth(&path, depth + 1)?);
+            }
         } else if path
             .extension()
             .and_then(|value| value.to_str())
@@ -315,6 +327,10 @@ fn roots_signature(roots: &[PathBuf]) -> String {
 }
 
 fn latest_mtime(path: &Path) -> Option<u128> {
+    latest_mtime_depth(path, 0)
+}
+
+fn latest_mtime_depth(path: &Path, depth: usize) -> Option<u128> {
     if !path.exists() {
         return Some(0);
     }
@@ -324,10 +340,10 @@ fn latest_mtime(path: &Path) -> Option<u128> {
         .and_then(|metadata| metadata.modified().ok())
         .and_then(system_time_ms)
         .unwrap_or(0);
-    if path.is_dir() {
+    if path.is_dir() && depth < MAX_SKILL_DIR_DEPTH {
         if let Ok(entries) = fs::read_dir(path) {
             for entry in entries.flatten() {
-                latest = latest.max(latest_mtime(&entry.path()).unwrap_or(0));
+                latest = latest.max(latest_mtime_depth(&entry.path(), depth + 1).unwrap_or(0));
             }
         }
     }

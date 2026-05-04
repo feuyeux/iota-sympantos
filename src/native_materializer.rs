@@ -50,7 +50,23 @@ pub fn backend_skill_path(
     skill_name: &str,
 ) -> Result<Option<PathBuf>> {
     let home = dirs::home_dir().context("Failed to get home directory")?;
-    let safe_name = skill_name.replace(['/', '\\'], "-");
+    // Sanitize the skill name so it is safe to use as a filesystem path segment:
+    // keep only alphanumeric characters, hyphens, and underscores; replace
+    // everything else (including path separators, `.`, spaces, Windows reserved
+    // characters such as `:` `*` `?` `"` `<` `>` `|`) with a hyphen.
+    // This also prevents path traversal via `..` components.
+    let safe_name: String = skill_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    // Truncate to 64 characters to avoid overly long path components.
+    let safe_name = &safe_name[..safe_name.len().min(64)];
     let path = match backend {
         AcpBackend::ClaudeCode => workspace
             .join(".claude")

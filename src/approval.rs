@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use crate::utils::now_ts;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ApprovalDimension {
     Shell,
     FileOutsideWorkspace,
@@ -62,7 +63,7 @@ impl ApprovalStore {
     ) -> Result<String> {
         let request_id = Uuid::new_v4().to_string();
         let payload_json = serde_json::to_string(payload)?;
-        let conn = self.conn.lock().expect("approval store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO approval_requests (request_id, execution_id, backend, tool_name, payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![request_id, execution_id, backend, tool_name, payload_json, now_ts()],
@@ -71,7 +72,7 @@ impl ApprovalStore {
     }
 
     pub fn record_decision(&self, request_id: &str, approved: bool, reason: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("approval store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO approval_decisions (request_id, approved, reason, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![request_id, approved, reason, now_ts()],
@@ -80,7 +81,8 @@ impl ApprovalStore {
     }
 
     fn init(&self) -> Result<()> {
-        let conn = self.conn.lock().expect("approval store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS approval_requests (
   request_id TEXT PRIMARY KEY,
@@ -100,7 +102,10 @@ CREATE TABLE IF NOT EXISTS approval_decisions (
 CREATE INDEX IF NOT EXISTS idx_approval_decisions_order ON approval_decisions(request_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_approval_requests_execution ON approval_requests(execution_id, created_at);",
         )?;
-        let _ = conn.execute("ALTER TABLE approval_requests ADD COLUMN execution_id TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE approval_requests ADD COLUMN execution_id TEXT",
+            [],
+        );
         let _ = conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_approval_requests_execution ON approval_requests(execution_id, created_at)",
             [],
@@ -112,31 +117,72 @@ CREATE INDEX IF NOT EXISTS idx_approval_requests_execution ON approval_requests(
 pub fn classify_operation(tool_name: &str, payload: &serde_json::Value) -> Vec<ApprovalDimension> {
     let mut dimensions = Vec::new();
     let normalized = tool_name.to_lowercase();
-    let payload_text = payload.to_string().to_lowercase();
+
+    // ── Tool-name-based checks ────────────────────────────────────────────────
     if normalized.contains("shell") || normalized.contains("bash") || normalized.contains("exec") {
         dimensions.push(ApprovalDimension::Shell);
-    }
-    if payload_text.contains("http://")
-        || payload_text.contains("https://")
-        || normalized.contains("network")
-    {
-        dimensions.push(ApprovalDimension::Network);
     }
     if normalized.starts_with("mcp") || normalized.contains("external") {
         dimensions.push(ApprovalDimension::McpExternal);
     }
-    if payload_text.contains("..")
-        || payload_text.contains("/etc/")
-        || payload_text.contains("c:\\\\windows")
-    {
-        dimensions.push(ApprovalDimension::FileOutsideWorkspace);
+    if normalized.contains("network") {
+        dimensions.push(ApprovalDimension::Network);
     }
-    if payload_text.contains("sudo")
-        || payload_text.contains("administrator")
-        || payload_text.contains("privilege")
-    {
-        dimensions.push(ApprovalDimension::PrivilegeEscalation);
+
+    // ── Payload field-based checks (structured, not full-JSON string match) ───
+    // Collect only the specific string fields that carry path / command / URL
+    // values to avoid false positives from unrelated text in the payload.
+    let mut field_values: Vec<String> = Vec::new();
+    for key in &[
+        "command",
+        "cmd",
+        "path",
+        "file",
+        "url",
+        "uri",
+        "target",
+        "destination",
+    ] {
+        if let Some(v) = payload.get(key).and_then(|v| v.as_str()) {
+            field_values.push(v.to_lowercase());
+        }
     }
+    // Also check top-level string payload if the whole value is a string.
+    if let Some(v) = payload.as_str() {
+        field_values.push(v.to_lowercase());
+    }
+
+    for value in &field_values {
+        if value.contains("http://") || value.contains("https://") || value.contains("ftp://") {
+            if !dimensions.contains(&ApprovalDimension::Network) {
+                dimensions.push(ApprovalDimension::Network);
+            }
+        }
+        // Path traversal / system directory access
+        if value.contains("../")
+            || value.contains("..\\")
+            || value.starts_with("/etc/")
+            || value.starts_with("/root/")
+            || value.contains("c:\\windows")
+            || value.contains("c:/windows")
+        {
+            if !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace) {
+                dimensions.push(ApprovalDimension::FileOutsideWorkspace);
+            }
+        }
+        // Privilege escalation indicators
+        if value.starts_with("sudo ")
+            || value.contains(" sudo ")
+            || value.contains("runas")
+            || value.contains("administrator")
+            || value.contains("privilege")
+        {
+            if !dimensions.contains(&ApprovalDimension::PrivilegeEscalation) {
+                dimensions.push(ApprovalDimension::PrivilegeEscalation);
+            }
+        }
+    }
+
     dimensions
 }
 
@@ -153,14 +199,6 @@ pub fn default_decision(dimensions: &[ApprovalDimension]) -> ApprovalPolicyDecis
     }
 }
 
-fn now_ts() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,13 +209,18 @@ mod tests {
     fn records_request_with_execution_id_before_decision() {
         let store = ApprovalStore::open(Path::new(":memory:")).unwrap();
         let request_id = store
-            .record_request(Some("exec-1"), "codex", "shell", &json!({"command":"echo hi"}))
+            .record_request(
+                Some("exec-1"),
+                "codex",
+                "shell",
+                &json!({"command":"echo hi"}),
+            )
             .unwrap();
         store
             .record_decision(&request_id, true, "test decision")
             .unwrap();
 
-        let conn = store.conn.lock().expect("approval store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&store.conn);
         let execution_id = conn
             .query_row(
                 "SELECT execution_id FROM approval_requests WHERE request_id = ?1",

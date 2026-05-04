@@ -20,7 +20,6 @@ use crate::acp_wire::{
 use crate::mcp_router;
 use crate::runtime_event::{self, RuntimeEvent};
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AcpBackend {
     ClaudeCode,
@@ -118,6 +117,7 @@ pub struct AcpPromptOutput {
     pub text: String,
     pub timing: AcpPromptTiming,
     pub backend_session_id: Option<String>,
+    pub execution_id: Option<String>,
     pub events: Vec<RuntimeEvent>,
 }
 
@@ -126,6 +126,7 @@ impl AcpPromptOutput {
         Self {
             text,
             backend_session_id: None,
+            execution_id: None,
             events: Vec::new(),
             timing: AcpPromptTiming {
                 client_started: false,
@@ -294,7 +295,7 @@ where
             continue;
         };
 
-        if let Some(event) = runtime_event::map_acp_event(method, message.params.as_ref()) {
+        for event in runtime_event::map_acp_events(method, message.params.as_ref()) {
             events.push(event);
         }
 
@@ -319,13 +320,9 @@ where
             "session/request_permission" | "request_permission" | "permission/request" => {
                 let id = permission_request_id(&message)?;
                 let params = message.params.clone().unwrap_or(Value::Null);
-                let decision = acp_permission::answer_permission_request(
-                    stdin,
-                    id,
-                    params,
-                    execution_id,
-                )
-                .await?;
+                let decision =
+                    acp_permission::answer_permission_request(stdin, id, params, execution_id)
+                        .await?;
                 events.push(RuntimeEvent::ApprovalDecision(decision));
             }
             _ => {
@@ -392,6 +389,7 @@ impl AcpClient {
         }
 
         let spawn_started = Instant::now();
+        tracing::debug!(backend = %backend, command = %executable, "starting ACP backend process");
         let mut child = TokioCommand::new(executable)
             .args(&args)
             .envs(&env)
@@ -403,6 +401,7 @@ impl AcpClient {
             .spawn()
             .with_context(|| format!("Failed to start ACP backend '{}'", backend))?;
         let process_spawn_ms = elapsed_ms(spawn_started);
+        tracing::debug!(backend = %backend, process_spawn_ms, "ACP backend process spawned");
 
         let mut stdin = child
             .stdin
@@ -448,6 +447,7 @@ impl AcpClient {
         .await
         .unwrap_or_else(|_| Err(anyhow!("ACP initialize timed out after {}ms", timeout_ms)));
         let init_ms = elapsed_ms(init_started);
+        tracing::debug!(backend = %backend, init_ms, "ACP backend initialized");
 
         if let Err(err) = init_result {
             let _ = stdin.shutdown().await;
@@ -484,6 +484,7 @@ impl AcpClient {
         self.prompt_counter += 1;
         let result = timeout(Duration::from_millis(self.timeout_ms), async {
             let session = self.ensure_session_timed(cwd).await?;
+            tracing::debug!(backend = %self.backend, session_reused = session.reused, session_new_ms = session.session_new_ms, "ACP session resolved");
             let id = format!("prompt:{}", self.prompt_counter);
             let prompt_started = Instant::now();
             send_request(
@@ -507,6 +508,7 @@ impl AcpClient {
                 execution_id,
             )
             .await?;
+            tracing::debug!(backend = %self.backend, prompt_ms = elapsed_ms(prompt_started), events = events.len(), "ACP prompt completed");
             Ok::<_, anyhow::Error>((
                 text,
                 events,
@@ -522,6 +524,7 @@ impl AcpClient {
         Ok(AcpPromptOutput {
             text,
             backend_session_id: Some(backend_session_id),
+            execution_id: None,
             events,
             timing: AcpPromptTiming {
                 client_started: false,
@@ -698,7 +701,6 @@ where
     ))
 }
 
-
 fn text_from_session_update(params: Option<&Value>) -> Option<String> {
     let params = params?;
     let update = params.get("update").unwrap_or(params);
@@ -721,7 +723,7 @@ fn extract_final_text(value: &Value) -> Option<String> {
         .or_else(|| extract_text(value))
 }
 
-fn extract_text(value: &Value) -> Option<String> {
+pub fn extract_text(value: &Value) -> Option<String> {
     if let Some(text) = value.as_str() {
         return Some(text.to_string());
     }
@@ -755,9 +757,6 @@ fn is_terminal_result(result: &Value) -> bool {
     result.get("stopReason").and_then(Value::as_str).is_some() || extract_text(result).is_some()
 }
 
-
-
-
 fn permission_request_id(message: &AcpWireMessage) -> Result<Value> {
     message
         .id
@@ -784,13 +783,8 @@ fn read_prompt_from_stdin() -> Result<String> {
 }
 
 fn is_backend_alias(value: &str) -> bool {
-    match value {
-        "claude" | "claude-code" | "claudecode" | "codex" | "gemini" | "gemini-cli" | "hermes"
-        | "hermes-agent" | "opencode" | "open-code" => true,
-        _ => false,
-    }
+    AcpBackend::parse(value).is_ok()
 }
-
 
 fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)

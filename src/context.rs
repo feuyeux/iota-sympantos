@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::acp::AcpBackend;
 use crate::config::ContextEngineConfig;
@@ -196,11 +196,16 @@ fn push_memory_section(output: &mut String, name: &str, records: &[MemoryRecord]
 }
 
 fn render_workspace(cwd: &Path) -> String {
+    // Run `git status --short` synchronously.  This function is called from
+    // the async engine path; callers are responsible for wrapping this in
+    // `spawn_blocking` when the runtime budget matters.
     let mut changed = Vec::new();
     if let Ok(output) = std::process::Command::new("git")
-        .arg("status")
-        .arg("--short")
+        .args(["status", "--short"])
         .current_dir(cwd)
+        // Prevent git from opening an editor or pager.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat")
         .output()
     {
         if output.status.success() {
@@ -236,22 +241,7 @@ fn trim_section(value: &str, budget: usize) -> String {
 }
 
 fn summarize(value: &str, limit: usize) -> String {
-    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.len() <= limit {
-        compact
-    } else {
-        let mut text = compact
-            .chars()
-            .take(limit.saturating_sub(3))
-            .collect::<String>();
-        text.push_str("...");
-        text
-    }
-}
-
-#[allow(dead_code)]
-fn _normalize_path(path: PathBuf) -> PathBuf {
-    path
+    crate::utils::summarize(value, limit)
 }
 
 #[cfg(test)]

@@ -91,10 +91,6 @@ impl Composer {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty()
-    }
-
     /// Returns true when in Ctrl+R search mode.
     pub fn is_searching(&self) -> bool {
         self.search.is_some()
@@ -486,7 +482,6 @@ impl Composer {
         let mut cur_line = String::new();
         let mut cursor_row = 0;
         let mut cursor_col = 0;
-        let mut gi = 0;
 
         for (idx, &g) in gs.iter().enumerate() {
             if idx == self.cursor {
@@ -499,10 +494,9 @@ impl Composer {
             } else {
                 cur_line.push_str(g);
             }
-            gi = idx + 1;
         }
-        // Cursor at end
-        if gi == self.cursor || self.cursor >= gs.len() {
+        // Cursor at end (past all graphemes)
+        if self.cursor >= gs.len() {
             cursor_row = lines.len();
             cursor_col = grapheme_count(&cur_line);
         }

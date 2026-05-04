@@ -14,6 +14,7 @@ use crate::runtime_event::{ErrorEvent, OutputEvent, RuntimeEvent, StateEvent};
 use crate::session_ledger::SessionLedger;
 use crate::skill_runner;
 use crate::skills::SkillRegistry;
+use crate::utils::summarize;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ClientKey {
@@ -95,6 +96,9 @@ impl IotaEngine {
             .ok()??;
         let deadline =
             tokio::time::Instant::now() + tokio::time::Duration::from_millis(self.timeout_ms);
+        // Poll with exponential back-off (50 ms → 500 ms cap) to avoid busy-wait
+        // while still picking up completion within a reasonable latency budget.
+        let mut poll_interval_ms: u64 = 50;
         loop {
             if let Ok(Some(record)) = store.get_execution(&running.execution_id) {
                 if record.status == "completed" {
@@ -107,7 +111,8 @@ impl IotaEngine {
             if tokio::time::Instant::now() >= deadline {
                 return None;
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval_ms)).await;
+            poll_interval_ms = (poll_interval_ms * 2).min(500);
         }
     }
 
@@ -168,6 +173,7 @@ impl IotaEngine {
                 self.clients.insert(key, client);
             }
         }
+        self.record_active_sessions();
         Ok(self.clients.len())
     }
 
@@ -198,11 +204,16 @@ impl IotaEngine {
         requested_execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
         let request_hash = event_store::request_hash(&backend.to_string(), &cwd, prompt);
+        tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
         if let Some(output) = self.try_replay_completed(backend, &request_hash) {
+            self.record_cache_hit();
+            tracing::info!(backend = %backend, request_hash = %request_hash, "replaying completed execution");
             self.dialogue.push_turn(backend, prompt, &output);
             return Ok(AcpPromptOutput::synthetic(output));
         }
         if let Some(output) = self.try_join_running(backend, &request_hash).await {
+            self.record_cache_hit();
+            tracing::info!(backend = %backend, request_hash = %request_hash, "joined running execution");
             self.dialogue.push_turn(backend, prompt, &output);
             return Ok(AcpPromptOutput::synthetic(output));
         }
@@ -220,6 +231,7 @@ impl IotaEngine {
                     Ok(execution_id) => Some(execution_id),
                     Err(_) => {
                         if let Some(output) = self.try_join_running(backend, &request_hash).await {
+                            self.record_cache_hit();
                             self.dialogue.push_turn(backend, prompt, &output);
                             return Ok(AcpPromptOutput::synthetic(output));
                         }
@@ -229,6 +241,8 @@ impl IotaEngine {
             }
             None => None,
         };
+        self.record_cache_miss();
+        tracing::debug!(backend = %backend, execution_id = execution_id.as_deref(), "execution started");
         self.record_event(
             &execution_id,
             RuntimeEvent::State(StateEvent {
@@ -283,17 +297,31 @@ impl IotaEngine {
                 .recall_buckets("local-user", &cwd.display().to_string(), &self.session_id)
                 .ok()
         });
-        let effective_prompt = self.context_engine.compose_effective_prompt(ComposeInput {
-            backend,
-            cwd: &cwd,
-            session_id: &self.session_id,
-            model: model.as_deref(),
-            prompt,
-            memory: memory.as_ref(),
-            skills: Some(&skills),
-            dialogue: &self.dialogue,
-            handoff: handoff.as_deref(),
-        });
+        // compose_effective_prompt runs `git status` which is a blocking syscall.
+        // Off-load it to the blocking thread pool to avoid stalling the tokio worker.
+        let context_engine = self.context_engine.clone();
+        let session_id_c = self.session_id.clone();
+        let model_c = model.clone();
+        let skills_c = skills.clone();
+        let dialogue_c = self.dialogue.clone();
+        let handoff_c = handoff.clone();
+        let prompt_c = prompt.to_string();
+        let cwd_c = cwd.clone();
+        let effective_prompt = tokio::task::spawn_blocking(move || {
+            context_engine.compose_effective_prompt(ComposeInput {
+                backend,
+                cwd: &cwd_c,
+                session_id: &session_id_c,
+                model: model_c.as_deref(),
+                prompt: &prompt_c,
+                memory: memory.as_ref(),
+                skills: Some(&skills_c),
+                dialogue: &dialogue_c,
+                handoff: handoff_c.as_deref(),
+            })
+        })
+        .await
+        .context("context composition task panicked")?;
 
         let client_started = self.ensure_client(backend, cwd.clone()).await?;
         let key = ClientKey {
@@ -306,14 +334,11 @@ impl IotaEngine {
             .context("ACP client missing after warm")?;
         let startup_timing = client.startup_timing();
         match client
-            .prompt_with_cwd_timed_for_execution(
-                &cwd,
-                &effective_prompt,
-                execution_id.as_deref(),
-            )
+            .prompt_with_cwd_timed_for_execution(&cwd, &effective_prompt, execution_id.as_deref())
             .await
         {
             Ok(mut output) => {
+                output.execution_id = execution_id.clone();
                 output.timing.client_started = client_started;
                 output.timing.process_spawned = client_started;
                 if client_started {
@@ -339,7 +364,8 @@ impl IotaEngine {
                 if let Some(session_id) = output.backend_session_id.as_deref() {
                     self.record_backend_session_id(backend, &cwd, session_id);
                 }
-                self.finish_execution(&execution_id, "completed");
+                self.finish_execution_with_timing(&execution_id, "completed", &output.timing);
+                tracing::info!(backend = %backend, execution_id = execution_id.as_deref(), total_ms = output.timing.total_ms, prompt_ms = output.timing.prompt_ms, "execution completed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
@@ -369,6 +395,7 @@ impl IotaEngine {
                     }),
                 );
                 self.finish_execution(&execution_id, "failed");
+                tracing::warn!(backend = %backend, execution_id = execution_id.as_deref(), error = %err, "execution failed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
@@ -396,6 +423,7 @@ impl IotaEngine {
         while let Some((_, client)) = self.clients.pop_first() {
             client.shutdown().await;
         }
+        self.record_active_sessions();
     }
 
     pub fn clients_count(&self) -> usize {
@@ -413,6 +441,7 @@ impl IotaEngine {
         while let Some((_, client)) = self.clients.pop_first() {
             client.shutdown().await;
         }
+        self.record_active_sessions();
     }
 
     fn try_replay_completed(&self, backend: AcpBackend, request_hash: &str) -> Option<String> {
@@ -508,12 +537,43 @@ impl IotaEngine {
 
     fn record_event(&self, execution_id: &Option<String>, event: RuntimeEvent) {
         if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
+            tracing::debug!(execution_id = %execution_id, event_type = event.event_type(), "recording runtime event");
             let _ = store.append_event(execution_id, &event);
+        }
+    }
+
+    fn record_cache_hit(&self) {
+        if let Some(store) = &self.event_store {
+            let _ = store.record_cache_hit();
+        }
+    }
+
+    fn record_cache_miss(&self) {
+        if let Some(store) = &self.event_store {
+            let _ = store.record_cache_miss();
+        }
+    }
+
+    fn record_active_sessions(&self) {
+        if let Some(store) = &self.event_store {
+            let _ = store.set_active_sessions(self.clients.len() as u64);
         }
     }
 
     fn finish_execution(&self, execution_id: &Option<String>, status: &str) {
         if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
+            let _ = store.finish_execution(execution_id, status);
+        }
+    }
+
+    fn finish_execution_with_timing(
+        &self,
+        execution_id: &Option<String>,
+        status: &str,
+        timing: &acp::AcpPromptTiming,
+    ) {
+        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
+            let _ = store.record_timing(execution_id, timing);
             let _ = store.finish_execution(execution_id, status);
         }
     }
@@ -536,6 +596,12 @@ impl IotaEngine {
         if !explicit {
             return;
         }
+        // Strip the trigger keywords to derive content.
+        // NOTE: This is keyword-based extraction and is intentionally imprecise.
+        // Phrases such as "remember to clean up" will store "to clean up" as a
+        // memory item.  The confidence is set below 1.0 to reflect this
+        // uncertainty.  A future implementation should delegate extraction to
+        // the LLM itself for more accurate structured results.
         let content = prompt
             .replace("remember", "")
             .replace("save this", "")
@@ -546,6 +612,8 @@ impl IotaEngine {
         if content.is_empty() {
             return;
         }
+        // Facet is also heuristic: keyword matches on common English/Chinese
+        // terms.  Misclassification is possible; confidence reflects this.
         let (facet, scope) =
             if lower.contains("prefer") || lower.contains("偏好") || lower.contains("喜欢") {
                 (MemoryFacet::Preference, MemoryScope::User)
@@ -569,11 +637,12 @@ impl IotaEngine {
             scope,
             scope_id,
             content,
-            confidence: 0.9,
+            // 0.70 rather than 0.90: heuristic extraction is often imprecise.
+            confidence: 0.70,
             source_backend: Some(backend.to_string()),
             source_session_id: Some(self.session_id.clone()),
             source_execution_id: execution_id.map(str::to_string),
-            metadata_json: Some("{\"extraction\":\"explicit\"}".to_string()),
+            metadata_json: Some("{\"extraction\":\"explicit-keyword\"}".to_string()),
             ttl_days: 365,
             supersedes: None,
         });
@@ -623,6 +692,7 @@ Output: {}",
         match self.clients.entry(key) {
             Entry::Vacant(entry) => {
                 entry.insert(client);
+                self.record_active_sessions();
             }
             Entry::Occupied(_) => {}
         }
@@ -666,19 +736,5 @@ Output: {}",
             self.timeout_ms,
         )
         .await
-    }
-}
-
-fn summarize(value: &str, limit: usize) -> String {
-    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.len() <= limit {
-        compact
-    } else {
-        let mut text = compact
-            .chars()
-            .take(limit.saturating_sub(3))
-            .collect::<String>();
-        text.push_str("...");
-        text
     }
 }

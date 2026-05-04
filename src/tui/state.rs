@@ -2,6 +2,16 @@ use std::collections::VecDeque;
 
 use crate::acp::AcpBackend;
 
+#[derive(Debug, Clone, Default)]
+pub struct ObservabilityMeta {
+    pub execution_id: Option<String>,
+    pub total_ms: Option<u64>,
+    pub prompt_ms: Option<u64>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+}
+
 /// A single entry in the conversation history.
 #[derive(Debug, Clone)]
 pub enum ConversationEntry {
@@ -11,13 +21,10 @@ pub enum ConversationEntry {
     AssistantMessage {
         backend: AcpBackend,
         text: String,
+        observability: Option<ObservabilityMeta>,
     },
     SystemNotice {
         text: String,
-    },
-    ToolCall {
-        name: String,
-        args: String,
     },
     ToolResult {
         name: String,

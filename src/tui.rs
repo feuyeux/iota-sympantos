@@ -30,19 +30,34 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{Mutex as TokioMutex, mpsc};
+use tokio::task::JoinHandle;
 
-use crate::acp::{ALL_BACKENDS, AcpBackend};
+use crate::acp::{ALL_BACKENDS, AcpBackend, AcpPromptOutput};
 use crate::acp_permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
+use crate::event_store::EventStore;
 use composer::{Composer, ComposerAction};
-use state::{ConversationEntry, HistoryState};
+use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 
 type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_HISTORY: usize = 500;
+
+// ── Typed turn message ────────────────────────────────────────────────────────
+
+/// Messages sent from the submit path to the engine dispatch loop.
+#[derive(Debug)]
+enum TurnMessage {
+    Prompt {
+        backend: AcpBackend,
+        cwd: PathBuf,
+        text: String,
+    },
+}
 
 // ── Overlay mode ─────────────────────────────────────────────────────────────
 
@@ -57,7 +72,9 @@ enum Overlay {
 // ── TuiApp ──────────────────────────────────────────────────────────────────
 
 struct TuiApp {
-    engine: IotaEngine,
+    /// Engine is wrapped in Arc<TokioMutex> so engine calls can be spawned
+    /// on a separate task without blocking the TUI event loop.
+    engine: Arc<TokioMutex<IotaEngine>>,
     config: NimiaConfig,
     cwd: PathBuf,
     history: HistoryState,
@@ -66,11 +83,12 @@ struct TuiApp {
     active_model: Option<String>,
     running_turn: bool,
     tick_count: u64,
-    /// Result sender — the spawned task posts its result here.
-    turn_tx: mpsc::Sender<Result<String>>,
-    turn_rx: mpsc::Receiver<Result<String>>,
+    /// Typed channel for submitting prompts to the engine dispatch task.
+    turn_tx: mpsc::Sender<TurnMessage>,
+    turn_rx: mpsc::Receiver<TurnMessage>,
     /// Pending approval request from the ACP layer (shown as an overlay).
     pending_approval: Option<ApprovalRequest>,
+    latest_observability: Option<ObservabilityMeta>,
     /// Streaming output channel — receives partial chunks while engine runs.
     stream_rx: mpsc::Receiver<String>,
     /// Sender side kept so we can re-install it on the engine each turn.
@@ -81,6 +99,10 @@ struct TuiApp {
     streaming_backend: Option<AcpBackend>,
     /// Active overlay (help / pager / quit-confirm).
     overlay: Overlay,
+    /// Currently running engine task, if a turn is active.
+    turn_task: Option<JoinHandle<()>>,
+    /// Cached event store for lightweight TUI observability updates.
+    event_store: Option<EventStore>,
     /// When running_turn is true, when did it start (for elapsed display).
     turn_started_at: Option<std::time::Instant>,
     /// Queued prompt while a turn is running (Tab to queue).
@@ -106,7 +128,11 @@ impl TuiApp {
 
         let active_model = backend_config(&config, active_backend).and_then(configured_model);
 
-        let engine = IotaEngine::new(config.clone(), false, crate::acp::DEFAULT_TIMEOUT_MS);
+        let engine = Arc::new(TokioMutex::new(IotaEngine::new(
+            config.clone(),
+            false,
+            crate::acp::DEFAULT_TIMEOUT_MS,
+        )));
         let (turn_tx, turn_rx) = mpsc::channel(4);
         let (stream_tx, stream_rx) = mpsc::channel::<String>(64);
 
@@ -123,11 +149,16 @@ impl TuiApp {
             turn_tx,
             turn_rx,
             pending_approval: None,
+            latest_observability: None,
             stream_rx,
             stream_tx,
             streaming_text: String::new(),
             streaming_backend: None,
             overlay: Overlay::None,
+            turn_task: None,
+            event_store: EventStore::default_path()
+                .ok()
+                .and_then(|path| EventStore::open(&path).ok()),
             turn_started_at: None,
             queued_prompt: None,
             quit_confirm_tick: None,
@@ -188,6 +219,7 @@ impl TuiApp {
         if self.running_turn {
             // Tab-queue: store for after current turn finishes
             self.queued_prompt = Some(text);
+            self.record_queued_prompts();
             self.history.push(ConversationEntry::SystemNotice {
                 text: "Queued (will send after current turn)".into(),
             });
@@ -199,7 +231,17 @@ impl TuiApp {
         self.running_turn = true;
         self.turn_started_at = Some(std::time::Instant::now());
         let tx = self.turn_tx.clone();
-        let _ = tx.try_send(Err(anyhow::anyhow!("__prompt__:{}", text)));
+        let _ = tx.try_send(TurnMessage::Prompt {
+            backend: self.active_backend,
+            cwd: self.cwd.clone(),
+            text,
+        });
+    }
+
+    fn record_queued_prompts(&self) {
+        if let Some(store) = &self.event_store {
+            let _ = store.set_queued_prompts(u64::from(self.queued_prompt.is_some()));
+        }
     }
 
     // ── render ───────────────────────────────────────────────────────────────
@@ -227,11 +269,11 @@ impl TuiApp {
         let si_height = if self.running_turn { 1 } else { 0 };
 
         let chunks = Layout::vertical([
-            Constraint::Length(1),            // header
-            Constraint::Fill(1),              // history
-            Constraint::Length(si_height),    // status indicator
-            Constraint::Length(3),            // composer / approval
-            Constraint::Length(1),            // status bar
+            Constraint::Length(1),         // header
+            Constraint::Fill(1),           // history
+            Constraint::Length(si_height), // status indicator
+            Constraint::Length(3),         // composer / approval
+            Constraint::Length(1),         // status bar
         ])
         .split(area);
 
@@ -255,6 +297,7 @@ impl TuiApp {
             self.running_turn,
             self.queued_prompt.is_some(),
             matches!(self.overlay, Overlay::QuitConfirm),
+            self.latest_observability.as_ref(),
         );
     }
 
@@ -267,60 +310,7 @@ impl TuiApp {
     }
 
     fn render_history(&self, frame: &mut Frame, area: Rect) {
-        let entries = &self.history.entries;
-        let mut lines: Vec<Line> = Vec::new();
-
-        for entry in entries.iter() {
-            match entry {
-                ConversationEntry::UserMessage { text } => {
-                    lines.push(Line::from(vec![
-                        Span::styled("you  ", theme::user_label_style()),
-                        Span::raw(text.clone()),
-                    ]));
-                    lines.push(Line::raw(""));
-                }
-                ConversationEntry::AssistantMessage { backend, text } => {
-                    lines.push(Line::from(Span::styled(
-                        format!("{}  ", backend),
-                        theme::assistant_label_style(),
-                    )));
-                    for md_line in markdown::render(text) {
-                        let indented = Line::from(
-                            std::iter::once(Span::raw("     "))
-                                .chain(md_line.spans)
-                                .collect::<Vec<_>>(),
-                        );
-                        lines.push(indented);
-                    }
-                    lines.push(Line::raw(""));
-                }
-                ConversationEntry::SystemNotice { text } => {
-                    lines.push(Line::from(Span::styled(
-                        format!("── {} ──", text),
-                        theme::system_notice_style(),
-                    )));
-                    lines.push(Line::raw(""));
-                }
-                ConversationEntry::ToolCall { name, args } => {
-                    lines.push(Line::from(vec![
-                        Span::styled("⚙ ", theme::tool_call_style()),
-                        Span::styled(format!("{}({})", name, args), theme::tool_call_style()),
-                    ]));
-                }
-                ConversationEntry::ToolResult { name, ok, text } => {
-                    let style = if *ok {
-                        theme::tool_result_ok_style()
-                    } else {
-                        theme::tool_result_err_style()
-                    };
-                    let icon = if *ok { "✓" } else { "✗" };
-                    lines.push(Line::from(Span::styled(
-                        format!("{} {} → {}", icon, name, text),
-                        style,
-                    )));
-                }
-            }
-        }
+        let mut lines = render_entries(&self.history.entries);
 
         // Live streaming text while engine responds.
         if self.running_turn && !self.streaming_text.is_empty() {
@@ -328,7 +318,10 @@ impl TuiApp {
                 .streaming_backend
                 .map(|b| format!("{}  ", b))
                 .unwrap_or_else(|| "…  ".to_string());
-            lines.push(Line::from(Span::styled(label, theme::assistant_label_style())));
+            lines.push(Line::from(Span::styled(
+                label,
+                theme::assistant_label_style(),
+            )));
             for md_line in markdown::render(&self.streaming_text) {
                 let indented = Line::from(
                     std::iter::once(Span::raw("     "))
@@ -342,9 +335,9 @@ impl TuiApp {
         let total = lines.len() as u16;
         let viewport_height = area.height;
         let max_scroll = total.saturating_sub(viewport_height) as usize;
+        // scroll_offset == 0 means "pinned to bottom"; increasing it scrolls up.
         let offset = self.history.scroll_offset.min(max_scroll);
-        let scroll_row = total.saturating_sub(viewport_height) as usize;
-        let effective_offset = scroll_row.saturating_sub(offset);
+        let effective_offset = max_scroll.saturating_sub(offset);
 
         let para = Paragraph::new(lines)
             .scroll((effective_offset as u16, 0))
@@ -399,14 +392,8 @@ impl TuiApp {
             .enumerate()
             .map(|(row, line_text)| {
                 if row == cur_row {
-                    let before: String = line_text
-                        .chars()
-                        .take(cur_col)
-                        .collect();
-                    let after: String = line_text
-                        .chars()
-                        .skip(cur_col)
-                        .collect();
+                    let before: String = line_text.chars().take(cur_col).collect();
+                    let after: String = line_text.chars().skip(cur_col).collect();
                     Line::from(vec![
                         Span::raw(before),
                         Span::styled("│", theme::user_label_style()),
@@ -434,7 +421,8 @@ impl TuiApp {
         );
     }
 
-    fn render_approval_overlay(&self, frame: &mut Frame, area: Rect) {        let tool_name = self
+    fn render_approval_overlay(&self, frame: &mut Frame, area: Rect) {
+        let tool_name = self
             .pending_approval
             .as_ref()
             .map(|r| r.tool_name.as_str())
@@ -461,6 +449,151 @@ impl TuiApp {
             Span::styled("deny", theme::assistant_text_style()),
         ]);
         frame.render_widget(Paragraph::new(line), inner);
+    }
+}
+
+fn observability_line(meta: &ObservabilityMeta, sparkline: Option<&str>) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(total_ms) = meta.total_ms {
+        parts.push(format!("total {}ms", total_ms));
+    }
+    if let Some(prompt_ms) = meta.prompt_ms {
+        parts.push(format!("prompt {}ms", prompt_ms));
+    }
+    if let Some(tokens) = meta.total_tokens {
+        parts.push(format!("{} tokens", tokens));
+    } else if meta.input_tokens.is_some() || meta.output_tokens.is_some() {
+        parts.push(format!(
+            "{} in / {} out",
+            meta.input_tokens.unwrap_or(0),
+            meta.output_tokens.unwrap_or(0)
+        ));
+    }
+    if let Some(execution_id) = meta.execution_id.as_deref() {
+        parts.push(format!("exec {}", execution_id));
+    }
+    if let Some(sparkline) = sparkline.filter(|value| !value.is_empty()) {
+        parts.push(format!("latency {}", sparkline));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// Converts a slice of [`ConversationEntry`] values into styled [`Line`]s
+/// ready for a [`Paragraph`] widget.  Factored out so both `render_history`
+/// and `render_pager` share identical rendering logic.
+///
+/// `latency_history` is filled with `total_ms` values (one per assistant turn)
+/// and used to render the sparkline suffix on observability lines.
+fn render_entries(entries: &std::collections::VecDeque<ConversationEntry>) -> Vec<Line<'_>> {
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    let mut latency_history: Vec<u64> = Vec::new();
+    for entry in entries.iter() {
+        match entry {
+            ConversationEntry::UserMessage { text } => {
+                lines.push(Line::from(vec![
+                    Span::styled("you  ", theme::user_label_style()),
+                    Span::raw(text.clone()),
+                ]));
+                lines.push(Line::raw(""));
+            }
+            ConversationEntry::AssistantMessage {
+                backend,
+                text,
+                observability,
+            } => {
+                if let Some(total_ms) = observability.as_ref().and_then(|meta| meta.total_ms) {
+                    latency_history.push(total_ms);
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("{}  ", backend),
+                    theme::assistant_label_style(),
+                )));
+                for md_line in markdown::render(text) {
+                    let indented = Line::from(
+                        std::iter::once(Span::raw("     "))
+                            .chain(md_line.spans)
+                            .collect::<Vec<_>>(),
+                    );
+                    lines.push(indented);
+                }
+                if let Some(meta) = observability {
+                    if let Some(line) =
+                        observability_line(meta, Some(&render_sparkline_suffix(&latency_history)))
+                    {
+                        lines.push(Line::from(Span::styled(
+                            format!("     {}", line),
+                            theme::status_bar_hint_style(),
+                        )));
+                    }
+                }
+                lines.push(Line::raw(""));
+            }
+            ConversationEntry::SystemNotice { text } => {
+                lines.push(Line::from(Span::styled(
+                    format!("── {} ──", text),
+                    theme::system_notice_style(),
+                )));
+                lines.push(Line::raw(""));
+            }
+            ConversationEntry::ToolResult { name, ok, text } => {
+                let style = if *ok {
+                    theme::tool_result_ok_style()
+                } else {
+                    theme::tool_result_err_style()
+                };
+                let icon = if *ok { "✓" } else { "✗" };
+                lines.push(Line::from(Span::styled(
+                    format!("{} {} → {}", icon, name, text),
+                    style,
+                )));
+            }
+        }
+    }
+    lines
+}
+
+fn render_sparkline_suffix(values: &[u64]) -> String {
+    if values.len() < 2 {
+        return String::new();
+    }
+    let start = values.len().saturating_sub(16);
+    render_sparkline(values[start..].iter().copied())
+}
+
+fn render_sparkline(values: impl Iterator<Item = u64>) -> String {
+    const TICKS: &[char] = &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let values = values.collect::<Vec<_>>();
+    let Some(min) = values.iter().min().copied() else {
+        return String::new();
+    };
+    let Some(max) = values.iter().max().copied() else {
+        return String::new();
+    };
+    if min == max {
+        return std::iter::repeat('▁').take(values.len()).collect();
+    }
+    values
+        .into_iter()
+        .map(|value| {
+            let scaled = ((value - min) as f64 / (max - min) as f64)
+                * (TICKS.len().saturating_sub(1) as f64);
+            TICKS[scaled.round() as usize]
+        })
+        .collect()
+}
+
+fn observability_from_output(output: &AcpPromptOutput) -> ObservabilityMeta {
+    let token_usage = output.events.iter().rev().find_map(|event| match event {
+        crate::runtime_event::RuntimeEvent::TokenUsage(usage) => Some(usage),
+        _ => None,
+    });
+    ObservabilityMeta {
+        execution_id: output.execution_id.clone(),
+        total_ms: Some(output.timing.total_ms),
+        prompt_ms: Some(output.timing.prompt_ms),
+        input_tokens: token_usage.and_then(|usage| usage.input_tokens),
+        output_tokens: token_usage.and_then(|usage| usage.output_tokens),
+        total_tokens: token_usage.and_then(|usage| usage.total_tokens),
     }
 }
 
@@ -502,56 +635,7 @@ impl TuiApp {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let mut lines: Vec<Line> = Vec::new();
-        for entry in self.history.entries.iter() {
-            match entry {
-                ConversationEntry::UserMessage { text } => {
-                    lines.push(Line::from(vec![
-                        Span::styled("you  ", theme::user_label_style()),
-                        Span::raw(text.clone()),
-                    ]));
-                    lines.push(Line::raw(""));
-                }
-                ConversationEntry::AssistantMessage { backend, text } => {
-                    lines.push(Line::from(Span::styled(
-                        format!("{}  ", backend),
-                        theme::assistant_label_style(),
-                    )));
-                    for md_line in markdown::render(text) {
-                        let indented = Line::from(
-                            std::iter::once(Span::raw("     "))
-                                .chain(md_line.spans)
-                                .collect::<Vec<_>>(),
-                        );
-                        lines.push(indented);
-                    }
-                    lines.push(Line::raw(""));
-                }
-                ConversationEntry::SystemNotice { text } => {
-                    lines.push(Line::from(Span::styled(
-                        format!("── {} ──", text),
-                        theme::system_notice_style(),
-                    )));
-                }
-                ConversationEntry::ToolCall { name, args } => {
-                    lines.push(Line::from(Span::styled(
-                        format!("⚙ {}({})", name, args),
-                        theme::tool_call_style(),
-                    )));
-                }
-                ConversationEntry::ToolResult { name, ok, text } => {
-                    let style = if *ok {
-                        theme::tool_result_ok_style()
-                    } else {
-                        theme::tool_result_err_style()
-                    };
-                    lines.push(Line::from(Span::styled(
-                        format!("{} {} → {}", if *ok { "✓" } else { "✗" }, name, text),
-                        style,
-                    )));
-                }
-            }
-        }
+        let lines = render_entries(&self.history.entries);
 
         let total = lines.len();
         let vp = inner.height as usize;
@@ -571,26 +655,29 @@ impl TuiApp {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(theme::composer_border_style(true))
-            .title(Span::styled(" Keyboard Shortcuts ", theme::status_bar_style()));
+            .title(Span::styled(
+                " Keyboard Shortcuts ",
+                theme::status_bar_style(),
+            ));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
         let items: &[(&str, &str)] = &[
-            ("Enter",        "Send prompt"),
-            ("Shift+Enter",  "Insert newline"),
-            ("Tab",          "Queue prompt while running"),
-            ("↑ / ↓",        "History recall"),
-            ("Ctrl+R",       "Search history"),
-            ("Ctrl+K",       "Kill to end of line"),
-            ("Ctrl+Y",       "Yank kill buffer"),
-            ("Ctrl+W",       "Delete word backward"),
-            ("Alt+B / Alt+F","Word backward / forward"),
-            ("Ctrl+T",       "Toggle transcript pager"),
-            ("Ctrl+B",       "Cycle backend"),
-            ("Ctrl+L",       "Clear history"),
-            ("Esc",          "Interrupt running turn"),
-            ("? ",           "Toggle this help"),
-            ("Ctrl+C",       "Quit (press twice)"),
+            ("Enter", "Send prompt"),
+            ("Shift+Enter", "Insert newline"),
+            ("Tab", "Queue prompt while running"),
+            ("↑ / ↓", "History recall"),
+            ("Ctrl+R", "Search history"),
+            ("Ctrl+K", "Kill to end of line"),
+            ("Ctrl+Y", "Yank kill buffer"),
+            ("Ctrl+W", "Delete word backward"),
+            ("Alt+B / Alt+F", "Word backward / forward"),
+            ("Ctrl+T", "Toggle transcript pager"),
+            ("Ctrl+B", "Cycle backend"),
+            ("Ctrl+L", "Clear history"),
+            ("Esc", "Interrupt running turn"),
+            ("? ", "Toggle this help"),
+            ("Ctrl+C", "Quit (press twice)"),
         ];
 
         let lines: Vec<Line> = items
@@ -603,10 +690,7 @@ impl TuiApp {
             })
             .collect();
 
-        frame.render_widget(
-            Paragraph::new(lines).wrap(Wrap { trim: false }),
-            inner,
-        );
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
     }
 }
 
@@ -681,7 +765,7 @@ async fn run_loop(
     // engine_result carries the completed engine response back to the loop.
     // We use a one-shot channel so the engine future can be driven without
     // holding a mutable borrow on `app` across the terminal.draw() call.
-    let (engine_tx, mut engine_rx) = mpsc::channel::<Result<(AcpBackend, String)>>(1);
+    let (engine_tx, mut engine_rx) = mpsc::channel::<Result<(AcpBackend, AcpPromptOutput)>>(1);
 
     // pending_prompt is set by the submit path.
     let mut pending_prompt: Option<(AcpBackend, PathBuf, String)> = None;
@@ -693,17 +777,24 @@ async fn run_loop(
             last_draw = now;
         }
 
-        // Kick off the engine call as a local task on the first loop iteration
-        // after a prompt is queued, so it doesn't block draw/event handling.
+        // Kick off the engine call as a non-blocking spawned task so the TUI
+        // event loop (draw + input) remains responsive during engine execution.
         if let Some((backend, cwd, prompt)) = pending_prompt.take() {
-            // Install the streaming sender so chunks arrive via stream_rx.
-            app.engine.set_stream_sender(Some(app.stream_tx.clone()));
             app.streaming_text.clear();
             app.streaming_backend = Some(backend);
+            let engine_arc = app.engine.clone();
+            let stream_tx = app.stream_tx.clone();
             let engine_tx2 = engine_tx.clone();
-            let result = app.engine.prompt_in_cwd(backend, cwd, &prompt).await;
-            app.engine.set_stream_sender(None);
-            let _ = engine_tx2.send(result.map(|text| (backend, text))).await;
+            app.turn_task = Some(tokio::spawn(async move {
+                // Lock the engine for the duration of this call.
+                let mut engine = engine_arc.lock().await;
+                engine.set_stream_sender(Some(stream_tx));
+                let result = engine.prompt_in_cwd_timed(backend, cwd, &prompt).await;
+                engine.set_stream_sender(None);
+                let _ = engine_tx2
+                    .send(result.map(|output| (backend, output)))
+                    .await;
+            }));
         }
 
         tokio::select! {
@@ -735,9 +826,16 @@ async fn run_loop(
 
             // Collect engine result
             Some(result) = engine_rx.recv() => {
+                app.turn_task = None;
                 match result {
-                    Ok((backend, text)) => {
-                        app.history.push(ConversationEntry::AssistantMessage { backend, text });
+                    Ok((backend, output)) => {
+                        let observability = observability_from_output(&output);
+                        app.latest_observability = Some(observability.clone());
+                        app.history.push(ConversationEntry::AssistantMessage {
+                            backend,
+                            text: output.text,
+                            observability: Some(observability),
+                        });
                     }
                     Err(err) => {
                         app.history.push(ConversationEntry::SystemNotice {
@@ -752,25 +850,25 @@ async fn run_loop(
                 app.history.scroll_to_bottom();
                 // Fire queued prompt if any.
                 if let Some(queued) = app.queued_prompt.take() {
+                    app.record_queued_prompts();
                     app.history.push(ConversationEntry::UserMessage { text: queued.clone() });
                     app.history.scroll_to_bottom();
                     app.running_turn = true;
                     app.turn_started_at = Some(std::time::Instant::now());
                     let tx = app.turn_tx.clone();
-                    let _ = tx.try_send(Err(anyhow::anyhow!("__prompt__:{}", queued)));
+                    let _ = tx.try_send(TurnMessage::Prompt {
+                        backend: app.active_backend,
+                        cwd: app.cwd.clone(),
+                        text: queued,
+                    });
                 }
             }
 
             // Pick up the internal "submit" signal from the channel
             Some(msg) = app.turn_rx.recv() => {
-                if let Err(ref e) = msg {
-                    let s = e.to_string();
-                    if let Some(prompt) = s.strip_prefix("__prompt__:") {
-                        pending_prompt = Some((
-                            app.active_backend,
-                            app.cwd.clone(),
-                            prompt.to_string(),
-                        ));
+                match msg {
+                    TurnMessage::Prompt { backend, cwd, text } => {
+                        pending_prompt = Some((backend, cwd, text));
                     }
                 }
             }
@@ -867,9 +965,16 @@ async fn run_loop(
                             // Esc — interrupt running turn or dismiss overlay
                             (KeyModifiers::NONE, KeyCode::Esc) => {
                                 if app.running_turn {
-                                    // Signal cancellation (best-effort; engine will finish)
+                                    if let Some(handle) = app.turn_task.take() {
+                                        handle.abort();
+                                    }
+                                    app.engine.lock().await.shutdown_all_clients().await;
+                                    app.running_turn = false;
+                                    app.streaming_text.clear();
+                                    app.streaming_backend = None;
+                                    app.turn_started_at = None;
                                     app.history.push(ConversationEntry::SystemNotice {
-                                        text: "Interrupted (waiting for engine to finish…)".into(),
+                                        text: "Interrupted".into(),
                                     });
                                 }
                                 app.overlay = Overlay::None;
@@ -947,6 +1052,9 @@ async fn run_loop(
         }
     }
 
-    app.engine.shutdown_all_clients().await;
+    if let Some(handle) = app.turn_task.take() {
+        handle.abort();
+    }
+    app.engine.lock().await.shutdown_all_clients().await;
     Ok(())
 }

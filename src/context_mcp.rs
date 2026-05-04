@@ -19,7 +19,12 @@ pub fn run_stdio() -> Result<()> {
         .and_then(|path| SessionLedger::open(&path).ok());
 
     for line in stdin.lock().lines() {
-        let line = line?;
+        // A broken pipe on stdin means the parent closed the connection — exit cleanly.
+        let line = match line {
+            Ok(l) => l,
+            Err(err) if err.kind() == io::ErrorKind::BrokenPipe => break,
+            Err(err) => return Err(err.into()),
+        };
         if line.trim().is_empty() {
             continue;
         }
@@ -35,8 +40,18 @@ pub fn run_stdio() -> Result<()> {
             &skills,
             &workspace,
         );
-        writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
-        stdout.flush()?;
+        // A broken pipe on stdout means the parent stopped reading — exit cleanly.
+        match writeln!(stdout, "{}", serde_json::to_string(&response)?) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::BrokenPipe => break,
+            Err(err) => return Err(err.into()),
+        }
+        if let Err(err) = stdout.flush() {
+            if err.kind() == io::ErrorKind::BrokenPipe {
+                break;
+            }
+            return Err(err.into());
+        }
     }
     Ok(())
 }

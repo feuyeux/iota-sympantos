@@ -124,8 +124,10 @@ impl LinesBuilder {
                 Event::Html(_) | Event::InlineHtml(_) => {}
                 Event::Rule => {
                     self.flush_line();
-                    self.current
-                        .push(Span::styled("─".repeat(40), Style::default().fg(Color::DarkGray)));
+                    self.current.push(Span::styled(
+                        "─".repeat(40),
+                        Style::default().fg(Color::DarkGray),
+                    ));
                     self.flush_line();
                 }
                 _ => {}
@@ -195,10 +197,8 @@ impl LinesBuilder {
                 } else {
                     "• ".to_string()
                 };
-                self.current.push(Span::styled(
-                    bullet,
-                    Style::default().fg(Color::LightBlue),
-                ));
+                self.current
+                    .push(Span::styled(bullet, Style::default().fg(Color::LightBlue)));
             }
             Tag::Table(_) | Tag::TableHead | Tag::TableRow | Tag::TableCell => {}
             _ => {}
@@ -210,8 +210,7 @@ impl LinesBuilder {
             TagEnd::Heading(_) => {
                 self.pop_style();
                 self.flush_line();
-                self.lines
-                    .push(Line::from(Span::raw(String::new()))); // blank after heading
+                self.lines.push(Line::from(Span::raw(String::new()))); // blank after heading
             }
             TagEnd::Paragraph => {
                 self.flush_line();

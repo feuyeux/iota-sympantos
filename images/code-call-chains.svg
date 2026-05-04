@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1500" viewBox="0 0 2200 1500">
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #0f172a; }
+      .title { font-size: 28px; font-weight: 700; }
+      .subtitle { font-size: 14px; fill: #475569; }
+      .laneTitle { font-size: 18px; font-weight: 700; fill: #1e293b; }
+      .laneNote { font-size: 12px; fill: #64748b; }
+      .entryLane { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; rx: 18; }
+      .presentationLane { fill: #f0f9ff; stroke: #bae6fd; stroke-width: 1.2; rx: 18; }
+      .serviceLane { fill: #f7fee7; stroke: #d9f99d; stroke-width: 1.2; rx: 18; }
+      .protocolLane { fill: #fff7ed; stroke: #fed7aa; stroke-width: 1.2; rx: 18; }
+      .contextLane { fill: #fdf4ff; stroke: #f5d0fe; stroke-width: 1.2; rx: 18; }
+      .storeLane { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1.2; rx: 18; }
+      .externalLane { fill: #fef2f2; stroke: #fecaca; stroke-width: 1.2; rx: 18; }
+      .configLane { fill: #ecfdf5; stroke: #bbf7d0; stroke-width: 1.2; rx: 18; }
+      .mod { fill: #ffffff; stroke: #475569; stroke-width: 1.35; rx: 10; }
+      .ipcMod { fill: #fff1f2; stroke: #dc2626; stroke-width: 1.7; rx: 10; }
+      .tcpMod { fill: #fffbeb; stroke: #d97706; stroke-width: 1.7; rx: 10; }
+      .netMod { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.7; rx: 10; }
+      .name { font-size: 13px; font-weight: 700; }
+      .desc { font-size: 11px; fill: #475569; }
+      .edge { stroke: #334155; stroke-width: 1.55; fill: none; marker-end: url(#arrow); }
+      .thin { stroke: #64748b; stroke-width: 1.15; fill: none; marker-end: url(#arrow-light); }
+      .ipc { stroke: #dc2626; stroke-width: 1.8; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrow-red); }
+      .tcp { stroke: #d97706; stroke-width: 1.8; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrow-orange); }
+      .net { stroke: #2563eb; stroke-width: 1.8; fill: none; stroke-dasharray: 8 5; marker-end: url(#arrow-blue); }
+      .label { font-size: 11px; fill: #334155; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
+      .ipcLabel { font-size: 11px; fill: #b91c1c; font-weight: 700; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
+      .tcpLabel { font-size: 11px; fill: #b45309; font-weight: 700; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
+      .legend { font-size: 12px; fill: #334155; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#334155"/></marker>
+    <marker id="arrow-light" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#64748b"/></marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#dc2626"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#d97706"/></marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#2563eb"/></marker>
+  </defs>
+
+  <text x="40" y="44" class="title">iota-sympantos layered module relationship map</text>
+  <text x="40" y="70" class="subtitle">Clean layered view: primary runtime flow goes downward; local module fan-out stays within the same lane; dashed lines mark process/TCP/stdio/network boundaries.</text>
+
+  <rect x="30" y="100" width="2140" height="90" class="entryLane"/>
+  <text x="55" y="130" class="laneTitle">Entry Layer</text>
+  <text x="55" y="152" class="laneNote">binary startup</text>
+
+  <rect x="30" y="210" width="2140" height="175" class="presentationLane"/>
+  <text x="55" y="240" class="laneTitle">Presentation Layer</text>
+  <text x="55" y="262" class="laneNote">commands and terminal UI</text>
+
+  <rect x="30" y="405" width="2140" height="125" class="serviceLane"/>
+  <text x="55" y="435" class="laneTitle">Service Orchestration Layer</text>
+  <text x="55" y="457" class="laneNote">engine pool and turn lifecycle</text>
+
+  <rect x="30" y="550" width="2140" height="170" class="protocolLane"/>
+  <text x="55" y="580" class="laneTitle">Protocol Adapter Layer</text>
+  <text x="55" y="602" class="laneNote">ACP/MCP adapters and event mapping</text>
+
+  <rect x="30" y="740" width="2140" height="190" class="contextLane"/>
+  <text x="55" y="770" class="laneTitle">Context Fabric Layer</text>
+  <text x="55" y="792" class="laneNote">context capsule, skills, MCP sidecars, projections</text>
+
+  <rect x="30" y="950" width="2140" height="140" class="storeLane"/>
+  <text x="55" y="980" class="laneTitle">Store Layer</text>
+  <text x="55" y="1002" class="laneNote">SQLite stores</text>
+
+  <rect x="30" y="1110" width="2140" height="155" class="externalLane"/>
+  <text x="55" y="1140" class="laneTitle">External Process / Network Boundaries</text>
+  <text x="55" y="1162" class="laneNote">IPC and subprocesses</text>
+
+  <rect x="30" y="1285" width="2140" height="110" class="configLane"/>
+  <text x="55" y="1315" class="laneTitle">Configuration and Shared Utility Layer</text>
+  <text x="55" y="1337" class="laneNote">read-only config and low-level helpers</text>
+
+  <!-- Entry -->
+  <rect x="1010" y="120" width="180" height="52" class="mod"/>
+  <text x="1032" y="143" class="name">main.rs</text><text x="1032" y="161" class="desc">Tokio entrypoint</text>
+
+  <!-- Presentation -->
+  <rect x="175" y="260" width="190" height="64" class="mod"/>
+  <text x="197" y="286" class="name">cli.rs</text><text x="197" y="304" class="desc">command dispatch</text>
+  <rect x="500" y="260" width="190" height="64" class="mod"/>
+  <text x="522" y="286" class="name">tui.rs</text><text x="522" y="304" class="desc">ratatui runtime loop</text>
+  <rect x="780" y="235" width="150" height="46" class="mod"/><text x="800" y="264" class="name">composer.rs</text>
+  <rect x="960" y="235" width="150" height="46" class="mod"/><text x="980" y="264" class="name">markdown.rs</text>
+  <rect x="1140" y="235" width="150" height="46" class="mod"/><text x="1160" y="264" class="name">status_bar.rs</text>
+  <rect x="1320" y="235" width="150" height="46" class="mod"/><text x="1350" y="264" class="name">theme.rs</text>
+  <rect x="1500" y="235" width="150" height="46" class="mod"/><text x="1534" y="264" class="name">state.rs</text>
+  <rect x="1680" y="235" width="170" height="46" class="mod"/><text x="1702" y="258" class="name">TUI channels</text><text x="1702" y="276" class="desc">stream / approval</text>
+
+  <!-- Service -->
+  <rect x="500" y="435" width="220" height="66" class="mod"/>
+  <text x="522" y="462" class="name">agent.rs</text><text x="522" y="480" class="desc">daemon TCP plane</text>
+  <rect x="920" y="435" width="240" height="66" class="mod"/>
+  <text x="942" y="462" class="name">engine.rs</text><text x="942" y="480" class="desc">IotaEngine orchestration</text>
+
+  <!-- Protocol -->
+  <rect x="580" y="590" width="210" height="66" class="mod"/>
+  <text x="602" y="617" class="name">acp.rs</text><text x="602" y="635" class="desc">AcpClient JSON-RPC</text>
+  <rect x="840" y="580" width="145" height="52" class="mod"/><text x="860" y="612" class="name">acp_wire.rs</text>
+  <rect x="1015" y="580" width="155" height="52" class="mod"/><text x="1035" y="612" class="name">acp_session.rs</text>
+  <rect x="1200" y="580" width="170" height="52" class="mod"/><text x="1220" y="612" class="name">acp_permission.rs</text>
+  <rect x="1400" y="580" width="160" height="52" class="mod"/><text x="1420" y="612" class="name">runtime_event.rs</text>
+  <rect x="1590" y="580" width="155" height="52" class="mod"/><text x="1610" y="612" class="name">mcp_router.rs</text>
+  <rect x="1780" y="580" width="155" height="52" class="mod"/><text x="1800" y="612" class="name">mcp_client.rs</text>
+
+  <!-- Context -->
+  <rect x="190" y="795" width="170" height="62" class="mod"/>
+  <text x="212" y="821" class="name">context.rs</text><text x="212" y="839" class="desc">capsule/dialogue</text>
+  <rect x="430" y="795" width="170" height="62" class="mod"/>
+  <text x="452" y="821" class="name">skills.rs</text><text x="452" y="839" class="desc">registry/triggers</text>
+  <rect x="670" y="795" width="170" height="62" class="mod"/>
+  <text x="692" y="821" class="name">skill_runner.rs</text><text x="692" y="839" class="desc">engine-run MCP</text>
+  <rect x="930" y="795" width="175" height="62" class="mod"/>
+  <text x="952" y="821" class="name">context_mcp.rs</text><text x="952" y="839" class="desc">MCP tools/resources</text>
+  <rect x="1165" y="795" width="175" height="62" class="mod"/>
+  <text x="1187" y="821" class="name">fun_mcp.rs</text><text x="1187" y="839" class="desc">7 language tools</text>
+  <rect x="1400" y="795" width="190" height="62" class="mod"/>
+  <text x="1422" y="821" class="name">native_materializer.rs</text><text x="1422" y="839" class="desc">native projection</text>
+  <rect x="1650" y="795" width="190" height="62" class="mod"/>
+  <text x="1672" y="821" class="name">skill_registry_cache.rs</text><text x="1672" y="839" class="desc">pull/cache skills</text>
+
+  <!-- Store -->
+  <rect x="420" y="1008" width="185" height="60" class="mod"/>
+  <text x="442" y="1033" class="name">event_store.rs</text><text x="442" y="1051" class="desc">executions/events</text>
+  <rect x="690" y="1008" width="165" height="60" class="mod"/>
+  <text x="712" y="1033" class="name">memory.rs</text><text x="712" y="1051" class="desc">memory SQLite/FTS</text>
+  <rect x="960" y="1008" width="165" height="60" class="mod"/>
+  <text x="982" y="1033" class="name">approval.rs</text><text x="982" y="1051" class="desc">policy/store</text>
+  <rect x="1230" y="1008" width="190" height="60" class="mod"/>
+  <text x="1252" y="1033" class="name">session_ledger.rs</text><text x="1252" y="1051" class="desc">sessions/handoff</text>
+
+  <!-- External -->
+  <rect x="175" y="1180" width="185" height="58" class="tcpMod"/>
+  <text x="197" y="1205" class="name">iota __daemon</text><text x="197" y="1223" class="desc">child process</text>
+  <rect x="430" y="1180" width="190" height="58" class="tcpMod"/>
+  <text x="452" y="1205" class="name">127.0.0.1:47661</text><text x="452" y="1223" class="desc">TCP JSON line</text>
+  <rect x="685" y="1180" width="230" height="58" class="ipcMod"/>
+  <text x="707" y="1205" class="name">ACP backend process</text><text x="707" y="1223" class="desc">Claude/Codex/Gemini/etc.</text>
+  <rect x="1000" y="1180" width="210" height="58" class="ipcMod"/>
+  <text x="1022" y="1205" class="name">MCP sidecar process</text><text x="1022" y="1223" class="desc">iota context/fun MCP</text>
+  <rect x="1280" y="1180" width="220" height="58" class="ipcMod"/>
+  <text x="1302" y="1205" class="name">compiler/interpreter</text><text x="1302" y="1223" class="desc">python/node/rustc/go/etc.</text>
+  <rect x="1560" y="1180" width="165" height="58" class="ipcMod"/>
+  <text x="1582" y="1205" class="name">git</text><text x="1582" y="1223" class="desc">status --short</text>
+  <rect x="1810" y="1180" width="185" height="58" class="netMod"/>
+  <text x="1832" y="1205" class="name">HTTP(S) source</text><text x="1832" y="1223" class="desc">skill pull</text>
+
+  <!-- Config -->
+  <rect x="620" y="1320" width="210" height="56" class="mod"/>
+  <text x="642" y="1344" class="name">config.rs</text><text x="642" y="1362" class="desc">nimia/env/MCP config</text>
+  <rect x="960" y="1320" width="190" height="56" class="mod"/>
+  <text x="982" y="1344" class="name">utils.rs</text><text x="982" y="1362" class="desc">time/summary/lock</text>
+
+  <!-- Main flow: intentionally orthogonal -->
+  <path class="edge" d="M1010 146 L270 146 L270 260"/><text x="545" y="136" class="label">main -> cli::run()</text>
+  <path class="edge" d="M365 292 L500 292"/><text x="405" y="282" class="label">tui</text>
+  <path class="edge" d="M270 324 L270 392 L610 392 L610 435"/><text x="335" y="384" class="label">daemon route</text>
+  <path class="edge" d="M270 324 L270 405 L1040 405 L1040 435"/><text x="575" y="396" class="label">direct run / bench</text>
+  <path class="edge" d="M595 324 L595 385 L1040 385 L1040 435"/><text x="720" y="376" class="label">TUI prompt task</text>
+  <path class="edge" d="M720 468 L920 468"/><text x="765" y="456" class="label">EnginePool</text>
+
+  <!-- TUI local fan-out; short lines only -->
+  <path class="thin" d="M690 266 L780 258"/>
+  <path class="thin" d="M690 270 L960 258"/>
+  <path class="thin" d="M690 274 L1140 258"/>
+  <path class="thin" d="M690 278 L1320 258"/>
+  <path class="thin" d="M690 282 L1500 258"/>
+  <path class="thin" d="M690 286 L1680 258"/>
+
+  <!-- Engine down to modules: grouped with separate vertical tracks -->
+  <path class="edge" d="M960 501 L960 540 L685 540 L685 590"/><text x="730" y="532" class="label">ACP prompt</text>
+  <path class="edge" d="M1000 501 L1000 735 L275 735 L275 795"/><text x="390" y="726" class="label">compose context</text>
+  <path class="edge" d="M1020 501 L1020 750 L515 750 L515 795"/><text x="600" y="742" class="label">load/match skills</text>
+  <path class="edge" d="M1040 501 L1040 765 L755 765 L755 795"/><text x="790" y="756" class="label">engine-run skill</text>
+  <path class="edge" d="M1060 501 L1060 925 L512 925 L512 1008"/><text x="585" y="917" class="label">events/timing/cache</text>
+  <path class="edge" d="M1080 501 L1080 910 L772 910 L772 1008"/><text x="810" y="902" class="label">recall/write memory</text>
+  <path class="edge" d="M1100 501 L1100 895 L1325 895 L1325 1008"/><text x="1168" y="886" class="label">session/handoff</text>
+
+  <!-- Protocol local relations -->
+  <path class="thin" d="M790 606 L840 606"/>
+  <path class="thin" d="M790 612 L1015 606"/>
+  <path class="thin" d="M790 618 L1200 606"/>
+  <path class="thin" d="M790 624 L1400 606"/>
+  <path class="thin" d="M790 630 L1590 606"/>
+  <path class="edge" d="M755 857 L755 884 L1857 884 L1857 632"/><text x="1280" y="875" class="label">MCP skill tool calls</text>
+  <path class="edge" d="M1285 632 L1285 970 L1042 970 L1042 1008"/><text x="1080" y="960" class="label">permission store</text>
+  <path class="edge" d="M1667 632 L1667 940 L772 940 L772 1008"/><text x="1180" y="932" class="label">iota_memory_search</text>
+  <path class="edge" d="M1667 632 L1667 755 L515 755 L515 795"/><text x="1220" y="747" class="label">iota_skill_search</text>
+
+  <!-- Context local relations -->
+  <path class="edge" d="M360 826 L430 826"/><text x="370" y="815" class="label">skill index</text>
+  <path class="edge" d="M275 857 L275 930 L772 930 L772 1008"/><text x="420" y="922" class="label">memory buckets</text>
+  <path class="edge" d="M1017 857 L1017 915 L772 915 L772 1008"/><text x="820" y="906" class="label">memory tools</text>
+  <path class="edge" d="M1017 857 L1017 900 L1325 900 L1325 1008"/><text x="1100" y="891" class="label">session tools</text>
+  <path class="edge" d="M1495 857 L1495 915 L772 915"/><text x="1295" y="907" class="label">project memory</text>
+  <path class="edge" d="M1495 857 L1495 880 L515 880 L515 857"/><text x="1100" y="872" class="label">project skills</text>
+
+  <!-- Store to utility -->
+  <path class="thin" d="M512 1068 L512 1275 L1055 1275 L1055 1320"/>
+  <path class="thin" d="M772 1068 L772 1280 L1055 1280 L1055 1320"/>
+  <path class="thin" d="M1042 1068 L1042 1320"/>
+  <path class="thin" d="M1325 1068 L1325 1275 L1055 1275"/>
+
+  <!-- Config support: run under everything and branch upward, no diagonal web -->
+  <path class="thin" d="M725 1320 L725 1268 L1040 1268 L1040 501"/><text x="760" y="1260" class="label">backend config/env</text>
+  <path class="thin" d="M725 1320 L725 1278 L1092 1278 L1092 632"/><text x="820" y="1270" class="label">mcpServers shape</text>
+  <path class="thin" d="M725 1320 L725 1290 L1495 1290 L1495 857"/><text x="1320" y="1282" class="label">projection paths</text>
+
+  <!-- CLI side commands: left rail to avoid crossing main body -->
+  <path class="edge" d="M270 324 L105 324 L105 826 L930 826"/><text x="120" y="615" class="label">context-mcp command</text>
+  <path class="edge" d="M270 324 L125 324 L125 840 L1165 840"/><text x="140" y="650" class="label">fun-mcp command</text>
+  <path class="edge" d="M270 324 L145 324 L145 875 L1495 875 L1495 857"/><text x="160" y="690" class="label">native-materialize</text>
+  <path class="edge" d="M270 324 L165 324 L165 890 L1745 890 L1745 857"/><text x="180" y="730" class="label">skill pull</text>
+  <path class="edge" d="M270 324 L185 324 L185 1038 L420 1038"/><text x="200" y="780" class="label">observability</text>
+
+  <!-- IPC boundaries, mostly vertical -->
+  <path class="tcp" d="M270 324 L270 1180"/><text x="285" y="1160" class="tcpLabel">spawn __daemon</text>
+  <path class="tcp" d="M610 501 L610 1160 L525 1160 L525 1180"/><text x="535" y="1152" class="tcpLabel">TCP JSON line</text>
+  <path class="ipc" d="M685 656 L685 1165 L800 1165 L800 1180"/><text x="700" y="1148" class="ipcLabel">ACP stdio</text>
+  <path class="ipc" d="M1092 632 L1092 1180"/><text x="1107" y="1160" class="ipcLabel">mcpServers</text>
+  <path class="ipc" d="M1857 632 L1857 1160 L1105 1160 L1105 1180"/><text x="1500" y="1152" class="ipcLabel">stdio MCP</text>
+  <path class="ipc" d="M1252 857 L1252 1160 L1390 1160 L1390 1180"/><text x="1265" y="1148" class="ipcLabel">run_command</text>
+  <path class="ipc" d="M275 857 L275 1128 L1642 1128 L1642 1180"/><text x="880" y="1120" class="ipcLabel">git status</text>
+  <path class="net" d="M1745 857 L1745 1160 L1902 1160 L1902 1180"/><text x="1760" y="1148" class="label">HTTP(S) / local</text>
+
+  <!-- Legend -->
+  <rect x="1500" y="1310" width="620" height="72" fill="#ffffff" stroke="#cbd5e1" rx="12"/>
+  <line x1="1525" y1="1332" x2="1600" y2="1332" class="edge"/><text x="1615" y="1337" class="legend">in-process module call / channel</text>
+  <line x1="1525" y1="1357" x2="1600" y2="1357" class="ipc"/><text x="1615" y="1362" class="legend">child process or stdio JSON-RPC boundary</text>
+  <line x1="1840" y1="1332" x2="1915" y2="1332" class="tcp"/><text x="1930" y="1337" class="legend">daemon TCP boundary</text>
+  <line x1="1840" y1="1357" x2="1915" y2="1357" class="net"/><text x="1930" y="1362" class="legend">network / external source</text>
+</svg>

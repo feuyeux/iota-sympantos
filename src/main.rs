@@ -21,6 +21,7 @@ mod skill_registry_cache;
 mod skill_runner;
 mod skills;
 mod tui;
+mod utils;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

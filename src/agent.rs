@@ -5,18 +5,66 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::acp::{AcpBackend, AcpPromptTiming};
-use crate::config::NimiaConfig;
+use crate::config::{NimiaConfig, backend_config};
 use crate::engine::IotaEngine;
 
 pub const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:47661";
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EngineKey {
+    backend: AcpBackend,
+    cwd: PathBuf,
+}
+
+struct EnginePool {
+    config: NimiaConfig,
+    show_native: bool,
+    timeout_ms: u64,
+    engines: BTreeMap<EngineKey, Arc<Mutex<IotaEngine>>>,
+}
+
+impl EnginePool {
+    fn new(config: NimiaConfig, show_native: bool, timeout_ms: u64) -> Self {
+        Self {
+            config,
+            show_native,
+            timeout_ms,
+            engines: BTreeMap::new(),
+        }
+    }
+
+    fn engine_for(&mut self, backend: AcpBackend, cwd: PathBuf) -> Arc<Mutex<IotaEngine>> {
+        let key = EngineKey { backend, cwd };
+        let timeout_ms = self.timeout_ms;
+        self.engines
+            .entry(key)
+            .or_insert_with(|| {
+                Arc::new(Mutex::new(IotaEngine::new(
+                    self.config.clone(),
+                    self.show_native,
+                    timeout_ms,
+                )))
+            })
+            .clone()
+    }
+
+    fn all_engines(&self) -> Vec<Arc<Mutex<IotaEngine>>> {
+        self.engines.values().cloned().collect()
+    }
+
+    fn config(&self) -> NimiaConfig {
+        self.config.clone()
+    }
+}
 
 pub fn daemon_addr() -> String {
     std::env::var("IOTA_DAEMON_ADDR")
@@ -68,11 +116,10 @@ pub async fn run_daemon(
     warm_on_start: bool,
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    let engine = Arc::new(Mutex::new(IotaEngine::new(config, false, timeout_ms)));
+    let engine_pool = Arc::new(Mutex::new(EnginePool::new(config, false, timeout_ms)));
     if warm_on_start {
         eprintln!("warming enabled ACP backends before accepting daemon requests");
-        let mut engine_guard = engine.lock().await;
-        let warmed = engine_guard.warm_enabled_backends_in_cwd(cwd).await?;
+        let warmed = warm_all_backends(Arc::clone(&engine_pool), cwd.clone()).await?;
         eprintln!("warmed {} ACP backend(s)", warmed);
     }
     let listener = TcpListener::bind(addr)
@@ -80,6 +127,8 @@ pub async fn run_daemon(
         .with_context(|| format!("Failed to bind daemon at {}", addr))?;
     eprintln!("iota agent daemon listening on {}", addr);
     eprintln!("Press Ctrl+C to shut down gracefully");
+
+    let concurrency = Arc::new(Semaphore::new(8));
 
     let shutdown_token = CancellationToken::new();
     let shutdown_signal = shutdown_token.clone();
@@ -100,18 +149,24 @@ pub async fn run_daemon(
         tokio::select! {
             _ = shutdown_token.cancelled() => {
                 eprintln!("Shutting down ACP clients...");
-                let mut engine_guard = engine.lock().await;
-                let clients_count = engine_guard.clients_count();
-                engine_guard.shutdown_all_clients().await;
+                let engines = engine_pool.lock().await.all_engines();
+                let mut clients_count = 0;
+                for engine in engines {
+                    let mut engine_guard = engine.lock().await;
+                    clients_count += engine_guard.clients_count();
+                    engine_guard.shutdown_all_clients().await;
+                }
                 eprintln!("Shut down {} ACP client(s)", clients_count);
                 eprintln!("Daemon shutdown complete");
                 return Ok(());
             }
             accept_result = listener.accept() => {
                 let (stream, _) = accept_result?;
-                let engine = Arc::clone(&engine);
+                let engine_pool = Arc::clone(&engine_pool);
+                let permit = Arc::clone(&concurrency);
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, engine).await {
+                    let _permit = permit.acquire_owned().await;
+                    if let Err(err) = handle_connection(stream, engine_pool).await {
                         eprintln!("daemon request failed: {}", err);
                     }
                 });
@@ -175,32 +230,39 @@ async fn send_request<T: Serialize + ?Sized>(
     serde_json::from_str(response.trim()).context("Failed to decode daemon response")
 }
 
-async fn handle_connection(stream: TcpStream, engine: Arc<Mutex<IotaEngine>>) -> Result<()> {
-    let mut reader = BufReader::new(stream);
+async fn handle_connection(stream: TcpStream, engine_pool: Arc<Mutex<EnginePool>>) -> Result<()> {
+    // Limit inbound request size to 10 MiB to prevent memory exhaustion from
+    // a malicious or misbehaving client sending an unbounded line.
+    const MAX_REQUEST_BYTES: u64 = 10 * 1024 * 1024;
+    let (read_half, mut write_half) = stream.into_split();
+    let limited = tokio::io::AsyncReadExt::take(read_half, MAX_REQUEST_BYTES + 1);
+    let mut reader = BufReader::new(limited);
     let mut request_line = String::new();
-    reader.read_line(&mut request_line).await?;
+    let bytes_read = reader.read_line(&mut request_line).await?;
+    if bytes_read as u64 > MAX_REQUEST_BYTES {
+        anyhow::bail!("daemon request exceeded {} byte limit", MAX_REQUEST_BYTES);
+    }
     let request: serde_json::Value =
         serde_json::from_str(request_line.trim()).context("Failed to decode daemon request")?;
     let response = if request.get("type").and_then(serde_json::Value::as_str) == Some("warm") {
         let request: DaemonWarmRequest =
             serde_json::from_value(request).context("Failed to decode daemon warm request")?;
-        handle_warm(request, engine).await
+        handle_warm(request, engine_pool).await
     } else {
         let request: DaemonPromptRequest =
             serde_json::from_value(request).context("Failed to decode daemon prompt request")?;
-        handle_prompt(request, engine).await
+        handle_prompt(request, engine_pool).await
     };
-    let mut stream = reader.into_inner();
     let mut line = serde_json::to_vec(&response).context("Failed to encode daemon response")?;
     line.push(b'\n');
-    stream.write_all(&line).await?;
-    stream.flush().await?;
+    write_half.write_all(&line).await?;
+    write_half.flush().await?;
     Ok(())
 }
 
 async fn handle_prompt(
     request: DaemonPromptRequest,
-    engine: Arc<Mutex<IotaEngine>>,
+    engine_pool: Arc<Mutex<EnginePool>>,
 ) -> DaemonPromptResponse {
     let backend = match AcpBackend::parse(&request.backend) {
         Ok(backend) => backend,
@@ -215,6 +277,7 @@ async fn handle_prompt(
         }
     };
     let cwd = PathBuf::from(request.cwd);
+    let engine = engine_pool.lock().await.engine_for(backend, cwd.clone());
     let mut engine = engine.lock().await;
     if let Some(timeout_ms) = request.timeout_ms {
         if timeout_ms == 0 {
@@ -256,14 +319,13 @@ async fn handle_prompt(
 
 async fn handle_warm(
     request: DaemonWarmRequest,
-    engine: Arc<Mutex<IotaEngine>>,
+    engine_pool: Arc<Mutex<EnginePool>>,
 ) -> DaemonPromptResponse {
     let cwd = PathBuf::from(request.cwd);
-    let mut engine = engine.lock().await;
     let result = if request.backends.is_empty() {
-        engine.warm_enabled_backends_in_cwd(cwd).await
+        warm_all_backends(Arc::clone(&engine_pool), cwd).await
     } else {
-        warm_selected_backends(&mut engine, cwd, &request.backends).await
+        warm_selected_backends(engine_pool, cwd, &request.backends).await
     };
 
     match result {
@@ -284,15 +346,35 @@ async fn handle_warm(
     }
 }
 
+async fn warm_all_backends(engine_pool: Arc<Mutex<EnginePool>>, cwd: PathBuf) -> Result<usize> {
+    let config = engine_pool.lock().await.config();
+    let enabled = crate::acp::ALL_BACKENDS
+        .iter()
+        .copied()
+        .filter(|backend| {
+            backend_config(&config, *backend)
+                .map(|section| section.enabled)
+                .unwrap_or(false)
+        })
+        .map(|backend| backend.to_string())
+        .collect::<Vec<_>>();
+    warm_selected_backends(engine_pool, cwd, &enabled).await
+}
+
 async fn warm_selected_backends(
-    engine: &mut IotaEngine,
+    engine_pool: Arc<Mutex<EnginePool>>,
     cwd: PathBuf,
     backends: &[String],
 ) -> Result<usize> {
     let mut warmed = 0;
     for backend in backends {
         let backend = AcpBackend::parse(backend)?;
-        engine.warm_backend_in_cwd(backend, cwd.clone()).await?;
+        let engine = engine_pool.lock().await.engine_for(backend, cwd.clone());
+        engine
+            .lock()
+            .await
+            .warm_backend_in_cwd(backend, cwd.clone())
+            .await?;
         warmed += 1;
     }
     Ok(warmed)

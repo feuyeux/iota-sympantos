@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+use crate::utils::now_ts;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -144,7 +145,7 @@ impl MemoryStore {
         let expires_at = now + ttl_days * 86_400;
         let content_hash = content_hash(&input.content);
         let id = Uuid::new_v4().to_string();
-        let conn = self.conn.lock().expect("memory store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
         if let Some(existing_id) = conn
             .query_row(
                 "SELECT id FROM memory WHERE scope = ?1 AND scope_id = ?2 AND type = ?3 AND facet IS ?4 AND content_hash = ?5 LIMIT 1",
@@ -274,7 +275,11 @@ impl MemoryStore {
     }
 
     fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
-        let conn = self.conn.lock().expect("memory store mutex poisoned");
+        // Wrap the query in double-quotes to make FTS5 treat it as a phrase
+        // rather than a boolean expression.  Internal double-quotes are escaped
+        // by doubling them (FTS5 phrase-quoting rules).
+        let safe_query = format!("\"{}\"", query.replace('"', "\"\""));
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT m.id, m.type, m.facet, m.scope, m.scope_id, m.content, m.confidence, m.created_at, m.updated_at, m.expires_at
              FROM memory m JOIN memory_fts f ON m.rowid = f.rowid
@@ -282,14 +287,14 @@ impl MemoryStore {
              ORDER BY rank, m.confidence DESC, m.updated_at DESC LIMIT ?3",
         )?;
         rows_to_records(stmt.query_map(
-            params![query, now_ts(), limit as i64],
+            params![safe_query, now_ts(), limit as i64],
             row_to_memory_record,
         )?)
     }
 
     fn search_like(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
         let needle = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-        let conn = self.conn.lock().expect("memory store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory
              WHERE expires_at > ?1 AND content LIKE ?2 ESCAPE ?4
@@ -312,7 +317,7 @@ impl MemoryStore {
     ) -> Result<Vec<MemoryRecord>> {
         let facet_value = facet.as_ref().map(MemoryFacet::as_str);
         let type_value = memory_type.as_ref().map(MemoryType::as_str);
-        let conn = self.conn.lock().expect("memory store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory\n             WHERE scope = ?1 AND scope_id = ?2 AND (?3 IS NULL OR facet = ?3) AND (?4 IS NULL OR type = ?4) AND confidence >= ?5 AND expires_at > ?6\n             ORDER BY confidence DESC, updated_at DESC, created_at DESC LIMIT ?7",
         )?;
@@ -331,7 +336,8 @@ impl MemoryStore {
     }
 
     fn init(&self) -> Result<bool> {
-        let conn = self.conn.lock().expect("memory store mutex poisoned");
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY,
@@ -380,7 +386,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS memory_au AFTER UPDATE ON memory BEGIN
   INSERT INTO memory_fts(memory_fts, rowid, content) VALUES('delete', old.rowid, old.content);
   INSERT INTO memory_fts(rowid, content) VALUES (new.rowid, new.content);
-END;"
+END;",
     )?;
     let missing_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM memory m LEFT JOIN memory_fts f ON m.rowid = f.rowid WHERE f.rowid IS NULL",
@@ -450,13 +456,6 @@ fn content_hash(content: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn now_ts() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,7 +499,11 @@ mod tests {
             .unwrap();
 
         let records = store.search("JSON-RPC", 10).unwrap();
-        assert!(records.iter().any(|record| record.content.contains("JSON-RPC")));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.content.contains("JSON-RPC"))
+        );
 
         let all = store.search("", 10).unwrap();
         assert_eq!(all.len(), 2);

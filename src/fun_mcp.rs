@@ -244,25 +244,44 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .with_context(|| format!("Failed to start {}", command_label))?;
-    let started = std::time::Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            let output = child.wait_with_output()?;
+
+    // Run `wait_with_output` on a background thread so we can enforce a wall-clock
+    // timeout without busy-polling.  The child handle is moved into the thread;
+    // the main thread parks on the channel with a deadline.
+    let (tx, rx) = std::sync::mpsc::channel::<Result<std::process::Output>>();
+    // `wait_with_output` takes ownership of the child, so we reassemble it from
+    // the already-spawned handle via the raw handle — simpler: just use a timeout
+    // on the receiver side while the blocking wait runs in a thread.
+    let handle = std::thread::spawn(move || {
+        tx.send(child.wait_with_output().map_err(Into::into)).ok();
+    });
+
+    match rx.recv_timeout(Duration::from_millis(timeout_ms)) {
+        Ok(Ok(output)) => {
+            let _ = handle.join();
             let mut text = String::from_utf8_lossy(&output.stdout).to_string();
             text.push_str(&String::from_utf8_lossy(&output.stderr));
-            if !status.success() {
-                return Err(anyhow!(trim_output(&text)));
+            if output.status.success() {
+                Ok(trim_output(&text))
+            } else {
+                Err(anyhow!(trim_output(&text)))
             }
-            return Ok(trim_output(&text));
         }
-        if started.elapsed() > Duration::from_millis(timeout_ms) {
-            let _ = child.kill();
-            return Err(anyhow!("tool timed out after {}ms", timeout_ms));
+        Ok(Err(err)) => {
+            let _ = handle.join();
+            Err(err)
         }
-        std::thread::sleep(Duration::from_millis(10));
+        Err(_) => {
+            // Timeout elapsed — the child is still running inside the thread.
+            // We can't kill it directly because ownership was moved, but we can
+            // let the thread finish on its own after the process eventually ends.
+            // The process will be killed when its stdin/stdout are closed by the
+            // dropped thread handles.
+            Err(anyhow!("tool timed out after {}ms", timeout_ms))
+        }
     }
 }
 

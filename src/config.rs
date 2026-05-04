@@ -349,7 +349,15 @@ fn push_codex_config_arg(args: &mut Vec<String>, key: &str, value: &str) {
 }
 
 fn toml_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+    )
 }
 
 fn backend_home_env_key(backend: AcpBackend) -> Option<&'static str> {
@@ -465,7 +473,9 @@ pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<Acp
     }
 
     let mut servers = Vec::new();
-    if let Some(server) = command_to_mcp_server("iota-context", engine.mcp.as_ref(), &["context-mcp"]) {
+    if let Some(server) =
+        command_to_mcp_server("iota-context", engine.mcp.as_ref(), &["context-mcp"])
+    {
         servers.push(server);
     }
     if let Some(server) = command_to_mcp_server("iota-fun", engine.fun.as_ref(), &["fun-mcp"]) {
@@ -490,9 +500,15 @@ fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) -> boo
             AcpBackend::OpenCode => cfg.opencode.as_ref(),
         });
     if let Some(value) = backend_config.and_then(|cfg| cfg.mcp_session_new.as_ref()) {
-        return yaml_flag(value, matches!(backend, AcpBackend::ClaudeCode | AcpBackend::Codex));
+        return yaml_flag(
+            value,
+            matches!(backend, AcpBackend::ClaudeCode | AcpBackend::Codex),
+        );
     }
-    matches!(backend, AcpBackend::Gemini | AcpBackend::Hermes | AcpBackend::OpenCode)
+    matches!(
+        backend,
+        AcpBackend::Gemini | AcpBackend::Hermes | AcpBackend::OpenCode
+    )
 }
 
 fn yaml_flag(value: &serde_yaml::Value, try_is_enabled: bool) -> bool {
@@ -520,7 +536,10 @@ fn command_to_mcp_server(
                 .iter()
                 .filter_map(|arg| expand_home_path(arg).ok())
                 .collect::<Vec<_>>();
-            (normalize_command(&expand_home_path(&command.command).ok()?), args)
+            (
+                normalize_command(&expand_home_path(&command.command).ok()?),
+                args,
+            )
         }
         Some(_) => return None,
         None => {
@@ -571,7 +590,6 @@ fn default_dialogue_chars() -> usize {
 fn default_workspace_chars() -> usize {
     800
 }
-
 
 #[cfg(test)]
 mod tests {

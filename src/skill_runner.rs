@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use tokio::task::JoinSet;
 
 use crate::mcp_client::{self, McpToolCall};
 use crate::runtime_event::{RuntimeEvent, ToolCallEvent, ToolResultEvent};
@@ -51,7 +50,7 @@ pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<Skil
             })
             .collect::<Vec<_>>();
         let results = if skill.metadata.execution.parallel {
-            run_parallel(command, args, calls).await
+            run_batch(command, args, calls).await
         } else {
             run_sequential(command, args, calls).await
         };
@@ -128,33 +127,42 @@ async fn run_sequential(
     results
 }
 
-async fn run_parallel(
+async fn run_batch(
     command: String,
     args: Vec<String>,
     calls: Vec<(String, String, String, Value)>,
 ) -> Vec<(String, String, String, bool, Value)> {
-    let mut set = JoinSet::new();
-    for (call_id, tool, alias, arguments) in calls {
-        let command = command.clone();
-        let args = args.clone();
-        set.spawn(
-            async move { run_one_tool(&command, &args, call_id, tool, alias, arguments).await },
-        );
+    let tool_calls = calls
+        .iter()
+        .map(|(_, tool, _, arguments)| McpToolCall {
+            name: tool.clone(),
+            arguments: arguments.clone(),
+        })
+        .collect::<Vec<_>>();
+    let batch =
+        mcp_client::call_stdio_batch(&command, &args, &BTreeMap::new(), tool_calls, 10_000).await;
+
+    match batch {
+        Ok(results) => calls
+            .into_iter()
+            .zip(results.into_iter())
+            .map(|((call_id, tool, alias, _), result)| {
+                (call_id, tool, alias, result.ok, result.content)
+            })
+            .collect(),
+        Err(err) => calls
+            .into_iter()
+            .map(|(call_id, tool, alias, _)| {
+                (
+                    call_id,
+                    tool,
+                    alias,
+                    false,
+                    json!({"error": err.to_string()}),
+                )
+            })
+            .collect(),
     }
-    let mut results = Vec::new();
-    while let Some(result) = set.join_next().await {
-        match result {
-            Ok(result) => results.push(result),
-            Err(err) => results.push((
-                "skill:join".to_string(),
-                "join".to_string(),
-                "join".to_string(),
-                false,
-                json!({"error": err.to_string()}),
-            )),
-        }
-    }
-    results
 }
 
 async fn run_one_tool(
