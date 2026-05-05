@@ -1,11 +1,20 @@
+//! Context Fabric Layer.
+//!
+//! - [`ContextEngine`] — composes the `<iota-context>` XML capsule injected
+//!   into every prompt, including memory, skills, dialogue, and workspace state.
+//! - [`server`] — `iota-context` stdio MCP server (tools: `iota_memory_*`,
+//!   `iota_skill_*`; resources: `iota://memory/…`, `iota://skill/index`).
+
+pub mod server;
+
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::Path;
 
 use crate::acp::AcpBackend;
 use crate::config::ContextEngineConfig;
-use crate::memory::{MemoryRecord, RecallBuckets};
-use crate::skills::SkillRegistry;
+use crate::skill::SkillRegistry;
+use crate::store::memory::{MemoryRecord, RecallBuckets};
 
 #[derive(Debug, Clone)]
 pub struct ContextEngine {
@@ -131,6 +140,10 @@ impl ContextEngine {
         capsule.push_str("</iota-context>\n\nUser request:\n");
         capsule.push_str(input.prompt);
         capsule
+    }
+
+    pub fn budgets(&self) -> ContextBudgets {
+        self.budgets
     }
 }
 

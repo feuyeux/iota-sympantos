@@ -11,7 +11,7 @@ pub struct SessionLedger {
     conn: Arc<Mutex<Connection>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionSummary {
     pub iota_session_id: String,
     pub cwd: String,

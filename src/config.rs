@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::acp::AcpBackend;
-use crate::acp_session::AcpMcpServer;
+use crate::acp::session::{AcpMcpEnvShape, AcpMcpServer, AcpSessionOptions};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelConfig {
@@ -199,17 +199,20 @@ pub fn normalized_acp_command(
     (normalize_command(&acp.command), args)
 }
 
-pub fn backend_process_env(
+pub fn backend_process_env_with_context(
     backend: AcpBackend,
     section: &BackendConfig,
+    backend_context: Option<&BackendContextConfig>,
 ) -> BTreeMap<String, String> {
     let model = section.model.as_ref();
     let mut process_env = BTreeMap::new();
-    if let Some(home) = section.home.as_deref().filter(|value| !value.is_empty()) {
-        if let Some(env_key) = backend_home_env_key(backend) {
-            process_env
-                .entry(env_key.to_string())
-                .or_insert(expand_home_path(home).unwrap_or_else(|_| home.to_string()));
+    if backend_context.map(|cfg| cfg.override_home).unwrap_or(true) {
+        if let Some(home) = section.home.as_deref().filter(|value| !value.is_empty()) {
+            if let Some(env_key) = backend_home_env_key(backend) {
+                process_env
+                    .entry(env_key.to_string())
+                    .or_insert(expand_home_path(home).unwrap_or_else(|_| home.to_string()));
+            }
         }
     }
 
@@ -488,17 +491,8 @@ pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<Acp
     }
 }
 
-fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) -> bool {
-    let backend_config = config
-        .context_engine_backend
-        .as_ref()
-        .and_then(|cfg| match backend {
-            AcpBackend::ClaudeCode => cfg.claude_code.as_ref(),
-            AcpBackend::Codex => cfg.codex.as_ref(),
-            AcpBackend::Gemini => cfg.gemini.as_ref(),
-            AcpBackend::Hermes => cfg.hermes.as_ref(),
-            AcpBackend::OpenCode => cfg.opencode.as_ref(),
-        });
+pub fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) -> bool {
+    let backend_config = backend_context_config(config, backend);
     if let Some(value) = backend_config.and_then(|cfg| cfg.mcp_session_new.as_ref()) {
         return yaml_flag(
             value,
@@ -509,6 +503,36 @@ fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) -> boo
         backend,
         AcpBackend::Gemini | AcpBackend::Hermes | AcpBackend::OpenCode
     )
+}
+
+pub fn backend_context_config(
+    config: &NimiaConfig,
+    backend: AcpBackend,
+) -> Option<&BackendContextConfig> {
+    config
+        .context_engine_backend
+        .as_ref()
+        .and_then(|cfg| match backend {
+            AcpBackend::ClaudeCode => cfg.claude_code.as_ref(),
+            AcpBackend::Codex => cfg.codex.as_ref(),
+            AcpBackend::Gemini => cfg.gemini.as_ref(),
+            AcpBackend::Hermes => cfg.hermes.as_ref(),
+            AcpBackend::OpenCode => cfg.opencode.as_ref(),
+        })
+}
+
+pub fn context_session_options(config: &NimiaConfig, backend: AcpBackend) -> AcpSessionOptions {
+    let Some(backend_context) = backend_context_config(config, backend) else {
+        return AcpSessionOptions::default();
+    };
+    AcpSessionOptions {
+        always_send_empty_mcp_servers: backend_context.always_send_empty_mcp_servers,
+        mcp_env_shape: backend_context
+            .mcp_env_shape
+            .as_deref()
+            .and_then(AcpMcpEnvShape::parse)
+            .unwrap_or_default(),
+    }
 }
 
 fn yaml_flag(value: &serde_yaml::Value, try_is_enabled: bool) -> bool {

@@ -12,13 +12,15 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command as TokioCommand};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, timeout};
 
-use crate::acp_permission;
-use crate::acp_session::{AcpMcpServer, session_new_params};
-use crate::acp_wire::{
-    AcpWireMessage, format_acp_error, is_response_id, parse_message_line, read_next_line,
-};
-use crate::mcp_router;
+pub mod permission;
+pub mod session;
+pub mod wire;
+
+use crate::mcp::router;
 use crate::runtime_event::{self, RuntimeEvent};
+use permission as acp_permission;
+use session::{AcpMcpServer, AcpSessionOptions, session_new_params_with_options};
+use wire::{AcpWireMessage, format_acp_error, is_response_id, parse_message_line, read_next_line};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AcpBackend {
@@ -334,7 +336,7 @@ where
             _ => {
                 if let (Some(id), Some(result)) = (
                     message.id.clone(),
-                    mcp_router::try_intercept_tool_call(method, message.params.as_ref()),
+                    router::try_intercept_tool_call(method, message.params.as_ref()),
                 ) {
                     let result = result.unwrap_or_else(|err| json!({"content":[{"type":"text","text":err.to_string()}],"isError":true}));
                     send_response(stdin, id, result).await?;
@@ -362,6 +364,7 @@ pub struct AcpClient {
     prompt_counter: u64,
     startup_timing: AcpStartupTiming,
     mcp_servers: Vec<AcpMcpServer>,
+    session_options: AcpSessionOptions,
     /// When set, each streamed output chunk is forwarded to the TUI.
     pub stream_tx: Option<mpsc::Sender<String>>,
 }
@@ -373,6 +376,7 @@ impl AcpClient {
         env: BTreeMap<String, String>,
         command_override: Option<(String, Vec<String>)>,
         mcp_servers: Vec<AcpMcpServer>,
+        session_options: AcpSessionOptions,
         show_native: bool,
         timeout_ms: u64,
     ) -> Result<Self> {
@@ -476,6 +480,7 @@ impl AcpClient {
                 init_ms,
             },
             mcp_servers,
+            session_options,
             stream_tx: None,
         })
     }
@@ -565,7 +570,12 @@ impl AcpClient {
             &mut self.stdin,
             session_request_id.clone(),
             "session/new",
-            session_new_params(self.backend, &self.cwd, &self.mcp_servers),
+            session_new_params_with_options(
+                self.backend,
+                &self.cwd,
+                &self.mcp_servers,
+                self.session_options,
+            ),
         )
         .await?;
         let session_result = wait_for_response(

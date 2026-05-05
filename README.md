@@ -23,9 +23,6 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 
 详见 [`doc/architecture.md`](doc/architecture.md) 和 [`doc/code-call-chains.md`](doc/code-call-chains.md)。
 
-## 请求流程
-
-![Request Workflow](images/iota-sympantos-workflow.png)
 
 ## 功能实验室
 
@@ -34,8 +31,6 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 |---|------|------|
 | 01 | 跨后端记忆延续 — 6 召回桶、SHA-256 去重、置信度过滤、token 预算 | [`gefsi/exp01-memory.md`](gefsi/exp01-memory.md) |
 | 02 | Skill + iota-fun 多语言执行 — 触发匹配、并行工具、编译缓存、5 后端一致性 | [`gefsi/exp02-skill-fun.md`](gefsi/exp02-skill-fun.md) |
-
-![Component Diagram](images/iota-sympantos-component.png)
 
 ## 快速开始
 

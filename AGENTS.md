@@ -18,7 +18,8 @@ iota-sympantos 是一个轻量级 Rust CLI，通过 ACP（Agent Control Protocol
 iota-sympantos/
 ├── src/
 │   ├── main.rs              # 程序入口
-│   ├── cli.rs               # 命令分发（run/check/tui/bench 等）
+│   ├── cli/
+│   │   └── mod.rs           # 命令分发（run/check/tui/bench 等）
 │   ├── tui.rs               # 交互式 TUI 主循环
 │   ├── tui/
 │   │   ├── composer.rs      # 多行输入组件（kill buffer/Ctrl+R/word motion）
@@ -27,28 +28,45 @@ iota-sympantos/
 │   │   ├── theme.rs         # ratatui 颜色主题（洋红主色）
 │   │   └── state.rs         # TUI 状态
 │   ├── engine.rs            # ACP 运行时编排，客户端池
-│   ├── acp.rs              # ACP JSON-RPC 2.0 协议驱动
-│   ├── agent.rs            # 内部 daemon（127.0.0.1:47661）
-│   ├── config.rs           # nimia.yaml 配置解析
-│   ├── runtime_event.rs    # 统一事件类型（Output/ToolCall/Approval 等）
-│   ├── event_store.rs      # SQLite 事件持久化
-│   ├── memory.rs           # MemoryStore（6 桶分类体系）
-│   ├── context.rs          # ContextEngine + capsule 组装 + budget
-│   ├── skills.rs           # SkillRegistry（分布式加载 + trigger 匹配）
-│   ├── skill_runner.rs     # engine-run skill 执行
-│   ├── mcp_client.rs       # engine 侧 MCP 客户端
-│   ├── mcp_router.rs       # MCP 工具调用拦截路由
-│   ├── context_mcp.rs      # iota-context MCP sidecar（stdio）
-│   ├── fun_mcp.rs         # iota-fun 7 语言 MCP server（stdio）
-│   ├── approval.rs         # ApprovalStore + policy
-│   ├── session_ledger.rs  # SessionLedger + 后端切换 handoff
-│   └── native_materializer.rs # 原生文件投影（可选）
+│   ├── acp/
+│   │   ├── mod.rs           # ACP JSON-RPC 2.0 协议驱动、AcpClient
+│   │   ├── permission.rs    # 权限请求处理（iota 工具自动批准）
+│   │   ├── session.rs       # session/new 参数渲染、mcpServers shape
+│   │   └── wire.rs          # line read/parse、response id 匹配
+│   ├── daemon/
+│   │   ├── mod.rs           # 内部 daemon TCP server（127.0.0.1:47661）
+│   │   ├── pool.rs          # EnginePool（按 cwd 维度复用 IotaEngine）
+│   │   └── proto.rs         # DaemonPromptRequest/Response wire types
+│   ├── config.rs            # nimia.yaml 配置解析 + per-backend context options
+│   ├── runtime_event.rs     # 统一事件类型（Output/ToolCall/Approval 等）
+│   ├── store/
+│   │   ├── mod.rs           # Store layer 入口
+│   │   ├── events.rs        # EventStore SQLite 事件持久化
+│   │   ├── memory.rs        # MemoryStore（6 桶分类体系）
+│   │   ├── approval.rs      # ApprovalStore + policy
+│   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
+│   ├── context/
+│   │   ├── mod.rs           # ContextEngine + capsule 组装 + budget
+│   │   └── server.rs        # iota-context MCP sidecar（stdio）
+│   ├── skill/
+│   │   ├── mod.rs           # SkillRegistry（分布式加载 + trigger 匹配）
+│   │   ├── runner.rs        # engine-run skill 执行
+│   │   ├── cache.rs         # skill pull/cache（HTTP 或本地）
+│   │   └── fun_server.rs    # iota-fun 7 语言 MCP server（stdio）
+│   ├── mcp/
+│   │   ├── mod.rs           # MCP 层入口
+│   │   ├── client.rs        # engine 侧 MCP 客户端
+│   │   └── router.rs        # MCP 工具调用拦截路由
+│   ├── native/
+│   │   └── mod.rs           # 原生文件投影（可选）
+│   └── utils.rs             # 共享工具函数
 ├── doc/
-│   ├── architecture.md       # 分层架构和模块职责
+│   ├── architecture.md      # 分层架构和模块职责
 │   ├── code-call-chains.md  # 入口、IPC 和调用链
-│   └── *observability*.md   # 观测性命令、存储和指标文档
+│   ├── observability.md     # 观测性命令、存储和指标文档
+│   └── acp-runtime.md       # ACP 进程模型和 benchmark
 ├── Cargo.toml
-└── ~/.i6/nimia.yaml       # 唯一配置来源
+└── ~/.i6/nimia.yaml         # 唯一配置来源
 ```
 
 ---
@@ -93,7 +111,7 @@ model:
   api_key: <api-key>
 ```
 
-运行时通过 `backend_process_env()` 将 model 配置映射为各后端所需的环境变量：
+运行时通过 `backend_process_env_with_context()` 将 model 配置映射为各后端所需的环境变量：
 - `claude-code`：api_key → `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN`；base_url → `ANTHROPIC_BASE_URL`；name → `ANTHROPIC_MODEL`
 - `codex`：api_key → `OPENAI_API_KEY` + `ROUTER_API_KEY`；base_url → `OPENAI_BASE_URL`；name → `OPENAI_MODEL`
 - `gemini`：api_key → `GEMINI_API_KEY`；name → `GEMINI_MODEL`
@@ -157,9 +175,9 @@ iota __daemon           # 内部 daemon 入口
 | 错误路径终端恢复（RAII guard） | `tui.rs` | ✅ |
 | stdout is-terminal 检查 | `tui.rs` | ✅ |
 | Engine turn 后台 task 执行 | `tui.rs` | ✅ |
-| Approval 浮层 | `tui.rs` / `acp_permission.rs` | ✅ |
+| Approval 浮层 | `tui.rs` / `acp/permission.rs` | ✅ |
 | 帧率限制器（约 120 FPS） | `tui.rs` | ✅ |
-| 流式输出增量渲染 | `tui.rs` / `engine.rs` / `acp.rs` | ✅ |
+| 流式输出增量渲染 | `tui.rs` / `engine.rs` / `acp/mod.rs` | ✅ |
 | 鼠标捕获启用 | `tui.rs` | ✅ |
 
 ### TUI 仍可改进
@@ -178,23 +196,23 @@ iota __daemon           # 内部 daemon 入口
 | Phase | 内容 | 文件 | 状态 |
 |-------|------|------|-------|
 | 1 | RuntimeEvent 归一化 | `runtime_event.rs` | ✅ |
-| 1 | EventStore SQLite 持久化 | `event_store.rs` | ✅ |
-| 1 | Execution idempotency + lock + fencing | `event_store.rs` | ✅ |
-| 2 | Context Capsule + budget | `context.rs` | ✅ |
-| 3 | MemoryStore（6 桶分类） | `memory.rs` | ✅ |
-| 3 | 6 桶 Recall 查询 | `memory.rs` | ✅ |
-| 3 | DialogueBuffer | `context.rs` | ✅ |
-| 4 | SkillRegistry 分布式加载 | `skills.rs` | ✅ |
-| 4 | Skill trigger 匹配 | `skills.rs` | ✅ |
-| 4b | Engine-run skill execution | `skill_runner.rs` | ✅ |
-| 4b | 7 种 fn 引擎（iota-fun MCP） | `fun_mcp.rs` | ✅ |
-| 4b | MCP client | `mcp_client.rs` | ✅ |
-| 5a | MCP sidecar（iota-context） | `context_mcp.rs` | ✅ |
-| 5a | ACP mcpServers 注入 | `acp.rs` | ✅ |
-| 5b | MCP response channel / 拦截 | `mcp_router.rs` | ✅ |
-| 6 | Approval 归一化 + 持久化 | `approval.rs` | ✅ |
-| 7 | SessionLedger + handoff | `session_ledger.rs` | ✅ |
-| 8 | Native materializer | `native_materializer.rs` | ✅ |
+| 1 | EventStore SQLite 持久化 | `store/events.rs` | ✅ |
+| 1 | Execution idempotency + lock + fencing | `store/events.rs` | ✅ |
+| 2 | Context Capsule + budget | `context/mod.rs` | ✅ |
+| 3 | MemoryStore（6 桶分类） | `store/memory.rs` | ✅ |
+| 3 | 6 桶 Recall 查询 | `store/memory.rs` | ✅ |
+| 3 | DialogueBuffer | `context/mod.rs` | ✅ |
+| 4 | SkillRegistry 分布式加载 | `skill/mod.rs` | ✅ |
+| 4 | Skill trigger 匹配 | `skill/mod.rs` | ✅ |
+| 4b | Engine-run skill execution | `skill/runner.rs` | ✅ |
+| 4b | 7 种 fn 引擎（iota-fun MCP） | `skill/fun_server.rs` | ✅ |
+| 4b | MCP client | `mcp/client.rs` | ✅ |
+| 5a | MCP sidecar（iota-context） | `context/server.rs` | ✅ |
+| 5a | ACP mcpServers 注入 | `acp/session.rs` | ✅ |
+| 5b | MCP response channel / 拦截 | `mcp/router.rs` | ✅ |
+| 6 | Approval 归一化 + 持久化 | `store/approval.rs` | ✅ |
+| 7 | SessionLedger + handoff | `store/ledger.rs` | ✅ |
+| 8 | Native materializer | `native/mod.rs` | ✅ |
 | 9 | Config 扩展（context_engine） | `config.rs` | ✅ |
 
 **所有 Phase 均已实现。**
@@ -226,9 +244,9 @@ iota __daemon           # 内部 daemon 入口
 
 ## 新增后端步骤
 
-1. 在 `acp.rs` 的 `AcpBackend` 枚举中添加变体
+1. 在 `acp/mod.rs` 的 `AcpBackend` 枚举中添加变体
 2. 实现 `parse()`、`command()`、`Display` 分支
 3. 加入 `ALL_BACKENDS`
 4. 在 `config.rs` 的 `NimiaConfig` 和 `BackendConfig` 中添加字段
-5. 在 `backend_config()`、`backend_home_env_key()`、`backend_process_env()` 中添加分支
+5. 在 `backend_config()`、`backend_home_env_key()`、`backend_process_env_with_context()` 中添加分支
 6. 在 `nimia.yaml.template` 中添加后端配置段

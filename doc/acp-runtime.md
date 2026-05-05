@@ -8,6 +8,8 @@
 | TUI | `iota` | 无参数进入 TUI；首次选择 backend 时 lazy-start，退出前复用 |
 | Daemon | `iota run --daemon ...` / `-d` | 连接常驻 daemon（自动静默启动），跨 CLI 调用复用 subprocess 和 session |
 
+相关模块：`src/cli/mod.rs`（命令入口）、`src/engine.rs`（编排）、`src/acp/mod.rs`（ACP 协议）、`src/daemon/mod.rs`（daemon 服务）。
+
 ### 1.1 Client Caching
 
 `IotaEngine` 缓存 key = `(backend, cwd)`。同 key 复用同一 `AcpClient` 及其 `sessionId`。cwd 变更产生新 key。
@@ -24,7 +26,9 @@ process spawn → initialize → session/new → session/prompt → session/upda
 
 ## 2 Daemon Architecture
 
-支持 `--daemon` / `-d` 的命令会连接 `127.0.0.1:47661`（`IOTA_DAEMON_ADDR` 可覆盖）；daemon 未运行时自动静默启动。Daemon 内部持有一个 `IotaEngine`，跨请求复用 ACP 进程。
+支持 `--daemon` / `-d` 的命令会连接 `127.0.0.1:47661`（`IOTA_DAEMON_ADDR` 可覆盖）；daemon 未运行时自动静默启动。Daemon 内部持有 `EnginePool`（`src/daemon/pool.rs`），按 cwd 维度复用 `IotaEngine`，跨请求复用 ACP 进程。
+
+模块结构：`src/daemon/mod.rs`（TCP server 主循环）、`src/daemon/pool.rs`（EnginePool）、`src/daemon/proto.rs`（请求/响应类型）。
 
 ### 2.1 Daemon Protocol
 
@@ -32,14 +36,15 @@ TCP JSON line protocol，两种请求类型：
 
 | Type | Fields | Response |
 |---|---|---|
-| Prompt | `backend`, `cwd`, `prompt`, `timeout_ms`, `trace_timing` | `ok`, `text`, `timing`, `error` |
+| Prompt | `backend`, `cwd`, `prompt`, `execution_id?`, `timeout_ms`, `trace_timing` | `ok`, `text`, `timing`, `events[]`, `error` |
 | Warm | `type: "warm"`, `cwd`, `backends` | `ok`, `warmed`, `error` |
 
 ### 2.2 Daemon Lifecycle
 
 - **启动**: `iota __daemon` 或首次 `--daemon` 调用时自动后台启动
-- **预热**: `iota check --daemon` 预热所有 enabled backends
-- **关闭**: Ctrl+C 优雅关闭所有 ACP 客户端
+- **预热**: `iota check --daemon` 预热所有 enabled backends；daemon 启动时可选 `warm_on_start`
+- **并发**: 使用 `Semaphore` 限制并发请求
+- **关闭**: `CancellationToken` 优雅关闭所有 engine 中的 ACP 客户端
 
 ```bash
 # 手动启动 daemon 并预热
@@ -92,7 +97,18 @@ export IOTA_DAEMON_ADDR='127.0.0.1:50100'
 | Hermes | `hermes acp` |
 | OpenCode | `npx -y opencode-ai@latest acp` |
 
-Windows 上 `npx` normalize 为 `npx.cmd`。设计单位是 ACP client/channel，非 OS 进程。
+Windows 上 `npx` normalize 为 `npx.cmd`（`config::normalize_command()`）。设计单位是 ACP client/channel，非 OS 进程。
+
+### 4.1 MCP Session Options
+
+每个后端可通过 `context_engine_backend.<backend>` 配置 MCP 注入行为：
+
+| Option | Default | Effect |
+|---|---|---|
+| `mcp_session_new` | Gemini/Hermes/OpenCode: true; Claude/Codex: try | 是否在 session/new 中注入 mcpServers |
+| `always_send_empty_mcp_servers` | false | 无 server 时也发送 `mcpServers: []` |
+| `mcp_env_shape` | `string_array` | env 格式：`string_array` (`["K=V"]`) 或 `object` (`{K:V}`) |
+| `override_home` | true | 是否将 home 配置写入后端 HOME 环境变量 |
 
 ## 5 Benchmark Commands
 

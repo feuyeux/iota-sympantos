@@ -35,11 +35,11 @@ use std::sync::Arc;
 use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::task::JoinHandle;
 
+use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::acp::{ALL_BACKENDS, AcpBackend, AcpPromptOutput};
-use crate::acp_permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
-use crate::event_store::EventStore;
+use crate::store::events::EventStore;
 use composer::{Composer, ComposerAction};
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 
@@ -206,7 +206,10 @@ impl TuiApp {
 
         let mut content = String::new();
         content.push_str(&format!("iota TUI Transcript\n"));
-        content.push_str(&format!("Exported: {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+        content.push_str(&format!(
+            "Exported: {}\n",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ));
         content.push_str(&format!("Backend: {}\n", self.active_backend));
         if let Some(model) = &self.active_model {
             content.push_str(&format!("Model: {}\n", model));
@@ -223,7 +226,11 @@ impl TuiApp {
                     content.push_str(text);
                     content.push_str("\n\n");
                 }
-                ConversationEntry::AssistantMessage { backend, text, observability } => {
+                ConversationEntry::AssistantMessage {
+                    backend,
+                    text,
+                    observability,
+                } => {
                     content.push_str(&format!("{}:\n", backend.to_string().to_uppercase()));
                     content.push_str(text);
                     content.push_str("\n");
@@ -353,8 +360,11 @@ impl TuiApp {
         let build_time = env!("BUILD_TIMESTAMP");
 
         // Logo and info line
-        let logo = "ιώτα";  // Greek word iota
-        let info = format!(" {} v{}-{}  {}  [{}·{}]", logo, version, build_time, cwd_str, backend_str, model_str);
+        let logo = "ιώτα"; // Greek word iota
+        let info = format!(
+            " {} v{}-{}  {}  [{}·{}]",
+            logo, version, build_time, cwd_str, backend_str, model_str
+        );
         let line = Line::from(Span::styled(info, theme::header_style()));
         frame.render_widget(Paragraph::new(line), area);
     }
@@ -751,10 +761,7 @@ impl TuiApp {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(theme::composer_border_style(true))
-            .title(Span::styled(
-                " Select Backend ",
-                theme::status_bar_style(),
-            ));
+            .title(Span::styled(" Select Backend ", theme::status_bar_style()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 

@@ -7,14 +7,16 @@ use std::process::Stdio;
 use tracing_subscriber::EnvFilter;
 
 use crate::acp;
-use crate::agent::{self, DaemonPromptRequest};
 use crate::config::{self, NimiaConfig};
+use crate::context::server as context_server;
+use crate::daemon::{self, DaemonPromptRequest};
 use crate::engine::IotaEngine;
-use crate::event_store::EventStore;
-use crate::memory::MemoryStore;
 use crate::runtime_event::RuntimeEvent;
-use crate::skills::SkillRegistry;
-use crate::{context_mcp, fun_mcp, native_materializer, skill_registry_cache, tui};
+use crate::skill::SkillRegistry;
+use crate::skill::fun_server;
+use crate::store::events::EventStore;
+use crate::store::memory::MemoryStore;
+use crate::{native, skill, tui};
 
 pub async fn run() -> Result<()> {
     init_tracing();
@@ -31,8 +33,12 @@ pub async fn run() -> Result<()> {
                     return run_prompt_via_daemon(&options).await;
                 } else {
                     let config = config::read_config()?;
-                    let mut engine =
-                        IotaEngine::new(config, options.show_native, options.timeout_ms);
+                    let mut engine = IotaEngine::new_for_session_cwd(
+                        config,
+                        options.show_native,
+                        options.timeout_ms,
+                        Some(&options.cwd),
+                    );
                     let result = engine
                         .prompt_in_cwd_timed(options.backend, options.cwd, &options.prompt)
                         .await;
@@ -52,10 +58,10 @@ pub async fn run() -> Result<()> {
                 }
             }
             "context-mcp" => {
-                return context_mcp::run_stdio();
+                return context_server::run_stdio();
             }
             "fun-mcp" => {
-                return fun_mcp::run_stdio();
+                return fun_server::run_stdio();
             }
             "native-materialize" => {
                 return run_native_materialize(&args[1..]);
@@ -68,8 +74,8 @@ pub async fn run() -> Result<()> {
             }
             "__daemon" => {
                 let config = config::read_config()?;
-                let daemon_addr = agent::daemon_addr();
-                return agent::run_daemon(config, &daemon_addr, acp::DEFAULT_TIMEOUT_MS, false)
+                let daemon_addr = daemon::daemon_addr();
+                return daemon::run_daemon(config, &daemon_addr, acp::DEFAULT_TIMEOUT_MS, false)
                     .await;
             }
             "check" => {
@@ -755,7 +761,7 @@ async fn run_skill_command(args: &[String]) -> Result<()> {
                 .get(1)
                 .context("skill pull requires a source path or URL")?;
             let name = args.get(2).map(String::as_str);
-            let path = skill_registry_cache::pull_skill(source, name).await?;
+            let path = skill::cache::pull_skill(source, name).await?;
             println!(
                 "{}",
                 serde_json::json!({"path": path.display().to_string()})
@@ -802,7 +808,7 @@ fn run_native_materialize(args: &[String]) -> Result<()> {
         let memory = config::context_memory_db_path(&config)
             .ok()
             .and_then(|path| MemoryStore::open(&path).ok());
-        let previews = native_materializer::dry_run_backend_projection(
+        let previews = native::dry_run_backend_projection(
             backend,
             &workspace,
             memory.as_ref(),
@@ -822,7 +828,7 @@ fn run_native_materialize(args: &[String]) -> Result<()> {
         } else {
             let changed = previews
                 .iter()
-                .map(|preview| native_materializer::apply(&preview.path, &preview.content))
+                .map(|preview| native::apply(&preview.path, &preview.content))
                 .collect::<Result<Vec<_>>>()?;
             println!("{}", serde_json::json!({"changed": changed}));
         }
@@ -833,7 +839,7 @@ fn run_native_materialize(args: &[String]) -> Result<()> {
             .first()
             .map(std::path::PathBuf::from)
             .unwrap_or(std::env::current_dir()?);
-        native_materializer::backend_memory_path(backend, &workspace)?
+        native::backend_memory_path(backend, &workspace)?
             .context("native materialization for this backend is deferred")?
     } else {
         positional
@@ -842,7 +848,7 @@ fn run_native_materialize(args: &[String]) -> Result<()> {
             .context("native-materialize requires a target path or --backend <name>")?
     };
     if dry_run {
-        let preview = native_materializer::dry_run(&path, body)?;
+        let preview = native::dry_run(&path, body)?;
         println!(
             "{}",
             serde_json::json!({
@@ -852,7 +858,7 @@ fn run_native_materialize(args: &[String]) -> Result<()> {
             })
         );
     } else {
-        let changed = native_materializer::apply(&path, body)?;
+        let changed = native::apply(&path, body)?;
         println!(
             "{}",
             serde_json::json!({"path": path.display().to_string(), "changed": changed})
@@ -870,8 +876,11 @@ async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Result<()> {
         timeout_ms: Some(options.timeout_ms),
         trace_timing: options.trace_timing,
     };
-    let daemon_addr = agent::daemon_addr();
+    let daemon_addr = daemon::daemon_addr();
     let response = send_prompt_autostart_daemon(&daemon_addr, &request).await?;
+    if options.trace {
+        print_trace_events(&response.events);
+    }
     if options.trace_timing {
         print_route_timing("daemon", options.backend, response.timing.as_ref());
     }
@@ -890,8 +899,8 @@ async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Result<()> {
 async fn send_prompt_autostart_daemon(
     daemon_addr: &str,
     request: &DaemonPromptRequest,
-) -> Result<agent::DaemonPromptResponse> {
-    match agent::send_prompt(daemon_addr, request).await {
+) -> Result<daemon::DaemonPromptResponse> {
+    match daemon::send_prompt(daemon_addr, request).await {
         Ok(response) => Ok(response),
         Err(first_error) => {
             start_daemon_silently()?;
@@ -901,13 +910,13 @@ async fn send_prompt_autostart_daemon(
                     daemon_addr, first_error
                 )
             })?;
-            agent::send_prompt(daemon_addr, request).await
+            daemon::send_prompt(daemon_addr, request).await
         }
     }
 }
 
 async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result<()> {
-    let request = agent::DaemonWarmRequest {
+    let request = daemon::DaemonWarmRequest {
         request_type: "warm".to_string(),
         cwd: std::env::current_dir()
             .context("Failed to get current directory")?
@@ -915,8 +924,8 @@ async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result<()> {
             .to_string(),
         backends,
     };
-    let daemon_addr = agent::daemon_addr();
-    let response = match agent::send_warm(&daemon_addr, &request).await {
+    let daemon_addr = daemon::daemon_addr();
+    let response = match daemon::send_warm(&daemon_addr, &request).await {
         Ok(response) => response,
         Err(first_error) => {
             start_daemon_silently()?;
@@ -926,7 +935,7 @@ async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result<()> {
                     daemon_addr, first_error
                 )
             })?;
-            agent::send_warm(&daemon_addr, &request).await?
+            daemon::send_warm(&daemon_addr, &request).await?
         }
     };
     if response.ok {
@@ -1005,7 +1014,7 @@ struct BackendInfo {
 fn print_combined_info(config: &NimiaConfig) -> Result<()> {
     let info = CombinedInfo {
         config_path: config::config_path()?.display().to_string(),
-        daemon_addr: agent::daemon_addr(),
+        daemon_addr: daemon::daemon_addr(),
         backends: acp::ALL_BACKENDS
             .iter()
             .copied()
@@ -1081,7 +1090,7 @@ async fn run_cold_benchmark(config: NimiaConfig, rounds: usize) -> Result<()> {
 
 async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
-    let daemon_addr = agent::daemon_addr();
+    let daemon_addr = daemon::daemon_addr();
     println!("backend,round,latency_ms,status");
     for round in 1..=rounds {
         for backend in acp::ALL_BACKENDS {

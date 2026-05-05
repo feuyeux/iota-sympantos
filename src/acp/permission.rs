@@ -6,8 +6,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::ChildStdin;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
-use crate::approval::{self, ApprovalStore};
 use crate::runtime_event::ApprovalDecisionEvent;
+use crate::store::approval::{self, ApprovalStore};
 
 /// A pending approval request forwarded to the TUI.
 pub struct ApprovalRequest {

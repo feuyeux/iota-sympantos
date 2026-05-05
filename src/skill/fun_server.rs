@@ -3,12 +3,12 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-const TOOLS: [(&str, &str); 7] = [
+pub const TOOLS: [(&str, &str); 7] = [
     ("fun.rust", "Rust"),
     ("fun.typescript", "TypeScript"),
     ("fun.python", "Python"),
@@ -73,7 +73,7 @@ fn tool_descriptions() -> Vec<Value> {
     })).collect()
 }
 
-fn run_tool(name: &str, args: &Value) -> Result<String> {
+pub fn run_tool(name: &str, args: &Value) -> Result<String> {
     let timeout_ms = args
         .get("timeout_ms")
         .and_then(Value::as_u64)
@@ -291,45 +291,63 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .with_context(|| format!("Failed to start {}", command_label))?;
 
-    // Run `wait_with_output` on a background thread so we can enforce a wall-clock
-    // timeout without busy-polling.  The child handle is moved into the thread;
-    // the main thread parks on the channel with a deadline.
-    let (tx, rx) = std::sync::mpsc::channel::<Result<std::process::Output>>();
-    // `wait_with_output` takes ownership of the child, so we reassemble it from
-    // the already-spawned handle via the raw handle — simpler: just use a timeout
-    // on the receiver side while the blocking wait runs in a thread.
-    let handle = std::thread::spawn(move || {
-        tx.send(child.wait_with_output().map_err(Into::into)).ok();
+    let mut stdout = child.stdout.take().context("tool stdout was not piped")?;
+    let mut stderr = child.stderr.take().context("tool stderr was not piped")?;
+    let stdout_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        stdout
+            .read_to_end(&mut buf)
+            .map(|_| buf)
+            .map_err(Into::into)
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        stderr
+            .read_to_end(&mut buf)
+            .map(|_| buf)
+            .map_err(Into::into)
     });
 
-    match rx.recv_timeout(Duration::from_millis(timeout_ms)) {
-        Ok(Ok(output)) => {
-            let _ = handle.join();
-            let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-            text.push_str(&String::from_utf8_lossy(&output.stderr));
-            if output.status.success() {
-                Ok(trim_output(&text))
-            } else {
-                Err(anyhow!(trim_output(&text)))
-            }
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .with_context(|| format!("Failed to wait for {}", command_label))?
+        {
+            break status;
         }
-        Ok(Err(err)) => {
-            let _ = handle.join();
-            Err(err)
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = join_output(stdout_handle, "stdout");
+            let _ = join_output(stderr_handle, "stderr");
+            return Err(anyhow!("tool timed out after {}ms", timeout_ms));
         }
-        Err(_) => {
-            // Timeout elapsed — the child is still running inside the thread.
-            // We can't kill it directly because ownership was moved, but we can
-            // let the thread finish on its own after the process eventually ends.
-            // The process will be killed when its stdin/stdout are closed by the
-            // dropped thread handles.
-            Err(anyhow!("tool timed out after {}ms", timeout_ms))
-        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+
+    let stdout = join_output(stdout_handle, "stdout")?;
+    let stderr = join_output(stderr_handle, "stderr")?;
+    let mut text = String::from_utf8_lossy(&stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&stderr));
+    if status.success() {
+        Ok(trim_output(&text))
+    } else {
+        Err(anyhow!(trim_output(&text)))
     }
+}
+
+fn join_output(
+    handle: std::thread::JoinHandle<Result<Vec<u8>>>,
+    stream_name: &str,
+) -> Result<Vec<u8>> {
+    handle
+        .join()
+        .map_err(|_| anyhow!("tool {} reader thread panicked", stream_name))?
 }
 
 fn fun_root() -> Result<PathBuf> {
@@ -427,4 +445,44 @@ fn ok(id: Value, result: Value) -> Value {
 
 fn error(id: Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn run_command_times_out_without_waiting_for_child_completion() {
+        let started = Instant::now();
+        let err = run_command(
+            "sh",
+            &[OsString::from("-c"), OsString::from("sleep 5")],
+            None,
+            100,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn run_command_times_out_without_waiting_for_child_completion() {
+        let started = Instant::now();
+        let err = run_command(
+            "cmd",
+            &[
+                OsString::from("/C"),
+                OsString::from("ping -n 6 127.0.0.1 >NUL"),
+            ],
+            None,
+            100,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

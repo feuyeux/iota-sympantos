@@ -1,11 +1,23 @@
-//! Agent service extension point.
+//! Agent service – background daemon that keeps [`IotaEngine`] alive across
+//! CLI invocations so ACP subprocess connections are reused.
 //!
-//! The agent surface keeps one [`crate::engine::IotaEngine`] alive across CLI
-//! invocations so short `iota run` commands can reuse ACP subprocesses.
+//! # Protocol
+//! TCP JSON-line on `127.0.0.1:47661` (default, overridable via
+//! `IOTA_DAEMON_ADDR`).  Each connection carries exactly one request line and
+//! receives exactly one response line before the connection is closed.
+//!
+//! Sub-modules:
+//! - [`pool`]  — [`EnginePool`] / [`EngineKey`]: backend×cwd engine buckets
+//! - [`proto`] — wire types: [`DaemonPromptRequest`], [`DaemonPromptResponse`],
+//!              [`DaemonWarmRequest`]
+
+mod pool;
+mod proto;
+
+pub use proto::{DaemonPromptRequest, DaemonPromptResponse, DaemonWarmRequest};
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -13,100 +25,20 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use crate::acp::{AcpBackend, AcpPromptTiming};
+use crate::acp::AcpBackend;
 use crate::config::{NimiaConfig, backend_config};
-use crate::engine::IotaEngine;
+
+use pool::EnginePool;
 
 pub const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:47661";
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct EngineKey {
-    backend: AcpBackend,
-    cwd: PathBuf,
-}
-
-struct EnginePool {
-    config: NimiaConfig,
-    show_native: bool,
-    timeout_ms: u64,
-    engines: BTreeMap<EngineKey, Arc<Mutex<IotaEngine>>>,
-}
-
-impl EnginePool {
-    fn new(config: NimiaConfig, show_native: bool, timeout_ms: u64) -> Self {
-        Self {
-            config,
-            show_native,
-            timeout_ms,
-            engines: BTreeMap::new(),
-        }
-    }
-
-    fn engine_for(&mut self, backend: AcpBackend, cwd: PathBuf) -> Arc<Mutex<IotaEngine>> {
-        let key = EngineKey { backend, cwd };
-        let timeout_ms = self.timeout_ms;
-        self.engines
-            .entry(key)
-            .or_insert_with(|| {
-                Arc::new(Mutex::new(IotaEngine::new(
-                    self.config.clone(),
-                    self.show_native,
-                    timeout_ms,
-                )))
-            })
-            .clone()
-    }
-
-    fn all_engines(&self) -> Vec<Arc<Mutex<IotaEngine>>> {
-        self.engines.values().cloned().collect()
-    }
-
-    fn config(&self) -> NimiaConfig {
-        self.config.clone()
-    }
-}
-
+/// Returns the daemon TCP address, honouring `IOTA_DAEMON_ADDR`.
 pub fn daemon_addr() -> String {
     std::env::var("IOTA_DAEMON_ADDR")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DaemonPromptRequest {
-    pub backend: String,
-    pub cwd: String,
-    pub prompt: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
-    #[serde(default)]
-    pub timeout_ms: Option<u64>,
-    #[serde(default)]
-    pub trace_timing: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DaemonPromptResponse {
-    pub ok: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timing: Option<AcpPromptTiming>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub warmed: Option<usize>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DaemonWarmRequest {
-    #[serde(rename = "type")]
-    pub request_type: String,
-    pub cwd: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub backends: Vec<String>,
 }
 
 pub async fn run_daemon(
@@ -273,11 +205,12 @@ async fn handle_prompt(
                 error: Some(err.to_string()),
                 timing: None,
                 warmed: None,
+                events: Vec::new(),
             };
         }
     };
     let cwd = PathBuf::from(request.cwd);
-    let engine = engine_pool.lock().await.engine_for(backend, cwd.clone());
+    let engine = engine_pool.lock().await.engine_for(cwd.clone());
     let mut engine = engine.lock().await;
     if let Some(timeout_ms) = request.timeout_ms {
         if timeout_ms == 0 {
@@ -287,6 +220,7 @@ async fn handle_prompt(
                 error: Some("timeout_ms must be greater than 0".to_string()),
                 timing: None,
                 warmed: None,
+                events: Vec::new(),
             };
         }
         engine.set_timeout_ms(timeout_ms);
@@ -306,6 +240,7 @@ async fn handle_prompt(
             error: None,
             timing: Some(output.timing),
             warmed: None,
+            events: output.events,
         },
         Err(err) => DaemonPromptResponse {
             ok: false,
@@ -313,6 +248,7 @@ async fn handle_prompt(
             error: Some(err.to_string()),
             timing: None,
             warmed: None,
+            events: Vec::new(),
         },
     }
 }
@@ -335,6 +271,7 @@ async fn handle_warm(
             error: None,
             timing: None,
             warmed: Some(warmed),
+            events: Vec::new(),
         },
         Err(err) => DaemonPromptResponse {
             ok: false,
@@ -342,6 +279,7 @@ async fn handle_warm(
             error: Some(err.to_string()),
             timing: None,
             warmed: None,
+            events: Vec::new(),
         },
     }
 }
@@ -369,7 +307,7 @@ async fn warm_selected_backends(
     let mut warmed = 0;
     for backend in backends {
         let backend = AcpBackend::parse(backend)?;
-        let engine = engine_pool.lock().await.engine_for(backend, cwd.clone());
+        let engine = engine_pool.lock().await.engine_for(cwd.clone());
         engine
             .lock()
             .await

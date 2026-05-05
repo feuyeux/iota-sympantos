@@ -1,3 +1,14 @@
+//! Skill Layer.
+//!
+//! - [`SkillRegistry`] / [`Skill`] — load, match and index `.md`/`.yaml` skill files
+//! - [`runner`]     — execute MCP-mode skills via sidecar processes
+//! - [`cache`]      — pull and cache skill files from HTTP/local sources
+//! - [`fun_server`] — `iota-fun` stdio MCP server (multi-language runners)
+
+pub mod cache;
+pub mod fun_server;
+pub mod runner;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

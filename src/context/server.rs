@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
-use crate::memory::{MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType};
-use crate::session_ledger::SessionLedger;
-use crate::skills::SkillRegistry;
+use crate::skill::SkillRegistry;
+use crate::store::ledger::SessionLedger;
+use crate::store::memory::{MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType};
 
 pub fn run_stdio() -> Result<()> {
     let stdin = io::stdin();
@@ -154,8 +154,8 @@ fn call_tool(
             let scope_id = args
                 .get("scope_id")
                 .and_then(Value::as_str)
-                .unwrap_or("local")
-                .to_string();
+                .map(str::to_string)
+                .unwrap_or_else(|| default_memory_scope_id(&scope, args, workspace));
             let confidence = args
                 .get("confidence")
                 .and_then(Value::as_f64)
@@ -278,10 +278,10 @@ fn tools() -> Vec<Value> {
         }),
         json!({
             "name": "iota_memory_write",
-            "description": "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id: use \"local-user\" for user scope, the cwd path for project scope, iota_session_id for session scope.",
+            "description": "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id is optional. Defaults match Engine recall: user → \"local-user\", project → current cwd path, session → source_session_id/session_id if provided.",
             "inputSchema": {
                 "type": "object",
-                "required": ["content", "type", "scope", "scope_id"],
+                "required": ["content", "type", "scope"],
                 "properties": {
                     "content":    {"type": "string"},
                     "type":       {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
@@ -358,6 +358,24 @@ fn parse_memory_scope(value: &str) -> std::result::Result<MemoryScope, String> {
     }
 }
 
+fn default_memory_scope_id(
+    scope: &MemoryScope,
+    args: &Value,
+    workspace: &std::path::Path,
+) -> String {
+    match scope {
+        MemoryScope::User => "local-user".to_string(),
+        MemoryScope::Project => workspace.display().to_string(),
+        MemoryScope::Session => args
+            .get("source_session_id")
+            .or_else(|| args.get("session_id"))
+            .and_then(Value::as_str)
+            .unwrap_or("local")
+            .to_string(),
+        MemoryScope::Global => "global".to_string(),
+    }
+}
+
 fn read_resource(
     uri: &str,
     memory: Option<&MemoryStore>,
@@ -400,5 +418,32 @@ fn read_resource(
         }
         ["workspace", _, "rules"] => Ok(json!({"cwd": workspace.display().to_string()})),
         _ => Err(format!("unknown resource {}", uri)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn memory_scope_id_defaults_match_context_workspace() {
+        let workspace = std::path::Path::new("/tmp/iota-project");
+        assert_eq!(
+            default_memory_scope_id(&MemoryScope::User, &json!({}), workspace),
+            "local-user"
+        );
+        assert_eq!(
+            default_memory_scope_id(&MemoryScope::Project, &json!({}), workspace),
+            workspace.display().to_string()
+        );
+        assert_eq!(
+            default_memory_scope_id(
+                &MemoryScope::Session,
+                &json!({"session_id":"s1"}),
+                workspace
+            ),
+            "s1"
+        );
     }
 }

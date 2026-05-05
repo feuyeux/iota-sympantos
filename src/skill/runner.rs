@@ -2,9 +2,9 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-use crate::mcp_client::{self, McpToolCall};
+use crate::mcp::client::McpToolCall;
 use crate::runtime_event::{RuntimeEvent, ToolCallEvent, ToolResultEvent};
-use crate::skills::{Skill, render_template};
+use crate::skill::{Skill, render_template};
 
 pub struct SkillRunOutput {
     pub text: String,
@@ -193,7 +193,7 @@ async fn run_one_tool(
     alias: String,
     arguments: Value,
 ) -> (String, String, String, bool, Value) {
-    let result = mcp_client::call_stdio(
+    let result = crate::mcp::client::call_stdio(
         command,
         args,
         &BTreeMap::new(),

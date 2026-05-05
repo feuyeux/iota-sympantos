@@ -4,18 +4,17 @@ use std::path::PathBuf;
 
 use crate::acp::{self, AcpBackend, AcpClient, AcpPromptOutput};
 use crate::config::{
-    self, NimiaConfig, backend_config, backend_process_env, config_path, configured_model,
-    normalized_acp_command,
+    self, NimiaConfig, backend_config, backend_context_config, backend_process_env_with_context,
+    config_path, configured_model, normalized_acp_command,
 };
 use crate::context::{ComposeInput, ContextEngine, DialogueBuffer};
-use crate::event_store::{self, EventStore};
-use crate::memory::{
+use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
+use crate::skill::SkillRegistry;
+use crate::store::events::EventStore;
+use crate::store::ledger::SessionLedger;
+use crate::store::memory::{
     MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType, RecallBuckets,
 };
-use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
-use crate::session_ledger::SessionLedger;
-use crate::skill_runner;
-use crate::skills::SkillRegistry;
 use crate::utils::summarize;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,6 +39,16 @@ pub struct IotaEngine {
 
 impl IotaEngine {
     pub fn new(config: NimiaConfig, show_native: bool, timeout_ms: u64) -> Self {
+        let session_cwd = std::env::current_dir().ok();
+        Self::new_for_session_cwd(config, show_native, timeout_ms, session_cwd.as_deref())
+    }
+
+    pub fn new_for_session_cwd(
+        config: NimiaConfig,
+        show_native: bool,
+        timeout_ms: u64,
+        session_cwd: Option<&std::path::Path>,
+    ) -> Self {
         let context_engine = ContextEngine::from_config(config.context_engine.as_ref());
         let memory_store = config::context_memory_db_path(&config)
             .ok()
@@ -50,12 +59,11 @@ impl IotaEngine {
         let session_ledger = SessionLedger::default_path()
             .ok()
             .and_then(|path| SessionLedger::open(&path).ok());
-        let session_id = std::env::current_dir()
-            .ok()
+        let session_id = session_cwd
             .and_then(|cwd| {
                 session_ledger
                     .as_ref()
-                    .and_then(|ledger| ledger.latest_session_for_cwd(&cwd).ok().flatten())
+                    .and_then(|ledger| ledger.latest_session_for_cwd(cwd).ok().flatten())
             })
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         Self {
@@ -143,9 +151,11 @@ impl IotaEngine {
                 continue;
             }
 
-            let env = backend_process_env(backend, section);
+            let backend_context = backend_context_config(&self.config, backend);
+            let env = backend_process_env_with_context(backend, section, backend_context);
             let command = normalized_acp_command(backend, section, acp_config);
             let mcp_servers = config::context_mcp_servers(&self.config, backend);
+            let session_options = config::context_session_options(&self.config, backend);
             let cwd = cwd.clone();
             let show_native = self.show_native;
             let timeout_ms = self.timeout_ms;
@@ -156,6 +166,7 @@ impl IotaEngine {
                     env,
                     Some(command),
                     mcp_servers,
+                    session_options,
                     show_native,
                     timeout_ms,
                 )
@@ -205,7 +216,7 @@ impl IotaEngine {
         prompt: &str,
         requested_execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
-        let request_hash = event_store::request_hash(&backend.to_string(), &cwd, prompt);
+        let request_hash = crate::store::events::request_hash(&backend.to_string(), &cwd, prompt);
         tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
         let configured_roots = config::context_skill_roots(&self.config);
         let skills = SkillRegistry::load(&cwd, &configured_roots);
@@ -302,7 +313,9 @@ impl IotaEngine {
         }
 
         if let Some(skill) = matched_skill {
-            if let Some(skill_output) = skill_runner::run_engine_skill(skill, prompt).await? {
+            if let Some(skill_output) =
+                crate::skill::runner::run_engine_skill(skill, prompt).await?
+            {
                 let mut events = Vec::new();
                 for event in skill_output.events {
                     self.record_event(&execution_id, event.clone());
@@ -346,7 +359,7 @@ impl IotaEngine {
             RuntimeEvent::Memory(MemoryEvent {
                 action: "inject".to_string(),
                 memory_id: None,
-                payload: memory_inject_payload(buckets),
+                payload: memory_inject_payload(buckets, self.context_engine.budgets().memory_chars),
             })
         });
         if let Some(event) = memory_event.clone() {
@@ -773,9 +786,14 @@ Output: {}",
         AcpClient::start(
             backend,
             cwd,
-            backend_process_env(backend, section),
+            backend_process_env_with_context(
+                backend,
+                section,
+                backend_context_config(&self.config, backend),
+            ),
             Some(normalized_acp_command(backend, section, acp_config)),
             config::context_mcp_servers(&self.config, backend),
+            config::context_session_options(&self.config, backend),
             self.show_native,
             self.timeout_ms,
         )
@@ -927,7 +945,7 @@ fn is_memory_query(prompt: &str) -> bool {
 fn push_memory_lines(
     lines: &mut Vec<String>,
     label: &str,
-    records: &[crate::memory::MemoryRecord],
+    records: &[crate::store::memory::MemoryRecord],
 ) {
     if records.is_empty() {
         return;
@@ -938,7 +956,7 @@ fn push_memory_lines(
     }
 }
 
-fn memory_inject_payload(buckets: &RecallBuckets) -> serde_json::Value {
+fn memory_inject_payload(buckets: &RecallBuckets, memory_chars: usize) -> serde_json::Value {
     let total_chars = memory_total_chars(buckets);
     serde_json::json!({
         "identity": memory_bucket_summary(&buckets.identity),
@@ -948,10 +966,10 @@ fn memory_inject_payload(buckets: &RecallBuckets) -> serde_json::Value {
         "procedural": memory_bucket_summary(&buckets.procedural),
         "episodic": memory_bucket_summary(&buckets.episodic),
         "budget": {
-            "memory_chars": 2000,
+            "memory_chars": memory_chars,
             "total_chars": total_chars,
-            "truncated": total_chars > 2000,
-            "excluded_count": if total_chars > 2000 { 1 } else { 0 },
+            "truncated": total_chars > memory_chars,
+            "excluded_count": excluded_memory_count(buckets, memory_chars),
         }
     })
 }
@@ -969,7 +987,29 @@ fn memory_total_chars(buckets: &RecallBuckets) -> usize {
         .sum()
 }
 
-fn memory_bucket_summary(records: &[crate::memory::MemoryRecord]) -> serde_json::Value {
+fn excluded_memory_count(buckets: &RecallBuckets, memory_chars: usize) -> usize {
+    let mut used = 0usize;
+    let mut excluded = 0usize;
+    for record in buckets
+        .identity
+        .iter()
+        .chain(buckets.preference.iter())
+        .chain(buckets.strategic.iter())
+        .chain(buckets.domain.iter())
+        .chain(buckets.procedural.iter())
+        .chain(buckets.episodic.iter())
+    {
+        let len = record.content.chars().count();
+        if used + len <= memory_chars {
+            used += len;
+        } else {
+            excluded += 1;
+        }
+    }
+    excluded
+}
+
+fn memory_bucket_summary(records: &[crate::store::memory::MemoryRecord]) -> serde_json::Value {
     serde_json::Value::Array(
         records
             .iter()
@@ -984,4 +1024,47 @@ fn memory_bucket_summary(records: &[crate::memory::MemoryRecord]) -> serde_json:
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::memory::MemoryRecord;
+
+    #[test]
+    fn memory_inject_payload_uses_configured_budget() {
+        let buckets = RecallBuckets {
+            identity: vec![memory_record("one")],
+            preference: vec![memory_record("two")],
+            ..Default::default()
+        };
+        let payload = memory_inject_payload(&buckets, 5);
+        let budget = payload.get("budget").unwrap();
+
+        assert_eq!(budget.get("memory_chars").and_then(|v| v.as_u64()), Some(5));
+        assert_eq!(budget.get("total_chars").and_then(|v| v.as_u64()), Some(6));
+        assert_eq!(
+            budget.get("truncated").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            budget.get("excluded_count").and_then(|v| v.as_u64()),
+            Some(1)
+        );
+    }
+
+    fn memory_record(content: &str) -> MemoryRecord {
+        MemoryRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            memory_type: "semantic".to_string(),
+            facet: Some("identity".to_string()),
+            scope: "user".to_string(),
+            scope_id: "local-user".to_string(),
+            content: content.to_string(),
+            confidence: 1.0,
+            created_at: 1,
+            updated_at: 1,
+            expires_at: 999,
+        }
+    }
 }

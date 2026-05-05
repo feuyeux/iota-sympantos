@@ -1,9 +1,13 @@
+//! Native materializer — projects memory and skills into backend-native files
+//! (e.g. `MEMORY.md`, `AGENTS.md`) so backends that cannot use MCP still see
+//! iota context.
+
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use crate::acp::AcpBackend;
-use crate::memory::{MemoryRecord, MemoryStore};
-use crate::skills::{Skill, SkillRegistry};
+use crate::skill::{Skill, SkillRegistry};
+use crate::store::memory::{MemoryRecord, MemoryStore};
 
 const START: &str = "<!-- IOTA_START -->";
 const END: &str = "<!-- IOTA_END -->";
@@ -212,16 +216,16 @@ mod tests {
 
     #[test]
     fn renders_claude_skill_with_allowed_tools() {
-        let skill = crate::skills::Skill {
-            metadata: crate::skills::SkillMetadata {
+        let skill = crate::skill::Skill {
+            metadata: crate::skill::SkillMetadata {
                 name: "review".to_string(),
                 version: None,
                 summary: Some("Review code".to_string()),
                 description: None,
                 triggers: Vec::new(),
                 backends: Vec::new(),
-                execution: crate::skills::SkillExecution::default(),
-                output: crate::skills::SkillOutput::default(),
+                execution: crate::skill::SkillExecution::default(),
+                output: crate::skill::SkillOutput::default(),
                 failure_policy: None,
             },
             body: "Body".to_string(),
