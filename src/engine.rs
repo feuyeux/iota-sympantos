@@ -496,7 +496,14 @@ impl IotaEngine {
                 );
                 self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &output.text);
-                self.write_episodic_memory(backend, prompt, &output.text, execution_id.as_deref());
+                if !is_explicit_memory_tool_prompt(prompt) {
+                    self.write_episodic_memory(
+                        backend,
+                        prompt,
+                        &output.text,
+                        execution_id.as_deref(),
+                    );
+                }
                 Ok(output)
             }
             Err(err) => {
@@ -919,6 +926,10 @@ fn is_memory_write_only_prompt(prompt: &str) -> bool {
         && !prompt.contains('？')
         && !prompt.contains('?')
         && !prompt.contains("请")
+}
+
+fn is_explicit_memory_tool_prompt(prompt: &str) -> bool {
+    prompt.contains("iota_memory_write")
 }
 
 fn deterministic_memory_answer(prompt: &str, buckets: &RecallBuckets) -> Option<String> {
