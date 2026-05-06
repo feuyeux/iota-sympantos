@@ -7,15 +7,15 @@ use crate::acp::AcpBackend;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AcpMcpEnvShape {
     #[default]
-    EnvVarArray,
+    StringArray,
+    Object,
 }
 
 impl AcpMcpEnvShape {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "env_var_array" | "env-var-array" | "env_array" | "env-array" | "array_object"
-            | "array-object" | "spec" | "string_array" | "string-array" | "array" | "object"
-            | "map" => Some(Self::EnvVarArray),
+            "string_array" | "string-array" | "array" => Some(Self::StringArray),
+            "object" | "map" => Some(Self::Object),
             _ => None,
         }
     }
@@ -49,10 +49,10 @@ pub fn session_new_params_with_options(
     let cwd = cwd.display().to_string();
     let mcp_servers = servers
         .iter()
-        .map(|server| render_mcp_server(server, options.mcp_env_shape))
+        .map(|server| render_mcp_server(backend, server, options.mcp_env_shape))
         .collect::<Vec<_>>();
-    let requires_mcp_servers_field = options.always_send_empty_mcp_servers
-        || matches!(backend, AcpBackend::Codex | AcpBackend::OpenCode);
+    let requires_mcp_servers_field =
+        options.always_send_empty_mcp_servers || backend == AcpBackend::Codex;
     if mcp_servers.is_empty() && !requires_mcp_servers_field {
         json!({ "cwd": cwd })
     } else {
@@ -60,22 +60,40 @@ pub fn session_new_params_with_options(
     }
 }
 
-fn render_mcp_server(server: &AcpMcpServer, env_shape: AcpMcpEnvShape) -> Value {
+fn render_mcp_server(
+    backend: AcpBackend,
+    server: &AcpMcpServer,
+    env_shape: AcpMcpEnvShape,
+) -> Value {
+    // Codex does not support mcp_session_new MCP servers in the same way.
+    // ClaudeCode, Hermes, Gemini all require env as an array of "KEY=VALUE" strings
+    // and an explicit type="stdio".
     let env: Value = match env_shape {
-        AcpMcpEnvShape::EnvVarArray => server
+        AcpMcpEnvShape::StringArray => server
             .env
             .iter()
-            .map(|(key, value)| json!({ "name": key, "value": value }))
+            .map(|(key, value)| Value::String(format!("{}={}", key, value)))
             .collect::<Vec<_>>()
             .into(),
+        AcpMcpEnvShape::Object => json!(server.env),
     };
-    json!({
-        "name": server.name,
-        "type": "stdio",
-        "command": server.command,
-        "args": server.args,
-        "env": env,
-    })
+    if backend == AcpBackend::Gemini {
+        // Gemini does not want the "name" field in the top-level mcp server object.
+        json!({
+            "type": "stdio",
+            "command": server.command,
+            "args": server.args,
+            "env": env,
+        })
+    } else {
+        json!({
+            "name": server.name,
+            "type": "stdio",
+            "command": server.command,
+            "args": server.args,
+            "env": env,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -385,10 +385,9 @@ impl IotaEngine {
         if let Some(event) = memory_event.clone() {
             self.record_event(&execution_id, event);
         }
-        if let (Some(buckets), Some(text)) = (
-            memory.as_ref(),
-            deterministic_memory_answer(prompt, memory.as_ref().unwrap()),
-        ) {
+        if let Some((buckets, text)) = memory.as_ref().and_then(|buckets| {
+            deterministic_memory_answer(prompt, buckets).map(|text| (buckets, text))
+        }) {
             let mut events = Vec::new();
             if let Some(event) = memory_event.clone() {
                 events.push(event);
