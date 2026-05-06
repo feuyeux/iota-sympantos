@@ -94,7 +94,9 @@ fn persists_execution_timing_and_summarizes() {
             },
         )
         .unwrap();
-    store.finish_execution(&execution_id, "completed").unwrap();
+    store
+        .finish_execution(&execution_id, ExecutionStatus::Completed)
+        .unwrap();
 
     let record = store.get_execution(&execution_id).unwrap().unwrap();
     assert_eq!(record.process_spawn_ms, Some(10));
@@ -109,4 +111,11 @@ fn persists_execution_timing_and_summarizes() {
     assert_eq!(summary.avg_total_ms, Some(100.0));
     assert_eq!(summary.p95_total_ms, Some(100));
     assert_eq!(summary.latest.len(), 1);
+}
+
+#[test]
+fn execution_status_preserves_unknown_store_values() {
+    let status = ExecutionStatus::from("legacy-state");
+    assert_eq!(status, ExecutionStatus::Unknown("legacy-state".to_string()));
+    assert_eq!(status.as_str(), "legacy-state");
 }

@@ -51,6 +51,43 @@ fn search_finds_records_and_empty_query_lists_records() {
 }
 
 #[test]
+fn search_skips_records_with_unknown_taxonomy_values() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+    store
+        .insert(test_memory_insert(
+            MemoryType::Semantic,
+            Some(MemoryFacet::Domain),
+            MemoryScope::Project,
+            "project",
+            "valid memory survives bad legacy rows",
+        ))
+        .unwrap();
+
+    {
+        let conn = crate::utils::lock_or_recover(&store.conn);
+        conn.execute("PRAGMA ignore_check_constraints = ON", [])
+            .unwrap();
+        let now = now_ts();
+        conn.execute(
+            "INSERT INTO memory (id, type, facet, scope, scope_id, content, content_hash, confidence, ttl_days, created_at, updated_at, expires_at)
+             VALUES (?1, 'legacy-type', 'domain', 'project', 'project', ?2, ?3, 1.0, 365, ?4, ?4, ?5)",
+            rusqlite::params![
+                uuid::Uuid::new_v4().to_string(),
+                "bad legacy taxonomy row",
+                content_hash("bad legacy taxonomy row"),
+                now,
+                now + 86_400,
+            ],
+        )
+        .unwrap();
+    }
+
+    let records = store.search("", 10).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].content, "valid memory survives bad legacy rows");
+}
+
+#[test]
 fn vector_search_matches_semantic_similarity() {
     let store = MemoryStore::open(Path::new(":memory:")).unwrap();
     store

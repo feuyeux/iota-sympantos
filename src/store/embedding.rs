@@ -44,7 +44,12 @@ impl EmbeddingEngine {
 
     /// Whether this engine uses an API (Ollama / OpenAI-compatible).
     pub fn is_api(&self) -> bool {
-        self.client.is_some() && self.config.as_ref().map(|c| c.base_url.is_some()).unwrap_or(false)
+        self.client.is_some()
+            && self
+                .config
+                .as_ref()
+                .map(|c| c.base_url.is_some())
+                .unwrap_or(false)
     }
 
     /// Compute embedding for content. Uses API if configured, else local trigram.

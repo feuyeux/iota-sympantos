@@ -7,6 +7,43 @@ use std::path::PathBuf;
 use crate::acp::AcpBackend;
 use crate::acp::session::{AcpMcpEnvShape, AcpMcpServer, AcpSessionOptions};
 
+pub mod paths {
+    use anyhow::{Context, Result};
+    use std::path::PathBuf;
+
+    #[derive(Debug, Clone)]
+    pub struct StorePaths {
+        root: PathBuf,
+    }
+
+    impl StorePaths {
+        pub fn new(root: PathBuf) -> Self {
+            Self { root }
+        }
+
+        pub fn resolve() -> Result<Self> {
+            let home = dirs::home_dir().context("Failed to get home directory")?;
+            Ok(Self::new(home.join(".i6").join("context")))
+        }
+
+        pub fn events_db(&self) -> PathBuf {
+            self.root.join("events.sqlite")
+        }
+
+        pub fn memory_db(&self) -> PathBuf {
+            self.root.join("memory.sqlite")
+        }
+
+        pub fn sessions_db(&self) -> PathBuf {
+            self.root.join("sessions.sqlite")
+        }
+
+        pub fn approvals_db(&self) -> PathBuf {
+            self.root.join("approvals.sqlite")
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,7 +94,7 @@ pub struct ContextEngineConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_context_injection")]
-    pub injection: String,
+    pub injection: ContextInjection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_db: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -93,6 +130,65 @@ impl Default for ContextEngineConfig {
             fun: None,
             embedding: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextInjection {
+    Auto,
+    Off,
+    Prompt,
+    Mcp,
+}
+
+impl ContextInjection {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Auto => "auto",
+            Self::Off => "off",
+            Self::Prompt => "prompt",
+            Self::Mcp => "mcp",
+        }
+    }
+
+    pub fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
+}
+
+impl Default for ContextInjection {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl Serialize for ContextInjection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ContextInjection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Self::Auto,
+            "off" => Self::Off,
+            "prompt" => Self::Prompt,
+            "mcp" => Self::Mcp,
+            _ => {
+                return Err(serde::de::Error::custom(format!(
+                    "invalid context_engine.injection '{}'; expected auto, off, prompt, or mcp",
+                    value
+                )));
+            }
+        })
     }
 }
 
@@ -190,6 +286,117 @@ pub struct NimiaConfig {
     pub context_engine: Option<ContextEngineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_engine_backend: Option<ContextEngineBackendConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectiveConfig {
+    backends: BTreeMap<AcpBackend, BackendConfig>,
+    backend_context: BTreeMap<AcpBackend, BackendContextConfig>,
+    context_engine: ContextEngineConfig,
+    memory_db_path: Option<PathBuf>,
+    skill_roots: Vec<PathBuf>,
+    mcp_servers: BTreeMap<AcpBackend, Vec<AcpMcpServer>>,
+    session_options: BTreeMap<AcpBackend, AcpSessionOptions>,
+    tool_whitelist: BTreeMap<AcpBackend, Vec<String>>,
+    recall_thresholds: RecallThresholdsConfig,
+    episodic_compaction_keep: usize,
+    embedding: Option<EmbeddingConfig>,
+}
+
+impl EffectiveConfig {
+    pub fn from_config(config: &NimiaConfig) -> Self {
+        let backends = crate::acp::ALL_BACKENDS
+            .iter()
+            .filter_map(|backend| {
+                backend_config(config, *backend)
+                    .cloned()
+                    .map(|cfg| (*backend, cfg))
+            })
+            .collect();
+        let backend_context = crate::acp::ALL_BACKENDS
+            .iter()
+            .filter_map(|backend| {
+                backend_context_config(config, *backend)
+                    .cloned()
+                    .map(|cfg| (*backend, cfg))
+            })
+            .collect();
+        let mcp_servers = crate::acp::ALL_BACKENDS
+            .iter()
+            .map(|backend| (*backend, context_mcp_servers(config, *backend)))
+            .collect();
+        let session_options = crate::acp::ALL_BACKENDS
+            .iter()
+            .map(|backend| (*backend, context_session_options(config, *backend)))
+            .collect();
+        let tool_whitelist = crate::acp::ALL_BACKENDS
+            .iter()
+            .map(|backend| (*backend, context_tool_whitelist(config, *backend)))
+            .collect();
+        Self {
+            backends,
+            backend_context,
+            context_engine: config.context_engine.clone().unwrap_or_default(),
+            memory_db_path: context_memory_db_path(config).ok(),
+            skill_roots: context_skill_roots(config),
+            mcp_servers,
+            session_options,
+            tool_whitelist,
+            recall_thresholds: context_recall_thresholds(config),
+            episodic_compaction_keep: context_episodic_compaction_keep(config),
+            embedding: context_embedding_config(config),
+        }
+    }
+
+    pub fn backend_config(&self, backend: AcpBackend) -> Option<&BackendConfig> {
+        self.backends.get(&backend)
+    }
+
+    pub fn backend_context_config(&self, backend: AcpBackend) -> Option<&BackendContextConfig> {
+        self.backend_context.get(&backend)
+    }
+
+    pub fn context_engine(&self) -> &ContextEngineConfig {
+        &self.context_engine
+    }
+
+    pub fn memory_db_path(&self) -> Option<&PathBuf> {
+        self.memory_db_path.as_ref()
+    }
+
+    pub fn skill_roots(&self) -> &[PathBuf] {
+        &self.skill_roots
+    }
+
+    pub fn context_mcp_servers(&self, backend: AcpBackend) -> Vec<AcpMcpServer> {
+        self.mcp_servers.get(&backend).cloned().unwrap_or_default()
+    }
+
+    pub fn context_session_options(&self, backend: AcpBackend) -> AcpSessionOptions {
+        self.session_options
+            .get(&backend)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn context_tool_whitelist(&self, backend: AcpBackend) -> Vec<String> {
+        self.tool_whitelist
+            .get(&backend)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn recall_thresholds(&self) -> &RecallThresholdsConfig {
+        &self.recall_thresholds
+    }
+
+    pub fn episodic_compaction_keep(&self) -> usize {
+        self.episodic_compaction_keep
+    }
+
+    pub fn embedding_config(&self) -> Option<EmbeddingConfig> {
+        self.embedding.clone()
+    }
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -525,8 +732,7 @@ pub fn context_memory_db_path(config: &NimiaConfig) -> Result<PathBuf> {
     {
         return Ok(PathBuf::from(expand_home_path(path)?));
     }
-    let home = dirs::home_dir().context("Failed to get home directory")?;
-    Ok(home.join(".i6").join("context").join("memory.sqlite"))
+    Ok(paths::StorePaths::resolve()?.memory_db())
 }
 
 pub fn context_skill_roots(config: &NimiaConfig) -> Vec<PathBuf> {
@@ -549,7 +755,7 @@ pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<Acp
     let Some(engine) = config.context_engine.as_ref() else {
         return default_context_mcp_servers();
     };
-    if !engine.enabled || engine.injection == "off" {
+    if !engine.enabled || engine.injection.is_off() {
         return Vec::new();
     }
 
@@ -702,8 +908,8 @@ fn default_context_mcp_servers() -> Vec<AcpMcpServer> {
     .collect()
 }
 
-fn default_context_injection() -> String {
-    "auto".to_string()
+fn default_context_injection() -> ContextInjection {
+    ContextInjection::Auto
 }
 
 fn default_memory_chars() -> usize {

@@ -375,7 +375,7 @@ pub struct AcpClient {
     session_options: AcpSessionOptions,
     tool_whitelist: Vec<String>,
     /// When set, each streamed output chunk is forwarded to the TUI.
-    pub stream_tx: Option<mpsc::Sender<String>>,
+    stream_tx: Option<mpsc::Sender<String>>,
 }
 
 impl AcpClient {
@@ -494,6 +494,10 @@ impl AcpClient {
             tool_whitelist,
             stream_tx: None,
         })
+    }
+
+    pub fn set_stream_sender(&mut self, tx: Option<mpsc::Sender<String>>) {
+        self.stream_tx = tx;
     }
 
     pub async fn prompt_with_cwd_timed_for_execution(

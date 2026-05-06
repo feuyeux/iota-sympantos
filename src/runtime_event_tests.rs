@@ -62,9 +62,7 @@ fn unknown_session_update_maps_to_state() {
         Some(&json!({"update":{"sessionUpdate":"thinking"}})),
     )
     .unwrap();
-    assert!(
-        matches!(event, RuntimeEvent::State(StateEvent { state, .. }) if state == "thinking")
-    );
+    assert!(matches!(event, RuntimeEvent::State(StateEvent { state, .. }) if state == "thinking"));
 }
 
 #[test]
@@ -86,7 +84,11 @@ fn session_complete_emits_token_usage_too() {
         Some(&json!({"model":"gpt-4o","usage":{"prompt_tokens":10,"completion_tokens":5}})),
     );
     assert_eq!(events.len(), 2);
-    assert!(events.iter().any(|e| matches!(e, RuntimeEvent::TokenUsage(_))));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::TokenUsage(_)))
+    );
     assert!(events.iter().any(|e| matches!(e, RuntimeEvent::State(_))));
 }
 

@@ -4,13 +4,13 @@ use std::path::PathBuf;
 
 use crate::acp::{self, AcpBackend, AcpClient, AcpPromptOutput};
 use crate::config::{
-    self, NimiaConfig, backend_config, backend_context_config, backend_process_env_with_context,
-    config_path, configured_model, normalized_acp_command,
+    EffectiveConfig, NimiaConfig, backend_process_env_with_context, config_path, configured_model,
+    normalized_acp_command,
 };
 use crate::context::{ComposeInput, ContextEngine, DialogueBuffer};
 use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
-use crate::skill::SkillRegistry;
-use crate::store::events::EventStore;
+use crate::skill::{SkillCache, SkillRegistry};
+use crate::store::events::{EventStore, ExecutionStatus};
 use crate::store::ledger::SessionLedger;
 use crate::store::memory::{
     MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType, RecallBuckets,
@@ -25,7 +25,7 @@ struct ClientKey {
 }
 
 pub struct IotaEngine {
-    config: NimiaConfig,
+    effective_config: EffectiveConfig,
     clients: BTreeMap<ClientKey, AcpClient>,
     show_native: bool,
     timeout_ms: u64,
@@ -36,6 +36,7 @@ pub struct IotaEngine {
     session_id: String,
     session_ledger: Option<SessionLedger>,
     active_backend: Option<AcpBackend>,
+    skill_cache: SkillCache,
 }
 
 impl IotaEngine {
@@ -50,11 +51,12 @@ impl IotaEngine {
         timeout_ms: u64,
         session_cwd: Option<&std::path::Path>,
     ) -> Self {
-        let context_engine = ContextEngine::from_config(config.context_engine.as_ref());
-        let embedding_cfg = config::context_embedding_config(&config);
-        let memory_store = config::context_memory_db_path(&config)
-            .ok()
-            .and_then(|path| MemoryStore::open_with_embedding(&path, embedding_cfg).ok());
+        let effective_config = EffectiveConfig::from_config(&config);
+        let context_engine = ContextEngine::from_config(Some(effective_config.context_engine()));
+        let embedding_cfg = effective_config.embedding_config();
+        let memory_store = effective_config
+            .memory_db_path()
+            .and_then(|path| MemoryStore::open_with_embedding(path, embedding_cfg).ok());
         let event_store = EventStore::default_path()
             .ok()
             .and_then(|path| EventStore::open(&path).ok());
@@ -69,7 +71,7 @@ impl IotaEngine {
             })
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         Self {
-            config,
+            effective_config,
             clients: BTreeMap::new(),
             show_native,
             timeout_ms,
@@ -80,19 +82,15 @@ impl IotaEngine {
             session_id,
             session_ledger,
             active_backend: None,
+            skill_cache: SkillCache::default(),
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn config(&self) -> &NimiaConfig {
-        &self.config
     }
 
     /// Set an output-streaming sender on all currently open ACP clients.
     /// New chunks from `session/update` events are forwarded to `tx` as they arrive.
     pub fn set_stream_sender(&mut self, tx: Option<tokio::sync::mpsc::Sender<String>>) {
         for client in self.clients.values_mut() {
-            client.stream_tx = tx.clone();
+            client.set_stream_sender(tx.clone());
         }
     }
 
@@ -113,10 +111,10 @@ impl IotaEngine {
         let mut poll_interval_ms: u64 = 50;
         loop {
             if let Ok(Some(record)) = store.get_execution(&running.execution_id) {
-                if record.status == "completed" {
+                if record.status == ExecutionStatus::Completed {
                     return store.output_text(&running.execution_id).ok().flatten();
                 }
-                if record.status != "running" {
+                if record.status != ExecutionStatus::Running {
                     return None;
                 }
             }
@@ -138,7 +136,7 @@ impl IotaEngine {
             if self.clients.contains_key(&key) {
                 continue;
             }
-            let Some(section) = backend_config(&self.config, backend) else {
+            let Some(section) = self.effective_config.backend_config(backend) else {
                 continue;
             };
             if !section.enabled {
@@ -153,12 +151,12 @@ impl IotaEngine {
                 continue;
             }
 
-            let backend_context = backend_context_config(&self.config, backend);
+            let backend_context = self.effective_config.backend_context_config(backend);
             let env = backend_process_env_with_context(backend, section, backend_context);
             let command = normalized_acp_command(backend, section, acp_config);
-            let mcp_servers = config::context_mcp_servers(&self.config, backend);
-            let session_options = config::context_session_options(&self.config, backend);
-            let tool_whitelist = config::context_tool_whitelist(&self.config, backend);
+            let mcp_servers = self.effective_config.context_mcp_servers(backend);
+            let session_options = self.effective_config.context_session_options(backend);
+            let tool_whitelist = self.effective_config.context_tool_whitelist(backend);
             let cwd = cwd.clone();
             let show_native = self.show_native;
             let timeout_ms = self.timeout_ms;
@@ -222,8 +220,11 @@ impl IotaEngine {
     ) -> Result<AcpPromptOutput> {
         let request_hash = crate::store::events::request_hash(&backend.to_string(), &cwd, prompt);
         tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
-        let configured_roots = config::context_skill_roots(&self.config);
-        let skills = SkillRegistry::load(&cwd, &configured_roots);
+        let skills = SkillRegistry::load_cached(
+            &cwd,
+            self.effective_config.skill_roots(),
+            &mut self.skill_cache,
+        );
         let matched_skill = skills.match_skill(backend, prompt);
         let skip_replay = matched_skill.is_some()
             || is_memory_query(prompt)
@@ -241,7 +242,10 @@ impl IotaEngine {
             self.dialogue.push_turn(backend, prompt, &output);
             return Ok(AcpPromptOutput::synthetic(output));
         }
-        let model = backend_config(&self.config, backend).and_then(configured_model);
+        let model = self
+            .effective_config
+            .backend_config(backend)
+            .and_then(configured_model);
         self.ensure_session_ledger(backend, &cwd, model.as_deref());
         let handoff = self.prepare_handoff(backend, &cwd);
         let execution_id = match self.event_store.as_ref() {
@@ -302,13 +306,13 @@ impl IotaEngine {
             });
             self.record_event(&execution_id, output_event.clone());
             events.push(output_event);
-            self.finish_execution(&execution_id, "completed");
+            self.finish_execution(&execution_id, ExecutionStatus::Completed);
             self.record_turn(
                 backend,
                 execution_id.as_deref(),
                 &request_hash,
                 &text,
-                "completed",
+                ExecutionStatus::Completed.as_str(),
             );
             self.active_backend = Some(backend);
             self.dialogue.push_turn(backend, prompt, &text);
@@ -333,13 +337,13 @@ impl IotaEngine {
                 });
                 self.record_event(&execution_id, output_event.clone());
                 events.push(output_event);
-                self.finish_execution(&execution_id, "completed");
+                self.finish_execution(&execution_id, ExecutionStatus::Completed);
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &skill_output.text,
-                    "completed",
+                    ExecutionStatus::Completed.as_str(),
                 );
                 self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &skill_output.text);
@@ -357,7 +361,7 @@ impl IotaEngine {
         }
 
         let memory = self.memory_store.as_ref().and_then(|store| {
-            let thresholds_cfg = config::context_recall_thresholds(&self.config);
+            let thresholds_cfg = self.effective_config.recall_thresholds();
             let thresholds = RecallThresholds {
                 identity: thresholds_cfg.identity,
                 preference: thresholds_cfg.preference,
@@ -398,13 +402,13 @@ impl IotaEngine {
             });
             self.record_event(&execution_id, output_event.clone());
             events.push(output_event);
-            self.finish_execution(&execution_id, "completed");
+            self.finish_execution(&execution_id, ExecutionStatus::Completed);
             self.record_turn(
                 backend,
                 execution_id.as_deref(),
                 &request_hash,
                 &text,
-                "completed",
+                ExecutionStatus::Completed.as_str(),
             );
             self.active_backend = Some(backend);
             self.dialogue.push_turn(backend, prompt, &text);
@@ -484,14 +488,18 @@ impl IotaEngine {
                 if let Some(session_id) = output.backend_session_id.as_deref() {
                     self.record_backend_session_id(backend, &cwd, session_id);
                 }
-                self.finish_execution_with_timing(&execution_id, "completed", &output.timing);
+                self.finish_execution_with_timing(
+                    &execution_id,
+                    ExecutionStatus::Completed,
+                    &output.timing,
+                );
                 tracing::info!(backend = %backend, execution_id = execution_id.as_deref(), total_ms = output.timing.total_ms, prompt_ms = output.timing.prompt_ms, "execution completed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &output.text,
-                    "completed",
+                    ExecutionStatus::Completed.as_str(),
                 );
                 self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &output.text);
@@ -514,14 +522,14 @@ impl IotaEngine {
                         data: None,
                     }),
                 );
-                self.finish_execution(&execution_id, "failed");
+                self.finish_execution(&execution_id, ExecutionStatus::Failed);
                 tracing::warn!(backend = %backend, execution_id = execution_id.as_deref(), error = %err, "execution failed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &err.to_string(),
-                    "failed",
+                    ExecutionStatus::Failed.as_str(),
                 );
                 Err(err)
             }
@@ -680,7 +688,7 @@ impl IotaEngine {
         }
     }
 
-    fn finish_execution(&self, execution_id: &Option<String>, status: &str) {
+    fn finish_execution(&self, execution_id: &Option<String>, status: ExecutionStatus) {
         if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
             let _ = store.finish_execution(execution_id, status);
         }
@@ -689,7 +697,7 @@ impl IotaEngine {
     fn finish_execution_with_timing(
         &self,
         execution_id: &Option<String>,
-        status: &str,
+        status: ExecutionStatus,
         timing: &acp::AcpPromptTiming,
     ) {
         if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
@@ -761,7 +769,7 @@ Output: {}",
             ttl_days: 7,
             supersedes: None,
         });
-        let keep = config::context_episodic_compaction_keep(&self.config);
+        let keep = self.effective_config.episodic_compaction_keep();
         let _ = store.compact_episodic_scope(MemoryScope::Session, &self.session_id, keep);
     }
 
@@ -786,13 +794,16 @@ Output: {}",
 
     async fn start_client(&self, backend: AcpBackend, cwd: PathBuf) -> Result<AcpClient> {
         let path = config_path()?;
-        let section = backend_config(&self.config, backend).with_context(|| {
-            format!(
-                "Missing backend section for {} in {}",
-                backend,
-                path.display()
-            )
-        })?;
+        let section = self
+            .effective_config
+            .backend_config(backend)
+            .with_context(|| {
+                format!(
+                    "Missing backend section for {} in {}",
+                    backend,
+                    path.display()
+                )
+            })?;
         if !section.enabled {
             bail!("Backend {} is disabled in {}", backend, path.display());
         }
@@ -817,12 +828,12 @@ Output: {}",
             backend_process_env_with_context(
                 backend,
                 section,
-                backend_context_config(&self.config, backend),
+                self.effective_config.backend_context_config(backend),
             ),
             Some(normalized_acp_command(backend, section, acp_config)),
-            config::context_mcp_servers(&self.config, backend),
-            config::context_session_options(&self.config, backend),
-            config::context_tool_whitelist(&self.config, backend),
+            self.effective_config.context_mcp_servers(backend),
+            self.effective_config.context_session_options(backend),
+            self.effective_config.context_tool_whitelist(backend),
             self.show_native,
             self.timeout_ms,
         )

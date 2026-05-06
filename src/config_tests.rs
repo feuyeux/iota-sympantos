@@ -62,3 +62,26 @@ fn expand_home_path_leaves_non_tilde_unchanged() {
     );
     assert_eq!(expand_home_path("relative").unwrap(), "relative");
 }
+
+#[test]
+fn context_injection_deserializes_normalized_values() {
+    let injection: ContextInjection = serde_yaml::from_str("\" McP \"").unwrap();
+    assert_eq!(injection, ContextInjection::Mcp);
+    assert_eq!(serde_yaml::to_string(&injection).unwrap(), "mcp\n");
+}
+
+#[test]
+fn context_injection_rejects_unknown_values() {
+    let err = serde_yaml::from_str::<ContextInjection>("\"maybe\"").unwrap_err();
+    assert!(err.to_string().contains("invalid context_engine.injection"));
+}
+
+#[test]
+fn store_paths_join_expected_database_names() {
+    let root = std::path::PathBuf::from("root").join("context");
+    let paths = paths::StorePaths::new(root.clone());
+    assert_eq!(paths.events_db(), root.join("events.sqlite"));
+    assert_eq!(paths.memory_db(), root.join("memory.sqlite"));
+    assert_eq!(paths.sessions_db(), root.join("sessions.sqlite"));
+    assert_eq!(paths.approvals_db(), root.join("approvals.sqlite"));
+}

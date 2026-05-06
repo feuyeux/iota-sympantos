@@ -27,6 +27,15 @@ impl MemoryType {
             Self::Procedural => "procedural",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "semantic" => Some(Self::Semantic),
+            "episodic" => Some(Self::Episodic),
+            "procedural" => Some(Self::Procedural),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,6 +54,16 @@ impl MemoryFacet {
             Self::Preference => "preference",
             Self::Strategic => "strategic",
             Self::Domain => "domain",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "identity" => Some(Self::Identity),
+            "preference" => Some(Self::Preference),
+            "strategic" => Some(Self::Strategic),
+            "domain" => Some(Self::Domain),
+            _ => None,
         }
     }
 }
@@ -67,15 +86,25 @@ impl MemoryScope {
             Self::Global => "global",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "session" => Some(Self::Session),
+            "project" => Some(Self::Project),
+            "user" => Some(Self::User),
+            "global" => Some(Self::Global),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryRecord {
     pub id: String,
     #[serde(rename = "type")]
-    pub memory_type: String,
-    pub facet: Option<String>,
-    pub scope: String,
+    pub memory_type: MemoryType,
+    pub facet: Option<MemoryFacet>,
+    pub scope: MemoryScope,
     pub scope_id: String,
     pub content: String,
     pub confidence: f64,
@@ -169,24 +198,16 @@ impl MemoryStore {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open memory store {}", path.display()))?;
-        let conn = Arc::new(Mutex::new(conn));
-        let engine = EmbeddingEngine::from_config(config);
-        let store = Self {
-            conn,
-            fts_available: false,
-            embedding: engine,
-        };
-        let fts_available = store.init()?;
+        let fts_available = init_schema(&conn)?;
         Ok(Self {
-            conn: store.conn,
+            conn: Arc::new(Mutex::new(conn)),
             fts_available,
-            embedding: store.embedding,
+            embedding: EmbeddingEngine::from_config(config),
         })
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        Ok(home.join(".i6").join("context").join("memory.sqlite"))
+        Ok(crate::config::paths::StorePaths::resolve()?.memory_db())
     }
 
     pub fn insert(&self, input: MemoryInsert) -> Result<String> {
@@ -461,7 +482,14 @@ impl MemoryStore {
 
         let mut scored = Vec::new();
         for row in rows {
-            let (record, blob) = row?;
+            let (record, blob) = match row {
+                Ok(value) => value,
+                Err(err) if is_invalid_memory_taxonomy_error(&err) => {
+                    warn_invalid_memory_taxonomy(&err);
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
             let vector = embedding::from_blob(&blob);
             let similarity = embedding::cosine(&query_vec, &vector);
             let overlap = token_overlap_score(&query_canonical, &record.content);
@@ -614,11 +642,34 @@ impl MemoryStore {
         Ok(records)
     }
 
-    fn init(&self) -> Result<bool> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS memory (
+    fn upsert_embedding(
+        &self,
+        conn: &Connection,
+        memory_id: &str,
+        content: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        let vector = self.embedding.embed(content);
+        if vector.is_empty() {
+            return Ok(());
+        }
+        let blob = embedding::to_blob(&vector);
+        conn.execute(
+            "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               vector_blob = excluded.vector_blob,
+               updated_at = excluded.updated_at",
+            params![memory_id, blob, updated_at],
+        )?;
+        Ok(())
+    }
+}
+
+fn init_schema(conn: &Connection) -> Result<bool> {
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL CHECK(type IN ('semantic','episodic','procedural')),
   facet TEXT CHECK(facet IN ('identity','preference','strategic','domain')),
@@ -654,32 +705,8 @@ CREATE VIEW IF NOT EXISTS memories AS SELECT * FROM memory;
 CREATE TRIGGER IF NOT EXISTS memories_delete INSTEAD OF DELETE ON memories BEGIN
   DELETE FROM memory WHERE id = old.id;
 END;",
-        )?;
-        Ok(init_fts(&conn).is_ok())
-    }
-
-    fn upsert_embedding(
-        &self,
-        conn: &Connection,
-        memory_id: &str,
-        content: &str,
-        updated_at: i64,
-    ) -> Result<()> {
-        let vector = self.embedding.embed(content);
-        if vector.is_empty() {
-            return Ok(());
-        }
-        let blob = embedding::to_blob(&vector);
-        conn.execute(
-            "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(memory_id) DO UPDATE SET
-               vector_blob = excluded.vector_blob,
-               updated_at = excluded.updated_at",
-            params![memory_id, blob, updated_at],
-        )?;
-        Ok(())
-    }
+    )?;
+    Ok(init_fts(conn).is_ok())
 }
 
 fn user_scope_candidates(user_id: &str) -> Vec<String> {
@@ -769,11 +796,16 @@ fn latest_related_memory_id(
 }
 
 fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecord> {
+    let memory_type = row.get::<_, String>(1)?;
+    let facet = row.get::<_, Option<String>>(2)?;
+    let scope = row.get::<_, String>(3)?;
     Ok(MemoryRecord {
         id: row.get(0)?,
-        memory_type: row.get(1)?,
-        facet: row.get(2)?,
-        scope: row.get(3)?,
+        memory_type: parse_memory_type_column(memory_type, 1)?,
+        facet: facet
+            .map(|value| parse_memory_facet_column(value, 2))
+            .transpose()?,
+        scope: parse_memory_scope_column(scope, 3)?,
         scope_id: row.get(4)?,
         content: row.get(5)?,
         confidence: row.get(6)?,
@@ -783,12 +815,52 @@ fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecor
     })
 }
 
+fn parse_memory_type_column(value: String, column: usize) -> rusqlite::Result<MemoryType> {
+    MemoryType::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
+}
+
+fn parse_memory_facet_column(value: String, column: usize) -> rusqlite::Result<MemoryFacet> {
+    MemoryFacet::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
+}
+
+fn parse_memory_scope_column(value: String, column: usize) -> rusqlite::Result<MemoryScope> {
+    MemoryScope::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
+}
+
+fn invalid_memory_taxonomy_value(column: usize, value: String) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        rusqlite::types::Type::Text,
+        format!("invalid memory taxonomy value: {}", value).into(),
+    )
+}
+
+fn is_invalid_memory_taxonomy_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::FromSqlConversionFailure(_, rusqlite::types::Type::Text, source)
+            if source
+                .to_string()
+                .starts_with("invalid memory taxonomy value:")
+    )
+}
+
+fn warn_invalid_memory_taxonomy(err: &rusqlite::Error) {
+    tracing::warn!(error = %err, "skipping memory record with unknown taxonomy value");
+}
+
 fn rows_to_records(
     rows: impl Iterator<Item = rusqlite::Result<MemoryRecord>>,
 ) -> Result<Vec<MemoryRecord>> {
     let mut records = Vec::new();
     for row in rows {
-        records.push(row?);
+        match row {
+            Ok(record) => records.push(record),
+            Err(err) if is_invalid_memory_taxonomy_error(&err) => {
+                warn_invalid_memory_taxonomy(&err);
+            }
+            Err(err) => return Err(err.into()),
+        }
     }
     Ok(records)
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::store::memory::MemoryRecord;
+use crate::store::memory::{MemoryFacet, MemoryRecord, MemoryScope, MemoryType};
 
 #[test]
 fn memory_inject_payload_uses_configured_budget() {
@@ -26,9 +26,9 @@ fn memory_inject_payload_uses_configured_budget() {
 fn memory_record(content: &str) -> MemoryRecord {
     MemoryRecord {
         id: uuid::Uuid::new_v4().to_string(),
-        memory_type: "semantic".to_string(),
-        facet: Some("identity".to_string()),
-        scope: "user".to_string(),
+        memory_type: MemoryType::Semantic,
+        facet: Some(MemoryFacet::Identity),
+        scope: MemoryScope::User,
         scope_id: "local-user".to_string(),
         content: content.to_string(),
         confidence: 1.0,
