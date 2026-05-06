@@ -42,6 +42,16 @@ pub struct BackendConfig {
     pub tool_whitelist: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct EmbeddingConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ContextEngineConfig {
     #[serde(default = "default_enabled")]
@@ -57,9 +67,15 @@ pub struct ContextEngineConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budgets: Option<ContextBudgetsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recall_thresholds: Option<RecallThresholdsConfig>,
+    #[serde(default = "default_episodic_compaction_keep")]
+    pub episodic_compaction_keep: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<CommandConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fun: Option<CommandConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<EmbeddingConfig>,
 }
 
 impl Default for ContextEngineConfig {
@@ -71,8 +87,11 @@ impl Default for ContextEngineConfig {
             skill_roots: Vec::new(),
             native_overlays: false,
             budgets: None,
+            recall_thresholds: None,
+            episodic_compaction_keep: default_episodic_compaction_keep(),
             mcp: None,
             fun: None,
+            embedding: None,
         }
     }
 }
@@ -96,6 +115,35 @@ impl Default for ContextBudgetsConfig {
             skills_chars: default_skills_chars(),
             dialogue_chars: default_dialogue_chars(),
             workspace_chars: default_workspace_chars(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RecallThresholdsConfig {
+    #[serde(default = "default_identity_threshold")]
+    pub identity: f64,
+    #[serde(default = "default_preference_threshold")]
+    pub preference: f64,
+    #[serde(default = "default_strategic_threshold")]
+    pub strategic: f64,
+    #[serde(default = "default_domain_threshold")]
+    pub domain: f64,
+    #[serde(default = "default_procedural_threshold")]
+    pub procedural: f64,
+    #[serde(default = "default_episodic_threshold")]
+    pub episodic: f64,
+}
+
+impl Default for RecallThresholdsConfig {
+    fn default() -> Self {
+        Self {
+            identity: default_identity_threshold(),
+            preference: default_preference_threshold(),
+            strategic: default_strategic_threshold(),
+            domain: default_domain_threshold(),
+            procedural: default_procedural_threshold(),
+            episodic: default_episodic_threshold(),
         }
     }
 }
@@ -287,6 +335,34 @@ pub fn backend_process_env_with_context(
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_identity_threshold() -> f64 {
+    0.85
+}
+
+fn default_preference_threshold() -> f64 {
+    0.80
+}
+
+fn default_strategic_threshold() -> f64 {
+    0.80
+}
+
+fn default_domain_threshold() -> f64 {
+    0.80
+}
+
+fn default_procedural_threshold() -> f64 {
+    0.75
+}
+
+fn default_episodic_threshold() -> f64 {
+    0.70
+}
+
+fn default_episodic_compaction_keep() -> usize {
+    40
 }
 
 pub fn expand_home_path(value: &str) -> Result<String> {
@@ -543,6 +619,29 @@ pub fn context_tool_whitelist(config: &NimiaConfig, backend: AcpBackend) -> Vec<
         .unwrap_or_default()
 }
 
+pub fn context_recall_thresholds(config: &NimiaConfig) -> RecallThresholdsConfig {
+    config
+        .context_engine
+        .as_ref()
+        .and_then(|cfg| cfg.recall_thresholds.clone())
+        .unwrap_or_default()
+}
+
+pub fn context_episodic_compaction_keep(config: &NimiaConfig) -> usize {
+    config
+        .context_engine
+        .as_ref()
+        .map(|cfg| cfg.episodic_compaction_keep.max(1))
+        .unwrap_or_else(default_episodic_compaction_keep)
+}
+
+pub fn context_embedding_config(config: &NimiaConfig) -> Option<EmbeddingConfig> {
+    config
+        .context_engine
+        .as_ref()
+        .and_then(|cfg| cfg.embedding.clone())
+}
+
 fn yaml_flag(value: &serde_yaml::Value, try_is_enabled: bool) -> bool {
     match value {
         serde_yaml::Value::Bool(value) => *value,
@@ -624,32 +723,5 @@ fn default_workspace_chars() -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mcp_servers_default_to_backend_capability() {
-        let config = NimiaConfig {
-            context_engine: Some(ContextEngineConfig::default()),
-            ..NimiaConfig::default()
-        };
-        assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 0);
-        assert_eq!(context_mcp_servers(&config, AcpBackend::Gemini).len(), 2);
-    }
-
-    #[test]
-    fn mcp_try_enables_claude_and_codex() {
-        let config = NimiaConfig {
-            context_engine: Some(ContextEngineConfig::default()),
-            context_engine_backend: Some(ContextEngineBackendConfig {
-                codex: Some(BackendContextConfig {
-                    mcp_session_new: Some(serde_yaml::Value::String("try".to_string())),
-                    ..BackendContextConfig::default()
-                }),
-                ..ContextEngineBackendConfig::default()
-            }),
-            ..NimiaConfig::default()
-        };
-        assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 2);
-    }
-}
+#[path = "config_tests.rs"]
+mod tests;

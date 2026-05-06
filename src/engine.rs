@@ -14,6 +14,7 @@ use crate::store::events::EventStore;
 use crate::store::ledger::SessionLedger;
 use crate::store::memory::{
     MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType, RecallBuckets,
+    RecallThresholds,
 };
 use crate::utils::summarize;
 
@@ -50,9 +51,10 @@ impl IotaEngine {
         session_cwd: Option<&std::path::Path>,
     ) -> Self {
         let context_engine = ContextEngine::from_config(config.context_engine.as_ref());
+        let embedding_cfg = config::context_embedding_config(&config);
         let memory_store = config::context_memory_db_path(&config)
             .ok()
-            .and_then(|path| MemoryStore::open(&path).ok());
+            .and_then(|path| MemoryStore::open_with_embedding(&path, embedding_cfg).ok());
         let event_store = EventStore::default_path()
             .ok()
             .and_then(|path| EventStore::open(&path).ok());
@@ -225,7 +227,8 @@ impl IotaEngine {
         let matched_skill = skills.match_skill(backend, prompt);
         let skip_replay = matched_skill.is_some()
             || is_memory_query(prompt)
-            || !classify_memory_prompt(prompt).is_empty();
+            || !classify_memory_prompt(prompt).is_empty()
+            || prompt.contains("iota_memory_write");
         if !skip_replay && let Some(output) = self.try_replay_completed(backend, &request_hash) {
             self.record_cache_hit();
             tracing::info!(backend = %backend, request_hash = %request_hash, "replaying completed execution");
@@ -275,7 +278,8 @@ impl IotaEngine {
             }),
         );
 
-        let extracted_memories = if is_memory_query(prompt) {
+        let extracted_memories = if is_memory_query(prompt) || prompt.contains("iota_memory_write")
+        {
             Vec::new()
         } else {
             self.extract_structured_memories(backend, &cwd, prompt, execution_id.as_deref())
@@ -353,8 +357,22 @@ impl IotaEngine {
         }
 
         let memory = self.memory_store.as_ref().and_then(|store| {
+            let thresholds_cfg = config::context_recall_thresholds(&self.config);
+            let thresholds = RecallThresholds {
+                identity: thresholds_cfg.identity,
+                preference: thresholds_cfg.preference,
+                strategic: thresholds_cfg.strategic,
+                domain: thresholds_cfg.domain,
+                procedural: thresholds_cfg.procedural,
+                episodic: thresholds_cfg.episodic,
+            };
             store
-                .recall_buckets("local-user", &cwd.display().to_string(), &self.session_id)
+                .recall_buckets_with_thresholds(
+                    "local-user",
+                    &cwd.display().to_string(),
+                    &self.session_id,
+                    thresholds,
+                )
                 .ok()
         });
         let memory_event = memory.as_ref().map(|buckets| {
@@ -737,6 +755,8 @@ Output: {}",
             ttl_days: 7,
             supersedes: None,
         });
+        let keep = config::context_episodic_compaction_keep(&self.config);
+        let _ = store.compact_episodic_scope(MemoryScope::Session, &self.session_id, keep);
     }
 
     async fn ensure_client(&mut self, backend: AcpBackend, cwd: PathBuf) -> Result<bool> {
@@ -1030,44 +1050,5 @@ fn memory_bucket_summary(records: &[crate::store::memory::MemoryRecord]) -> serd
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::store::memory::MemoryRecord;
-
-    #[test]
-    fn memory_inject_payload_uses_configured_budget() {
-        let buckets = RecallBuckets {
-            identity: vec![memory_record("one")],
-            preference: vec![memory_record("two")],
-            ..Default::default()
-        };
-        let payload = memory_inject_payload(&buckets, 5);
-        let budget = payload.get("budget").unwrap();
-
-        assert_eq!(budget.get("memory_chars").and_then(|v| v.as_u64()), Some(5));
-        assert_eq!(budget.get("total_chars").and_then(|v| v.as_u64()), Some(6));
-        assert_eq!(
-            budget.get("truncated").and_then(|v| v.as_bool()),
-            Some(true)
-        );
-        assert_eq!(
-            budget.get("excluded_count").and_then(|v| v.as_u64()),
-            Some(1)
-        );
-    }
-
-    fn memory_record(content: &str) -> MemoryRecord {
-        MemoryRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            memory_type: "semantic".to_string(),
-            facet: Some("identity".to_string()),
-            scope: "user".to_string(),
-            scope_id: "local-user".to_string(),
-            content: content.to_string(),
-            confidence: 1.0,
-            created_at: 1,
-            updated_at: 1,
-            expires_at: 999,
-        }
-    }
-}
+#[path = "engine_tests.rs"]
+mod tests;

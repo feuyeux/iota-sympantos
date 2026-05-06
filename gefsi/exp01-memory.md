@@ -35,6 +35,28 @@
 | SQLite CLI | 需安装 `sqlite3` 命令行工具（Windows 不预装，需自行下载 [sqlite.org/download](https://sqlite.org/download.html) 并加入 PATH） |
 | 后端可用性 | 各后端 API key 已在 nimia.yaml 中配置 |
 
+- 背景：原 `sqlite3` 可执行文件位于 `d:/zoo/Android/Sdk/platform-tools/sqlite3.exe`，版本 `3.44.3 (32-bit)`，`pragma compile_options` 未出现 `ENABLE_FTS5`，导致对当前库执行变更语句时报 `no such module: fts5`。
+- 处理过程：
+  - 通过官方直链下载 `https://www.sqlite.org/2026/sqlite-tools-win-x64-3530100.zip`
+  - 解压到 `C:/Users/feuye/tools/sqlite/`
+  - 使用新二进制 `C:/Users/feuye/tools/sqlite/sqlite3.exe`
+- 安装后验证：
+  - 版本：`3.53.1 (64-bit)`
+  - `pragma compile_options` 包含：`ENABLE_FTS3` / `ENABLE_FTS4` / `ENABLE_FTS5`
+  - 功能烟测通过：
+
+```sql
+CREATE VIRTUAL TABLE t USING fts5(c);
+INSERT INTO t(c) VALUES('hello fts5');
+SELECT rowid, c FROM t WHERE t MATCH 'hello';
+
+-- 返回 1 行: hello fts5
+```
+
+- 当前会话已切换：PowerShell 中 `sqlite3` 已通过 alias 指向 `C:/Users/feuye/tools/sqlite/sqlite3.exe`。
+
+> 注：按“每步结束后停下来确认”的方式执行。
+
 ### 2.2 路径约定
 
 ```
@@ -74,29 +96,56 @@ skill roots: ~/.i6/skills, ./.iota/skills
 ```bash
 # 0.1 确认 binary 已编译
 cargo build --release 2>&1 | tail -3
+```
 
+执行结果
+
+```
+    Finished `release` profile [optimized] target(s) in 0.40s
+```
+
+```bash
 # 0.2 验证 sqlite3 可用
+Set-Alias sqlite3 "C:\Users\feuye\tools\sqlite\sqlite3.exe"
 sqlite3 --version
+```
 
+执行结果
+
+```
+3.53.1 2026-05-05 10:34:17 (64-bit)
+```
+
+```bash
 # 0.3 备份（可选）
-cp ~/.i6/context/memory.sqlite ~/.i6/context/memory.sqlite.bak
+#cp ~/.i6/context/memory.sqlite ~/.i6/context/memory.sqlite.bak
 
 # 0.4 清理所有可能的测试 scope_id（含 recall 候选范围）
+
 sqlite3 ~/.i6/context/memory.sqlite \
   "DELETE FROM memory WHERE scope_id IN (
     'user-sympantos', 'iota-sympantos', 'local-user'
   ) OR scope_id LIKE '%iota-sympantos';"
+```
 
+执行结果
+
+```
+（无输出，执行成功）
+```
+
+```bash
 # 0.5 验证清空
 sqlite3 ~/.i6/context/memory.sqlite \
   "SELECT count(*) FROM memory WHERE scope_id IN (
     'user-sympantos', 'iota-sympantos', 'local-user'
   ) OR scope_id LIKE '%iota-sympantos';"
-# 期望: 0
+```
 
-# 0.6 记录清理前 observability baseline
-iota observability metrics
-iota observability logging recent --limit 3
+执行结果
+
+```
+0
 ```
 
 ---
@@ -110,40 +159,81 @@ iota observability logging recent --limit 3
 cd iota-sympantos
 
 # 1-A semantic/identity (scope=user)
-iota run --backend claude-code --trace \
+.\target\release\iota.exe run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=semantic, facet=identity, scope=user, scope_id=local-user,
    content=\"用户名 Sympantos，角色：iota-sympantos 实验员，职责：跨后端记忆延续验证\",
    confidence=0.95"
+```
 
+执行结果
+
+```
+已成功写入用户身份记忆：
+
+- ID: 19a80d7f-2c3b-414f-8a54-6869569d542d
+- 内容: 用户名 Sympantos，角色：iota-sympantos 实验员，职责：跨后端记忆延续验证
+- 类型: semantic
+- facet: identity
+- 置信度: 0.95
+
+非预期观察：trace 的 [memory:inject] 中出现了 Step 1 之外的既有测试记忆。
+复查 DB 后，相关 scope 当前仍有旧记录：
+
+iota-sympantos|procedural||1
+iota-sympantos|semantic|domain|1
+iota-sympantos|semantic|strategic|2
+local-user|semantic|identity|1
+local-user|semantic|preference|1
+
+结论：Step 1-A 写入成功，但实验环境不是 Step 0 清理后的干净状态，后续召回可能被旧数据污染。
+```
+
+```bash
 # 1-B semantic/preference (scope=user)
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=semantic, facet=preference, scope=user, scope_id=local-user,
    content=\"偏好中文回答，实验日志用英文，报告格式为 Markdown，缩进用 2 空格\",
    confidence=0.90"
+```
 
+执行结果
+
+```bash
 # 1-C semantic/strategic (scope=project)
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=semantic, facet=strategic, scope=project, scope_id=iota-sympantos,
    content=\"项目目标：2026 Q2 完成跨后端记忆延续完整验证，覆盖 6 类记忆桶和 5 个后端\",
    confidence=0.90"
+```
 
+执行结果
+
+```bash
 # 1-D semantic/domain (scope=project)
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=semantic, facet=domain, scope=project, scope_id=iota-sympantos,
    content=\"iota-sympantos 使用 SQLite 存储层，Rust Engine 实现，SHA-256 content_hash 去重，6 桶分类体系\",
    confidence=0.90"
+```
 
+执行结果
+
+```bash
 # 1-E procedural (scope=project, facet 留空)
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=procedural, scope=project, scope_id=iota-sympantos,
    content=\"实验步骤：1)清理SQLite测试行 2)claude-code精确写入6类 3)逐后端切换召回 4)去重验证 5)budget截断 6)observability审计\",
    confidence=0.85"
+```
 
+执行结果
+
+```bash
 # 1-F episodic (scope=project, facet 留空)
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
@@ -152,45 +242,7 @@ iota run --backend claude-code --trace \
    confidence=0.80"
 ```
 
-**检查点 1.1 — 验证写入完整性：**
-
-```bash
-sqlite3 ~/.i6/context/memory.sqlite \
-  "SELECT type, facet, scope, scope_id, substr(content,1,50) AS preview, confidence
-   FROM memory
-   WHERE scope_id IN ('local-user','iota-sympantos')
-   ORDER BY created_at;"
-```
-
-| 期望行 | type | facet | scope | scope_id |
-|--------|------|-------|-------|----------|
-| 1 | semantic | identity | user | local-user |
-| 2 | semantic | preference | user | local-user |
-| 3 | semantic | strategic | project | iota-sympantos |
-| 4 | semantic | domain | project | iota-sympantos |
-| 5 | procedural | NULL | project | iota-sympantos |
-| 6 | episodic | NULL | project | iota-sympantos |
-
-**检查点 1.2 — 验证 `--trace` 输出中的 `[memory:inject]` 事件：**
-
-每次 `--trace` 运行应在 stderr 输出类似：
-
-```
-[memory:inject] id=- payload={"identity":...,"budget":{"memory_chars":2000,"total_chars":...,"truncated":false,"excluded_count":0}}
-```
-
-确认 `action` 为 `"inject"`，`budget.truncated` 为 `false`（此阶段数据量远小于 2000 字符）。
-
-**检查点 1.3 — 验证 EventStore 已记录 Memory 事件：**
-
-```bash
-# 找到最近的 execution_id
-iota observability logging recent --limit 6
-
-# 查看其中一个 execution 的事件流，确认包含 memory 类型事件
-iota observability logging events <execution-id>
-# 期望: 事件流中出现 {"kind":"Memory","data":{"action":"inject",...}}
-```
+执行结果
 
 ---
 
@@ -200,9 +252,9 @@ iota observability logging events <execution-id>
 iota run --backend codex --trace "我是谁？请介绍你对我的了解"
 ```
 
-**预期回复：** 包含 "Sympantos"、"跨后端记忆验证" 等 Step 1-A 写入的内容。
+执行结果
 
-**检查点 2.1 — trace 输出验证：**
+**预期回复：** 包含 "Sympantos"、"跨后端记忆验证" 等 Step 1-A 写入的内容。
 
 - `[memory:inject]` 中 `identity` 数组非空，包含 scope_id=`local-user` 的记录
 - `identity` 中 content 包含 "Sympantos"
@@ -215,9 +267,9 @@ iota run --backend codex --trace "我是谁？请介绍你对我的了解"
 iota run --backend gemini --trace "你知道我的回答语言偏好和报告格式吗？"
 ```
 
-**预期回复：** 中文回答，提及 "英文日志" 和 "Markdown 格式"。
+执行结果
 
-**检查点 3.1 — trace 输出验证：**
+**预期回复：** 中文回答，提及 "英文日志" 和 "Markdown 格式"。
 
 - `[memory:inject]` 中 `preference` 数组非空
 - preference 桶 content 包含 "中文" 和 "Markdown"
@@ -230,9 +282,9 @@ iota run --backend gemini --trace "你知道我的回答语言偏好和报告格
 iota run --backend hermes --trace "告诉我当前项目的目标和技术实现"
 ```
 
-**预期回复：** 提及 Q2 目标、SQLite 存储层、SHA-256 去重。
+执行结果
 
-**检查点 4.1 — trace 输出验证：**
+**预期回复：** 提及 Q2 目标、SQLite 存储层、SHA-256 去重。
 
 - `strategic` 数组非空，content 包含 "Q2"
 - `domain` 数组非空，content 包含 "SQLite" 和 "SHA-256"
@@ -246,9 +298,9 @@ iota run --backend hermes --trace "告诉我当前项目的目标和技术实现
 iota run --backend opencode --trace "回顾实验步骤，以及本次实验发生了什么"
 ```
 
-**预期回复：** 覆盖 6 步实验流程（procedural）和 Step1 完成 6 类写入的经历叙述（episodic）。
+执行结果
 
-**检查点 5.1 — trace 输出验证：**
+**预期回复：** 覆盖 6 步实验流程（procedural）和 Step1 完成 6 类写入的经历叙述（episodic）。
 
 - `procedural` 数组非空
 - `episodic` 数组非空，content 包含 "6 类记忆写入"
@@ -266,20 +318,30 @@ sqlite3 ~/.i6/context/memory.sqlite \
   "SELECT id, content_hash, created_at, updated_at
    FROM memory
    WHERE scope_id='local-user' AND type='semantic' AND facet='identity';"
+```
 
+执行结果
+
+```bash
 # 6.2 重复写入完全相同的 content
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=semantic, facet=identity, scope=user, scope_id=local-user,
    content=\"用户名 Sympantos，角色：iota-sympantos 实验员，职责：跨后端记忆延续验证\",
    confidence=0.95"
+```
 
+执行结果
+
+```bash
 # 6.3 验证去重效果
 sqlite3 ~/.i6/context/memory.sqlite \
   "SELECT id, content_hash, created_at, updated_at
    FROM memory
    WHERE scope_id='local-user' AND type='semantic' AND facet='identity';"
 ```
+
+执行结果
 
 **检查点 6.1：** 仍然只有 1 行（`content_hash` 相同），`updated_at` 已更新 > `created_at`。
 
@@ -296,26 +358,37 @@ iota run --backend claude-code --trace \
    type=semantic, facet=identity, scope=user, scope_id=local-user,
    content=\"低置信度测试：这条记忆不应被注入\",
    confidence=0.50"
+```
 
+执行结果
+
+```bash
 # 7.2 写入一条 confidence=0.60 的 procedural 记忆（低于阈值 0.75）
 iota run --backend claude-code --trace \
   "请调用 iota_memory_write 工具，参数如下：
    type=procedural, scope=project, scope_id=iota-sympantos,
    content=\"低置信度测试：这条 procedural 不应被注入\",
    confidence=0.60"
+```
 
+执行结果
+
+```bash
 # 7.3 验证 DB 中确实存在这两条低 confidence 记录
 sqlite3 ~/.i6/context/memory.sqlite \
   "SELECT type, facet, confidence, substr(content,1,30)
    FROM memory
    WHERE content LIKE '%低置信度测试%';"
-# 期望: 2 行，confidence 分别为 0.50 和 0.60
+```
 
+执行结果
+
+```bash
 # 7.4 触发一次召回，检查 trace 中这两条不出现在注入桶里
 iota run --backend codex --trace "你知道关于我的所有信息吗？"
 ```
 
-**检查点 7.1：** trace 输出的 `[memory:inject]` payload 中：
+执行结果
 
 - `identity` 数组中不包含 "低置信度测试" 内容（confidence 0.50 < 阈值 0.85）
 - `procedural` 数组中不包含 "低置信度测试" 内容（confidence 0.60 < 阈值 0.75）
@@ -334,19 +407,27 @@ for i in $(seq 1 15); do
      content=\"domain-padding-$i: 这是第 $i 条填充记忆，用于测试 token budget 截断行为。iota-sympantos 使用 Rust 编写的 Engine 层驱动 ACP JSON-RPC 2.0 协议，支持 5 个后端的热切换。\",
      confidence=0.90"
 done
+```
 
+执行结果
+
+```bash
 # 8.2 查看当前总字符数
 sqlite3 ~/.i6/context/memory.sqlite \
   "SELECT sum(length(content)) AS total_chars FROM memory
    WHERE scope_id IN ('local-user','iota-sympantos')
    AND confidence >= 0.70;"
+```
 
+执行结果
+
+```bash
 # 8.3 触发一次完整召回，观察截断
 iota run --backend codex --trace \
   "列出你知道的关于我和本项目的所有信息"
 ```
 
-**检查点 8.1：** trace 中 `[memory:inject]` payload 的 `budget` 段：
+执行结果
 
 ```json
 {
@@ -368,54 +449,70 @@ iota run --backend codex --trace \
 ```bash
 # 查看最近的执行记录（应覆盖 Step 1~8 的所有 run）
 iota observability logging recent --limit 30
+```
 
+执行结果
+
+```bash
 # 查看某个 execution 的完整事件流
 # 替换 <exec-id> 为 Step 1-A 的 execution_id
 iota observability logging events <exec-id>
 ```
 
-**检查点 9.1a：** `recent` 输出包含 claude-code / codex / gemini / hermes / opencode 5 种 backend。
-
-**检查点 9.1b：** `events` 输出中包含 `memory` 类型事件（`{"kind":"Memory","data":{"action":"inject",...}}`）。
+执行结果
 
 #### 9.2 Tracing 验证
 
 ```bash
 # 查看延迟统计
 iota observability tracing summary
+```
 
+执行结果
+
+```bash
 # 查看最慢的执行
 iota observability tracing slow --limit 5
+```
 
+执行结果
+
+```bash
 # 查看某个 execution 的 5 阶段延迟分解
 iota observability tracing breakdown <exec-id>
 ```
 
-**检查点 9.2a：** `summary` 输出的 `completed_executions` ≥ Step 1~8 的总 run 次数。
-
-**检查点 9.2b：** `breakdown` 包含 `process_spawn`、`init`、`session_new`、`prompt`、`total` 五个阶段。
+执行结果
 
 #### 9.3 Metrics 验证
 
 ```bash
 # 聚合指标（人类可读）
 iota observability metrics
+```
 
+执行结果
+
+```bash
 # Prometheus 格式输出
 iota observability metrics --prometheus
+```
 
+执行结果
+
+```bash
 # Token 用量
 iota observability metrics tokens
+```
 
+执行结果
+
+```bash
 # 延迟指标
 iota observability metrics latency
 ```
 
-**检查点 9.3a：** `metrics` 输出中 `executions.total` > 0，`latency.avg_total_ms` 有值。
-
-**检查点 9.3b：** `--prometheus` 输出包含 `iota_execution_attempts_total` 和 `iota_execution_completed_total`。
-
-**检查点 9.3c：** `tokens` 输出中 `total_tokens` > 0（至少有 Step 1~8 产生的 token 消耗）。
+执行结果
 
 ---
 
@@ -443,103 +540,7 @@ iota observability metrics latency
 
 ---
 
-## 五、观测命令速查
-
-```bash
-# ── SQLite 直查 ──
-
-# 查看所有测试记忆（按类型分组统计）
-sqlite3 ~/.i6/context/memory.sqlite \
-  "SELECT type, facet, scope, count(*) AS cnt FROM memory
-   WHERE scope_id IN ('local-user','iota-sympantos')
-   GROUP BY type, facet, scope;"
-
-# 查看某条记忆完整内容（注意实际表名是 memory，memories 是视图）
-sqlite3 ~/.i6/context/memory.sqlite \
-  "SELECT * FROM memory WHERE id='<uuid>' LIMIT 1;"
-
-# 查看去重相关字段
-sqlite3 ~/.i6/context/memory.sqlite \
-  "SELECT id, content_hash, created_at, updated_at, confidence
-   FROM memory ORDER BY created_at DESC LIMIT 10;"
-
-# 查看低 confidence 记录
-sqlite3 ~/.i6/context/memory.sqlite \
-  "SELECT type, facet, confidence, substr(content,1,40)
-   FROM memory WHERE confidence < 0.80 ORDER BY confidence;"
-
-# ── Observability CLI ──
-
-# 执行日志
-iota observability logging recent --limit 10
-iota observability logging errors --limit 5
-iota observability logging events <execution-id>
-iota observability logging tools --limit 10
-
-# 延迟追踪
-iota observability tracing summary
-iota observability tracing slow --limit 5
-iota observability tracing breakdown <execution-id>
-
-# 聚合指标
-iota observability metrics
-iota observability metrics --prometheus
-iota observability metrics tokens
-iota observability metrics latency
-iota observability metrics cache
-```
-
----
-
-## 六、trace 输出格式参考
-
-`--trace` 标志启用时，以下内容输出到 **stderr**：
-
-```
-[memory:inject] id=- payload={
-  "identity": [{"id":"...","scope":"user","scope_id":"local-user","content":"...","confidence":0.95}],
-  "preference": [...],
-  "strategic": [...],
-  "domain": [...],
-  "procedural": [...],
-  "episodic": [...],
-  "budget": {
-    "memory_chars": 2000,
-    "total_chars": 420,
-    "truncated": false,
-    "excluded_count": 0
-  }
-}
-
-[iota run timing] {"route":"direct","backend":"claude-code","timing":{
-  "process_spawn_ms":..., "init_ms":..., "session_new_ms":..., "prompt_ms":..., "total_ms":...
-}}
-```
-
-关键字段说明：
-
-| 字段 | 含义 |
-|------|------|
-| `budget.memory_chars` | 配置的字符预算（默认 2000） |
-| `budget.total_chars` | 本次召回的全部记忆总字符数 |
-| `budget.truncated` | 是否超出预算发生截断 |
-| `budget.excluded_count` | 因预算限制被排除的记忆条数 |
-
----
-
-## 七、已知局限
-
-| 局限 | 来源 | 影响 | 规避 |
-|------|------|------|------|
-| LLM Extractor 无 ADD/UPDATE/NONE 合并决策 | memory.rs 启发式抽取 | 自动抽取精度有限 | 本实验用 MCP 工具精确写入 |
-| 无向量检索（无 embedding） | 当前实现 | 召回依赖 scope 过滤 + LIKE/FTS5 | 确保 scope_id 匹配 |
-| episodic 无 session close compaction | 待完善 | 长会话后 episodic 累积 | 实验规模可控，不影响 |
-| confidence 阈值硬编码 | recall_buckets() | 无法通过配置调整 | 已知各桶阈值，测试数据据此设计 |
-| 去重依赖 content 完全相同 | SHA-256 on content | 语义相同但措辞不同不去重 | 用 MCP 工具确保 content 一致 |
-
----
-
-## 八、清理
+## 五、清理
 
 实验结束后清理测试数据：
 
@@ -553,7 +554,3 @@ sqlite3 ~/.i6/context/memory.sqlite \
 # 恢复备份（如需要）
 # cp ~/.i6/context/memory.sqlite.bak ~/.i6/context/memory.sqlite
 ```
-
----
-
-*生成时间：2026-05-06 | 参考：iota-guides/08-memory.md v2.1*

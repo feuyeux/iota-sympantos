@@ -27,15 +27,6 @@ impl MemoryType {
             Self::Procedural => "procedural",
         }
     }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "semantic" => Some(Self::Semantic),
-            "episodic" => Some(Self::Episodic),
-            "procedural" => Some(Self::Procedural),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,16 +45,6 @@ impl MemoryFacet {
             Self::Preference => "preference",
             Self::Strategic => "strategic",
             Self::Domain => "domain",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "identity" => Some(Self::Identity),
-            "preference" => Some(Self::Preference),
-            "strategic" => Some(Self::Strategic),
-            "domain" => Some(Self::Domain),
-            _ => None,
         }
     }
 }
@@ -86,25 +67,15 @@ impl MemoryScope {
             Self::Global => "global",
         }
     }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "session" => Some(Self::Session),
-            "project" => Some(Self::Project),
-            "user" => Some(Self::User),
-            "global" => Some(Self::Global),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryRecord {
     pub id: String,
     #[serde(rename = "type")]
-    pub memory_type: MemoryType,
-    pub facet: Option<MemoryFacet>,
-    pub scope: MemoryScope,
+    pub memory_type: String,
+    pub facet: Option<String>,
+    pub scope: String,
     pub scope_id: String,
     pub content: String,
     pub confidence: f64,
@@ -198,16 +169,24 @@ impl MemoryStore {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open memory store {}", path.display()))?;
-        let fts_available = init_schema(&conn)?;
+        let conn = Arc::new(Mutex::new(conn));
+        let engine = EmbeddingEngine::from_config(config);
+        let store = Self {
+            conn,
+            fts_available: false,
+            embedding: engine,
+        };
+        let fts_available = store.init()?;
         Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+            conn: store.conn,
             fts_available,
-            embedding: EmbeddingEngine::from_config(config),
+            embedding: store.embedding,
         })
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        Ok(crate::config::paths::StorePaths::resolve()?.memory_db())
+        let home = dirs::home_dir().context("Failed to get home directory")?;
+        Ok(home.join(".i6").join("context").join("memory.sqlite"))
     }
 
     pub fn insert(&self, input: MemoryInsert) -> Result<String> {
@@ -225,8 +204,7 @@ impl MemoryStore {
         let ttl_days = input.ttl_days.max(1);
         let expires_at = now + ttl_days * 86_400;
         let content_hash = content_hash(&input.content);
-        let embed_vector = self.embedding.embed(&input.content);
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         if let Some(existing_id) = conn
             .query_row(
                 "SELECT id FROM memory WHERE scope = ?1 AND scope_id = ?2 AND type = ?3 AND facet IS ?4 AND content_hash = ?5 LIMIT 1",
@@ -247,7 +225,7 @@ impl MemoryStore {
                 "UPDATE memory SET updated_at = ?2, expires_at = ?3, confidence = MAX(confidence, ?4) WHERE id = ?1",
                 params![existing_id, now, expires_at, input.confidence],
             )?;
-            Self::upsert_embedding(&conn, &existing_id, &embed_vector, now)?;
+            self.upsert_embedding(&conn, &existing_id, &input.content, now)?;
             return Ok(Some(existing_id));
         }
 
@@ -289,7 +267,7 @@ impl MemoryStore {
                     input.metadata_json,
                 ],
             )?;
-            Self::upsert_embedding(&conn, &target_id, &embed_vector, now)?;
+            self.upsert_embedding(&conn, &target_id, &input.content, now)?;
             return Ok(Some(target_id));
         }
 
@@ -318,7 +296,7 @@ impl MemoryStore {
                 supersedes,
             ],
         )?;
-        Self::upsert_embedding(&conn, &id, &embed_vector, now)?;
+        self.upsert_embedding(&conn, &id, &input.content, now)?;
         Ok(Some(id))
     }
 
@@ -415,7 +393,7 @@ impl MemoryStore {
         keep_latest: usize,
     ) -> Result<usize> {
         let keep_latest = keep_latest.max(1) as i64;
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let deleted = conn.execute(
             "DELETE FROM memory WHERE id IN (
                 SELECT id FROM memory
@@ -468,29 +446,22 @@ impl MemoryStore {
             return Ok(Vec::new());
         }
         let query_canonical = embedding::canonicalize(query);
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT m.id, m.type, m.facet, m.scope, m.scope_id, m.content, m.confidence, m.created_at, m.updated_at, m.expires_at, e.vector_blob
              FROM memory m
              JOIN memory_embedding e ON e.memory_id = m.id
-             WHERE m.expires_at > ?1 AND m.type IN ('semantic','procedural')
+             WHERE m.expires_at > ?1
              ORDER BY m.updated_at DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![now_ts(), 400i64], |row| {
+        let rows = stmt.query_map(params![now_ts(), 800i64], |row| {
             Ok((row_to_memory_record(row)?, row.get::<_, Vec<u8>>(10)?))
         })?;
 
         let mut scored = Vec::new();
         for row in rows {
-            let (record, blob) = match row {
-                Ok(value) => value,
-                Err(err) if is_invalid_memory_taxonomy_error(&err) => {
-                    warn_invalid_memory_taxonomy(&err);
-                    continue;
-                }
-                Err(err) => return Err(err.into()),
-            };
+            let (record, blob) = row?;
             let vector = embedding::from_blob(&blob);
             let similarity = embedding::cosine(&query_vec, &vector);
             let overlap = token_overlap_score(&query_canonical, &record.content);
@@ -550,9 +521,11 @@ impl MemoryStore {
     }
 
     fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
-        let sanitized = sanitize_fts5_query(query);
-        let safe_query = format!("\"{}\"", sanitized.replace('"', "\"\""));
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        // Wrap the query in double-quotes to make FTS5 treat it as a phrase
+        // rather than a boolean expression.  Internal double-quotes are escaped
+        // by doubling them (FTS5 phrase-quoting rules).
+        let safe_query = format!("\"{}\"", query.replace('"', "\"\""));
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT m.id, m.type, m.facet, m.scope, m.scope_id, m.content, m.confidence, m.created_at, m.updated_at, m.expires_at
              FROM memory m JOIN memory_fts f ON m.rowid = f.rowid
@@ -567,7 +540,7 @@ impl MemoryStore {
 
     fn search_like(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
         let needle = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory
              WHERE expires_at > ?1 AND content LIKE ?2 ESCAPE ?4
@@ -590,7 +563,7 @@ impl MemoryStore {
     ) -> Result<Vec<MemoryRecord>> {
         let facet_value = facet.as_ref().map(MemoryFacet::as_str);
         let type_value = memory_type.as_ref().map(MemoryType::as_str);
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory\n             WHERE scope = ?1 AND scope_id = ?2 AND (?3 IS NULL OR facet = ?3) AND (?4 IS NULL OR type = ?4) AND confidence >= ?5 AND expires_at > ?6\n             ORDER BY confidence DESC, updated_at DESC, created_at DESC LIMIT ?7",
         )?;
@@ -641,32 +614,11 @@ impl MemoryStore {
         Ok(records)
     }
 
-    fn upsert_embedding(
-        conn: &Connection,
-        memory_id: &str,
-        vector: &[f32],
-        updated_at: i64,
-    ) -> Result<()> {
-        if vector.is_empty() {
-            return Ok(());
-        }
-        let blob = embedding::to_blob(vector);
-        conn.execute(
-            "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(memory_id) DO UPDATE SET
-               vector_blob = excluded.vector_blob,
-               updated_at = excluded.updated_at",
-            params![memory_id, blob, updated_at],
-        )?;
-        Ok(())
-    }
-}
-
-fn init_schema(conn: &Connection) -> Result<bool> {
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS memory (
+    fn init(&self) -> Result<bool> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL CHECK(type IN ('semantic','episodic','procedural')),
   facet TEXT CHECK(facet IN ('identity','preference','strategic','domain')),
@@ -702,8 +654,32 @@ CREATE VIEW IF NOT EXISTS memories AS SELECT * FROM memory;
 CREATE TRIGGER IF NOT EXISTS memories_delete INSTEAD OF DELETE ON memories BEGIN
   DELETE FROM memory WHERE id = old.id;
 END;",
-    )?;
-    Ok(init_fts(conn).is_ok())
+        )?;
+        Ok(init_fts(&conn).is_ok())
+    }
+
+    fn upsert_embedding(
+        &self,
+        conn: &Connection,
+        memory_id: &str,
+        content: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        let vector = self.embedding.embed(content);
+        if vector.is_empty() {
+            return Ok(());
+        }
+        let blob = embedding::to_blob(&vector);
+        conn.execute(
+            "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               vector_blob = excluded.vector_blob,
+               updated_at = excluded.updated_at",
+            params![memory_id, blob, updated_at],
+        )?;
+        Ok(())
+    }
 }
 
 fn user_scope_candidates(user_id: &str) -> Vec<String> {
@@ -793,16 +769,11 @@ fn latest_related_memory_id(
 }
 
 fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecord> {
-    let memory_type = row.get::<_, String>(1)?;
-    let facet = row.get::<_, Option<String>>(2)?;
-    let scope = row.get::<_, String>(3)?;
     Ok(MemoryRecord {
         id: row.get(0)?,
-        memory_type: parse_memory_type_column(memory_type, 1)?,
-        facet: facet
-            .map(|value| parse_memory_facet_column(value, 2))
-            .transpose()?,
-        scope: parse_memory_scope_column(scope, 3)?,
+        memory_type: row.get(1)?,
+        facet: row.get(2)?,
+        scope: row.get(3)?,
         scope_id: row.get(4)?,
         content: row.get(5)?,
         confidence: row.get(6)?,
@@ -812,52 +783,12 @@ fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecor
     })
 }
 
-fn parse_memory_type_column(value: String, column: usize) -> rusqlite::Result<MemoryType> {
-    MemoryType::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
-}
-
-fn parse_memory_facet_column(value: String, column: usize) -> rusqlite::Result<MemoryFacet> {
-    MemoryFacet::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
-}
-
-fn parse_memory_scope_column(value: String, column: usize) -> rusqlite::Result<MemoryScope> {
-    MemoryScope::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
-}
-
-fn invalid_memory_taxonomy_value(column: usize, value: String) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        column,
-        rusqlite::types::Type::Text,
-        format!("invalid memory taxonomy value: {}", value).into(),
-    )
-}
-
-fn is_invalid_memory_taxonomy_error(err: &rusqlite::Error) -> bool {
-    matches!(
-        err,
-        rusqlite::Error::FromSqlConversionFailure(_, rusqlite::types::Type::Text, source)
-            if source
-                .to_string()
-                .starts_with("invalid memory taxonomy value:")
-    )
-}
-
-fn warn_invalid_memory_taxonomy(err: &rusqlite::Error) {
-    tracing::warn!(error = %err, "skipping memory record with unknown taxonomy value");
-}
-
 fn rows_to_records(
     rows: impl Iterator<Item = rusqlite::Result<MemoryRecord>>,
 ) -> Result<Vec<MemoryRecord>> {
     let mut records = Vec::new();
     for row in rows {
-        match row {
-            Ok(record) => records.push(record),
-            Err(err) if is_invalid_memory_taxonomy_error(&err) => {
-                warn_invalid_memory_taxonomy(&err);
-            }
-            Err(err) => return Err(err.into()),
-        }
+        records.push(row?);
     }
     Ok(records)
 }
@@ -885,17 +816,6 @@ fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
     hex::encode(hasher.finalize())
-}
-
-/// Strip FTS5 special syntax so a user query is treated as literal text.
-fn sanitize_fts5_query(query: &str) -> String {
-    query
-        .chars()
-        .filter(|c| !matches!(c, '*' | '^' | '(' | ')' | ':'))
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 #[cfg(test)]
