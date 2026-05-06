@@ -814,7 +814,7 @@ async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result<()> {
 
 fn start_daemon_silently() -> Result<()> {
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;
-    let child = std::process::Command::new(exe)
+    let mut child = std::process::Command::new(exe)
         .arg("__daemon")
         .stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -7,43 +7,6 @@ use std::path::PathBuf;
 use crate::acp::AcpBackend;
 use crate::acp::session::{AcpMcpEnvShape, AcpMcpServer, AcpSessionOptions};
 
-pub mod paths {
-    use anyhow::{Context, Result};
-    use std::path::PathBuf;
-
-    #[derive(Debug, Clone)]
-    pub struct StorePaths {
-        root: PathBuf,
-    }
-
-    impl StorePaths {
-        pub fn new(root: PathBuf) -> Self {
-            Self { root }
-        }
-
-        pub fn resolve() -> Result<Self> {
-            let home = dirs::home_dir().context("Failed to get home directory")?;
-            Ok(Self::new(home.join(".i6").join("context")))
-        }
-
-        pub fn events_db(&self) -> PathBuf {
-            self.root.join("events.sqlite")
-        }
-
-        pub fn memory_db(&self) -> PathBuf {
-            self.root.join("memory.sqlite")
-        }
-
-        pub fn sessions_db(&self) -> PathBuf {
-            self.root.join("sessions.sqlite")
-        }
-
-        pub fn approvals_db(&self) -> PathBuf {
-            self.root.join("approvals.sqlite")
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,22 +26,14 @@ pub struct CommandConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
-pub struct BackendVersionMapping {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub acp: Option<String>,
-    #[serde(default, alias = "backend", skip_serializing_if = "Option::is_none")]
-    pub bin: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct BackendConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acp: Option<CommandConfig>,
-    #[serde(default, alias = "versions", skip_serializing_if = "Option::is_none")]
-    pub version_mapping: Option<BackendVersionMapping>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<CommandConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -87,22 +42,12 @@ pub struct BackendConfig {
     pub tool_whitelist: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct EmbeddingConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ContextEngineConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_context_injection")]
-    pub injection: ContextInjection,
+    pub injection: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_db: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -112,15 +57,9 @@ pub struct ContextEngineConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budgets: Option<ContextBudgetsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recall_thresholds: Option<RecallThresholdsConfig>,
-    #[serde(default = "default_episodic_compaction_keep")]
-    pub episodic_compaction_keep: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp: Option<CommandConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fun: Option<CommandConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embedding: Option<EmbeddingConfig>,
 }
 
 impl Default for ContextEngineConfig {
@@ -132,71 +71,9 @@ impl Default for ContextEngineConfig {
             skill_roots: Vec::new(),
             native_overlays: false,
             budgets: None,
-            recall_thresholds: None,
-            episodic_compaction_keep: default_episodic_compaction_keep(),
             mcp: None,
             fun: None,
-            embedding: None,
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContextInjection {
-    Auto,
-    Off,
-    Prompt,
-    Mcp,
-}
-
-impl ContextInjection {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Auto => "auto",
-            Self::Off => "off",
-            Self::Prompt => "prompt",
-            Self::Mcp => "mcp",
-        }
-    }
-
-    pub fn is_off(&self) -> bool {
-        matches!(self, Self::Off)
-    }
-}
-
-impl Default for ContextInjection {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
-impl Serialize for ContextInjection {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for ContextInjection {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Ok(match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Self::Auto,
-            "off" => Self::Off,
-            "prompt" => Self::Prompt,
-            "mcp" => Self::Mcp,
-            _ => {
-                return Err(serde::de::Error::custom(format!(
-                    "invalid context_engine.injection '{}'; expected auto, off, prompt, or mcp",
-                    value
-                )));
-            }
-        })
     }
 }
 
@@ -219,35 +96,6 @@ impl Default for ContextBudgetsConfig {
             skills_chars: default_skills_chars(),
             dialogue_chars: default_dialogue_chars(),
             workspace_chars: default_workspace_chars(),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct RecallThresholdsConfig {
-    #[serde(default = "default_identity_threshold")]
-    pub identity: f64,
-    #[serde(default = "default_preference_threshold")]
-    pub preference: f64,
-    #[serde(default = "default_strategic_threshold")]
-    pub strategic: f64,
-    #[serde(default = "default_domain_threshold")]
-    pub domain: f64,
-    #[serde(default = "default_procedural_threshold")]
-    pub procedural: f64,
-    #[serde(default = "default_episodic_threshold")]
-    pub episodic: f64,
-}
-
-impl Default for RecallThresholdsConfig {
-    fn default() -> Self {
-        Self {
-            identity: default_identity_threshold(),
-            preference: default_preference_threshold(),
-            strategic: default_strategic_threshold(),
-            domain: default_domain_threshold(),
-            procedural: default_procedural_threshold(),
-            episodic: default_episodic_threshold(),
         }
     }
 }
@@ -294,117 +142,6 @@ pub struct NimiaConfig {
     pub context_engine: Option<ContextEngineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_engine_backend: Option<ContextEngineBackendConfig>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EffectiveConfig {
-    backends: BTreeMap<AcpBackend, BackendConfig>,
-    backend_context: BTreeMap<AcpBackend, BackendContextConfig>,
-    context_engine: ContextEngineConfig,
-    memory_db_path: Option<PathBuf>,
-    skill_roots: Vec<PathBuf>,
-    mcp_servers: BTreeMap<AcpBackend, Vec<AcpMcpServer>>,
-    session_options: BTreeMap<AcpBackend, AcpSessionOptions>,
-    tool_whitelist: BTreeMap<AcpBackend, Vec<String>>,
-    recall_thresholds: RecallThresholdsConfig,
-    episodic_compaction_keep: usize,
-    embedding: Option<EmbeddingConfig>,
-}
-
-impl EffectiveConfig {
-    pub fn from_config(config: &NimiaConfig) -> Self {
-        let backends = crate::acp::ALL_BACKENDS
-            .iter()
-            .filter_map(|backend| {
-                backend_config(config, *backend)
-                    .cloned()
-                    .map(|cfg| (*backend, cfg))
-            })
-            .collect();
-        let backend_context = crate::acp::ALL_BACKENDS
-            .iter()
-            .filter_map(|backend| {
-                backend_context_config(config, *backend)
-                    .cloned()
-                    .map(|cfg| (*backend, cfg))
-            })
-            .collect();
-        let mcp_servers = crate::acp::ALL_BACKENDS
-            .iter()
-            .map(|backend| (*backend, context_mcp_servers(config, *backend)))
-            .collect();
-        let session_options = crate::acp::ALL_BACKENDS
-            .iter()
-            .map(|backend| (*backend, context_session_options(config, *backend)))
-            .collect();
-        let tool_whitelist = crate::acp::ALL_BACKENDS
-            .iter()
-            .map(|backend| (*backend, context_tool_whitelist(config, *backend)))
-            .collect();
-        Self {
-            backends,
-            backend_context,
-            context_engine: config.context_engine.clone().unwrap_or_default(),
-            memory_db_path: context_memory_db_path(config).ok(),
-            skill_roots: context_skill_roots(config),
-            mcp_servers,
-            session_options,
-            tool_whitelist,
-            recall_thresholds: context_recall_thresholds(config),
-            episodic_compaction_keep: context_episodic_compaction_keep(config),
-            embedding: context_embedding_config(config),
-        }
-    }
-
-    pub fn backend_config(&self, backend: AcpBackend) -> Option<&BackendConfig> {
-        self.backends.get(&backend)
-    }
-
-    pub fn backend_context_config(&self, backend: AcpBackend) -> Option<&BackendContextConfig> {
-        self.backend_context.get(&backend)
-    }
-
-    pub fn context_engine(&self) -> &ContextEngineConfig {
-        &self.context_engine
-    }
-
-    pub fn memory_db_path(&self) -> Option<&PathBuf> {
-        self.memory_db_path.as_ref()
-    }
-
-    pub fn skill_roots(&self) -> &[PathBuf] {
-        &self.skill_roots
-    }
-
-    pub fn context_mcp_servers(&self, backend: AcpBackend) -> Vec<AcpMcpServer> {
-        self.mcp_servers.get(&backend).cloned().unwrap_or_default()
-    }
-
-    pub fn context_session_options(&self, backend: AcpBackend) -> AcpSessionOptions {
-        self.session_options
-            .get(&backend)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    pub fn context_tool_whitelist(&self, backend: AcpBackend) -> Vec<String> {
-        self.tool_whitelist
-            .get(&backend)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub fn recall_thresholds(&self) -> &RecallThresholdsConfig {
-        &self.recall_thresholds
-    }
-
-    pub fn episodic_compaction_keep(&self) -> usize {
-        self.episodic_compaction_keep
-    }
-
-    pub fn embedding_config(&self) -> Option<EmbeddingConfig> {
-        self.embedding.clone()
-    }
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -550,34 +287,6 @@ pub fn backend_process_env_with_context(
 
 fn default_enabled() -> bool {
     true
-}
-
-fn default_identity_threshold() -> f64 {
-    0.85
-}
-
-fn default_preference_threshold() -> f64 {
-    0.80
-}
-
-fn default_strategic_threshold() -> f64 {
-    0.80
-}
-
-fn default_domain_threshold() -> f64 {
-    0.80
-}
-
-fn default_procedural_threshold() -> f64 {
-    0.75
-}
-
-fn default_episodic_threshold() -> f64 {
-    0.70
-}
-
-fn default_episodic_compaction_keep() -> usize {
-    40
 }
 
 pub fn expand_home_path(value: &str) -> Result<String> {
@@ -740,7 +449,8 @@ pub fn context_memory_db_path(config: &NimiaConfig) -> Result<PathBuf> {
     {
         return Ok(PathBuf::from(expand_home_path(path)?));
     }
-    Ok(paths::StorePaths::resolve()?.memory_db())
+    let home = dirs::home_dir().context("Failed to get home directory")?;
+    Ok(home.join(".i6").join("context").join("memory.sqlite"))
 }
 
 pub fn context_skill_roots(config: &NimiaConfig) -> Vec<PathBuf> {
@@ -757,16 +467,13 @@ pub fn context_skill_roots(config: &NimiaConfig) -> Vec<PathBuf> {
 }
 
 pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<AcpMcpServer> {
-    if backend == AcpBackend::OpenCode {
-        return Vec::new();
-    }
     if !context_mcp_session_enabled(config, backend) {
         return Vec::new();
     }
     let Some(engine) = config.context_engine.as_ref() else {
         return default_context_mcp_servers();
     };
-    if !engine.enabled || engine.injection.is_off() {
+    if !engine.enabled || engine.injection == "off" {
         return Vec::new();
     }
 
@@ -794,7 +501,10 @@ pub fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) ->
             matches!(backend, AcpBackend::ClaudeCode | AcpBackend::Codex),
         );
     }
-    matches!(backend, AcpBackend::Gemini | AcpBackend::Hermes)
+    matches!(
+        backend,
+        AcpBackend::Gemini | AcpBackend::Hermes | AcpBackend::OpenCode
+    )
 }
 
 pub fn backend_context_config(
@@ -831,29 +541,6 @@ pub fn context_tool_whitelist(config: &NimiaConfig, backend: AcpBackend) -> Vec<
     backend_config(config, backend)
         .map(|cfg| cfg.tool_whitelist.clone())
         .unwrap_or_default()
-}
-
-pub fn context_recall_thresholds(config: &NimiaConfig) -> RecallThresholdsConfig {
-    config
-        .context_engine
-        .as_ref()
-        .and_then(|cfg| cfg.recall_thresholds.clone())
-        .unwrap_or_default()
-}
-
-pub fn context_episodic_compaction_keep(config: &NimiaConfig) -> usize {
-    config
-        .context_engine
-        .as_ref()
-        .map(|cfg| cfg.episodic_compaction_keep.max(1))
-        .unwrap_or_else(default_episodic_compaction_keep)
-}
-
-pub fn context_embedding_config(config: &NimiaConfig) -> Option<EmbeddingConfig> {
-    config
-        .context_engine
-        .as_ref()
-        .and_then(|cfg| cfg.embedding.clone())
 }
 
 fn yaml_flag(value: &serde_yaml::Value, try_is_enabled: bool) -> bool {
@@ -902,7 +589,7 @@ fn command_to_mcp_server(
         name: default_name.to_string(),
         command,
         args,
-        env: default_mcp_server_env(default_name),
+        env: BTreeMap::new(),
     })
 }
 
@@ -916,18 +603,8 @@ fn default_context_mcp_servers() -> Vec<AcpMcpServer> {
     .collect()
 }
 
-fn default_mcp_server_env(default_name: &str) -> BTreeMap<String, String> {
-    let mut env = BTreeMap::new();
-    if default_name == "iota-context" {
-        let rust_log = std::env::var("IOTA_CONTEXT_MCP_RUST_LOG")
-            .unwrap_or_else(|_| "iota::context::server=info".to_string());
-        env.insert("RUST_LOG".to_string(), rust_log);
-    }
-    env
-}
-
-fn default_context_injection() -> ContextInjection {
-    ContextInjection::Auto
+fn default_context_injection() -> String {
+    "auto".to_string()
 }
 
 fn default_memory_chars() -> usize {
@@ -947,5 +624,32 @@ fn default_workspace_chars() -> usize {
 }
 
 #[cfg(test)]
-#[path = "config_tests.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_servers_default_to_backend_capability() {
+        let config = NimiaConfig {
+            context_engine: Some(ContextEngineConfig::default()),
+            ..NimiaConfig::default()
+        };
+        assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 0);
+        assert_eq!(context_mcp_servers(&config, AcpBackend::Gemini).len(), 2);
+    }
+
+    #[test]
+    fn mcp_try_enables_claude_and_codex() {
+        let config = NimiaConfig {
+            context_engine: Some(ContextEngineConfig::default()),
+            context_engine_backend: Some(ContextEngineBackendConfig {
+                codex: Some(BackendContextConfig {
+                    mcp_session_new: Some(serde_yaml::Value::String("try".to_string())),
+                    ..BackendContextConfig::default()
+                }),
+                ..ContextEngineBackendConfig::default()
+            }),
+            ..NimiaConfig::default()
+        };
+        assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 2);
+    }
+}

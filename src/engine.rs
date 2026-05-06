@@ -4,23 +4,18 @@ use std::path::PathBuf;
 
 use crate::acp::{self, AcpBackend, AcpClient, AcpPromptOutput};
 use crate::config::{
-    EffectiveConfig, NimiaConfig, backend_process_env_with_context, config_path, configured_model,
-    normalized_acp_command,
+    self, NimiaConfig, backend_config, backend_context_config, backend_process_env_with_context,
+    config_path, configured_model, normalized_acp_command,
 };
 use crate::context::{ComposeInput, ContextEngine, DialogueBuffer};
-use crate::runtime_event::{
-    ErrorEvent, LogEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent,
-};
-use crate::skill::{SkillCache, SkillRegistry};
-use crate::store::cache::{CacheStore, ExecutionStatus, request_hash};
+use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
+use crate::skill::SkillRegistry;
+use crate::store::events::EventStore;
 use crate::store::ledger::SessionLedger;
 use crate::store::memory::{
     MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType, RecallBuckets,
-    RecallThresholds,
 };
-use crate::telemetry::{logs, metrics, spans};
 use crate::utils::summarize;
-use opentelemetry::trace::Span as _;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ClientKey {
@@ -29,18 +24,17 @@ struct ClientKey {
 }
 
 pub struct IotaEngine {
-    effective_config: EffectiveConfig,
+    config: NimiaConfig,
     clients: BTreeMap<ClientKey, AcpClient>,
     show_native: bool,
     timeout_ms: u64,
     context_engine: ContextEngine,
     memory_store: Option<MemoryStore>,
-    cache_store: Option<CacheStore>,
+    event_store: Option<EventStore>,
     dialogue: DialogueBuffer,
     session_id: String,
     session_ledger: Option<SessionLedger>,
     active_backend: Option<AcpBackend>,
-    skill_cache: SkillCache,
 }
 
 impl IotaEngine {
@@ -55,15 +49,13 @@ impl IotaEngine {
         timeout_ms: u64,
         session_cwd: Option<&std::path::Path>,
     ) -> Self {
-        let effective_config = EffectiveConfig::from_config(&config);
-        let context_engine = ContextEngine::from_config(Some(effective_config.context_engine()));
-        let embedding_cfg = effective_config.embedding_config();
-        let memory_store = effective_config
-            .memory_db_path()
-            .and_then(|path| MemoryStore::open_with_embedding(path, embedding_cfg).ok());
-        let cache_store = CacheStore::default_path()
+        let context_engine = ContextEngine::from_config(config.context_engine.as_ref());
+        let memory_store = config::context_memory_db_path(&config)
             .ok()
-            .and_then(|path| CacheStore::open(&path).ok());
+            .and_then(|path| MemoryStore::open(&path).ok());
+        let event_store = EventStore::default_path()
+            .ok()
+            .and_then(|path| EventStore::open(&path).ok());
         let session_ledger = SessionLedger::default_path()
             .ok()
             .and_then(|path| SessionLedger::open(&path).ok());
@@ -75,26 +67,30 @@ impl IotaEngine {
             })
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         Self {
-            effective_config,
+            config,
             clients: BTreeMap::new(),
             show_native,
             timeout_ms,
             context_engine,
             memory_store,
-            cache_store,
+            event_store,
             dialogue: DialogueBuffer::new(50),
             session_id,
             session_ledger,
             active_backend: None,
-            skill_cache: SkillCache::default(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn config(&self) -> &NimiaConfig {
+        &self.config
     }
 
     /// Set an output-streaming sender on all currently open ACP clients.
     /// New chunks from `session/update` events are forwarded to `tx` as they arrive.
     pub fn set_stream_sender(&mut self, tx: Option<tokio::sync::mpsc::Sender<String>>) {
         for client in self.clients.values_mut() {
-            client.set_stream_sender(tx.clone());
+            client.stream_tx = tx.clone();
         }
     }
 
@@ -104,19 +100,21 @@ impl IotaEngine {
     }
 
     async fn try_join_running(&self, backend: AcpBackend, request_hash: &str) -> Option<String> {
-        let store = self.cache_store.as_ref()?.clone();
+        let store = self.event_store.as_ref()?.clone();
         let running = store
             .find_running_by_request_hash(&backend.to_string(), request_hash)
             .ok()??;
         let deadline =
             tokio::time::Instant::now() + tokio::time::Duration::from_millis(self.timeout_ms);
+        // Poll with exponential back-off (50 ms → 500 ms cap) to avoid busy-wait
+        // while still picking up completion within a reasonable latency budget.
         let mut poll_interval_ms: u64 = 50;
         loop {
             if let Ok(Some(record)) = store.get_execution(&running.execution_id) {
-                if record.status == ExecutionStatus::Completed {
+                if record.status == "completed" {
                     return store.output_text(&running.execution_id).ok().flatten();
                 }
-                if record.status != ExecutionStatus::Running {
+                if record.status != "running" {
                     return None;
                 }
             }
@@ -138,7 +136,7 @@ impl IotaEngine {
             if self.clients.contains_key(&key) {
                 continue;
             }
-            let Some(section) = self.effective_config.backend_config(backend) else {
+            let Some(section) = backend_config(&self.config, backend) else {
                 continue;
             };
             if !section.enabled {
@@ -153,12 +151,12 @@ impl IotaEngine {
                 continue;
             }
 
-            let backend_context = self.effective_config.backend_context_config(backend);
+            let backend_context = backend_context_config(&self.config, backend);
             let env = backend_process_env_with_context(backend, section, backend_context);
             let command = normalized_acp_command(backend, section, acp_config);
-            let mcp_servers = self.effective_config.context_mcp_servers(backend);
-            let session_options = self.effective_config.context_session_options(backend);
-            let tool_whitelist = self.effective_config.context_tool_whitelist(backend);
+            let mcp_servers = config::context_mcp_servers(&self.config, backend);
+            let session_options = config::context_session_options(&self.config, backend);
+            let tool_whitelist = config::context_tool_whitelist(&self.config, backend);
             let cwd = cwd.clone();
             let show_native = self.show_native;
             let timeout_ms = self.timeout_ms;
@@ -185,16 +183,12 @@ impl IotaEngine {
             }));
         }
 
-        let before = self.clients.len();
         for handle in handles {
             if let Ok(Some((key, client))) = handle.await {
                 self.clients.insert(key, client);
             }
         }
-        let added = self.clients.len().saturating_sub(before) as i64;
-        if added > 0 {
-            self.record_session_delta(added);
-        }
+        self.record_active_sessions();
         Ok(self.clients.len())
     }
 
@@ -224,18 +218,14 @@ impl IotaEngine {
         prompt: &str,
         requested_execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
-        let request_hash = request_hash(&backend.to_string(), &cwd, prompt);
+        let request_hash = crate::store::events::request_hash(&backend.to_string(), &cwd, prompt);
         tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
-        let skills = SkillRegistry::load_cached(
-            &cwd,
-            self.effective_config.skill_roots(),
-            &mut self.skill_cache,
-        );
+        let configured_roots = config::context_skill_roots(&self.config);
+        let skills = SkillRegistry::load(&cwd, &configured_roots);
         let matched_skill = skills.match_skill(backend, prompt);
         let skip_replay = matched_skill.is_some()
             || is_memory_query(prompt)
-            || !classify_memory_prompt(prompt).is_empty()
-            || prompt.contains("iota_memory_write");
+            || !classify_memory_prompt(prompt).is_empty();
         if !skip_replay && let Some(output) = self.try_replay_completed(backend, &request_hash) {
             self.record_cache_hit();
             tracing::info!(backend = %backend, request_hash = %request_hash, "replaying completed execution");
@@ -248,13 +238,10 @@ impl IotaEngine {
             self.dialogue.push_turn(backend, prompt, &output);
             return Ok(AcpPromptOutput::synthetic(output));
         }
-        let model = self
-            .effective_config
-            .backend_config(backend)
-            .and_then(configured_model);
+        let model = backend_config(&self.config, backend).and_then(configured_model);
         self.ensure_session_ledger(backend, &cwd, model.as_deref());
         let handoff = self.prepare_handoff(backend, &cwd);
-        let execution_id = match self.cache_store.as_ref() {
+        let execution_id = match self.event_store.as_ref() {
             Some(store) => {
                 match store.begin_execution_with_id(
                     &backend.to_string(),
@@ -279,13 +266,6 @@ impl IotaEngine {
             None => None,
         };
         self.record_cache_miss();
-        if let Some(ref eid) = execution_id {
-            tracing::info!(execution_id = %eid, backend = %backend, session_id = %self.session_id, "execution.started");
-        }
-        self.record_execution_active_delta(1);
-        let execution_span = execution_id.as_ref().map(|eid| {
-            spans::start_execution_span(eid, &self.session_id, &backend.to_string(), &request_hash)
-        });
         tracing::debug!(backend = %backend, execution_id = execution_id.as_deref(), "execution started");
         self.record_event(
             &execution_id,
@@ -295,13 +275,8 @@ impl IotaEngine {
             }),
         );
 
-        let extracted_memories = if is_memory_query(prompt) || prompt.contains("iota_memory_write")
-        {
+        let extracted_memories = if is_memory_query(prompt) {
             Vec::new()
-        } else if let Some(span) = execution_span.as_ref() {
-            span.in_scope(|| {
-                self.extract_structured_memories(backend, &cwd, prompt, execution_id.as_deref())
-            })
         } else {
             self.extract_structured_memories(backend, &cwd, prompt, execution_id.as_deref())
         };
@@ -323,17 +298,13 @@ impl IotaEngine {
             });
             self.record_event(&execution_id, output_event.clone());
             events.push(output_event);
-            self.finish_execution(&execution_id, ExecutionStatus::Completed);
-            self.record_execution_active_delta(-1);
-            if let Some(span) = execution_span.as_ref() {
-                span.end_ok();
-            }
+            self.finish_execution(&execution_id, "completed");
             self.record_turn(
                 backend,
                 execution_id.as_deref(),
                 &request_hash,
                 &text,
-                ExecutionStatus::Completed.as_str(),
+                "completed",
             );
             self.active_backend = Some(backend);
             self.dialogue.push_turn(backend, prompt, &text);
@@ -358,37 +329,22 @@ impl IotaEngine {
                 });
                 self.record_event(&execution_id, output_event.clone());
                 events.push(output_event);
-                self.finish_execution(&execution_id, ExecutionStatus::Completed);
-                self.record_execution_active_delta(-1);
+                self.finish_execution(&execution_id, "completed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &skill_output.text,
-                    ExecutionStatus::Completed.as_str(),
+                    "completed",
                 );
                 self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &skill_output.text);
-                if let Some(span) = execution_span.as_ref() {
-                    span.in_scope(|| {
-                        self.write_episodic_memory(
-                            backend,
-                            prompt,
-                            &skill_output.text,
-                            execution_id.as_deref(),
-                        )
-                    });
-                } else {
-                    self.write_episodic_memory(
-                        backend,
-                        prompt,
-                        &skill_output.text,
-                        execution_id.as_deref(),
-                    );
-                }
-                if let Some(span) = execution_span.as_ref() {
-                    span.end_ok();
-                }
+                self.write_episodic_memory(
+                    backend,
+                    prompt,
+                    &skill_output.text,
+                    execution_id.as_deref(),
+                );
                 let mut output = AcpPromptOutput::synthetic(skill_output.text);
                 output.execution_id = execution_id;
                 output.events = events;
@@ -396,96 +352,11 @@ impl IotaEngine {
             }
         }
 
-        let recall_memory = || {
-            self.memory_store.as_ref().and_then(|store| {
-                let thresholds_cfg = self.effective_config.recall_thresholds();
-                let thresholds = RecallThresholds {
-                    identity: thresholds_cfg.identity,
-                    preference: thresholds_cfg.preference,
-                    strategic: thresholds_cfg.strategic,
-                    domain: thresholds_cfg.domain,
-                    procedural: thresholds_cfg.procedural,
-                    episodic: thresholds_cfg.episodic,
-                };
-                let project_id = cwd.display().to_string();
-                self.record_log_event(
-                    execution_id.as_deref(),
-                    backend,
-                    "info",
-                    "memory.recall.started",
-                    serde_json::json!({
-                        "user_id": "local-user",
-                        "project_id": project_id.clone(),
-                    }),
-                );
-                tracing::info!(
-                    backend = %backend,
-                    execution_id = execution_id.as_deref().unwrap_or("-"),
-                    session_id = %self.session_id,
-                    user_id = "local-user",
-                    project_id = %project_id,
-                    "engine memory recall started"
-                );
-                match store.recall_buckets_with_thresholds(
-                    "local-user",
-                    &project_id,
-                    &self.session_id,
-                    thresholds,
-                ) {
-                    Ok(buckets) => {
-                        self.record_log_event(
-                            execution_id.as_deref(),
-                            backend,
-                            "info",
-                            "memory.recall.completed",
-                            serde_json::json!({
-                                "identity_count": buckets.identity.len(),
-                                "preference_count": buckets.preference.len(),
-                                "strategic_count": buckets.strategic.len(),
-                                "domain_count": buckets.domain.len(),
-                                "procedural_count": buckets.procedural.len(),
-                                "episodic_count": buckets.episodic.len(),
-                            }),
-                        );
-                        tracing::info!(
-                            backend = %backend,
-                            execution_id = execution_id.as_deref().unwrap_or("-"),
-                            session_id = %self.session_id,
-                            identity_count = buckets.identity.len(),
-                            preference_count = buckets.preference.len(),
-                            strategic_count = buckets.strategic.len(),
-                            domain_count = buckets.domain.len(),
-                            procedural_count = buckets.procedural.len(),
-                            episodic_count = buckets.episodic.len(),
-                            "engine memory recall completed"
-                        );
-                        Some(buckets)
-                    }
-                    Err(err) => {
-                        self.record_log_event(
-                            execution_id.as_deref(),
-                            backend,
-                            "warn",
-                            "memory.recall.failed",
-                            serde_json::json!({"error": err.to_string()}),
-                        );
-                        tracing::warn!(
-                            backend = %backend,
-                            execution_id = execution_id.as_deref().unwrap_or("-"),
-                            session_id = %self.session_id,
-                            error = %err,
-                            "engine memory recall failed"
-                        );
-                        None
-                    }
-                }
-            })
-        };
-        let memory = if let Some(span) = execution_span.as_ref() {
-            span.in_scope(recall_memory)
-        } else {
-            recall_memory()
-        };
+        let memory = self.memory_store.as_ref().and_then(|store| {
+            store
+                .recall_buckets("local-user", &cwd.display().to_string(), &self.session_id)
+                .ok()
+        });
         let memory_event = memory.as_ref().map(|buckets| {
             RuntimeEvent::Memory(MemoryEvent {
                 action: "inject".to_string(),
@@ -494,25 +365,12 @@ impl IotaEngine {
             })
         });
         if let Some(event) = memory_event.clone() {
-            self.record_log_event(
-                execution_id.as_deref(),
-                backend,
-                "info",
-                "memory.inject",
-                event_payload(&event),
-            );
-            tracing::info!(
-                backend = %backend,
-                execution_id = execution_id.as_deref().unwrap_or("-"),
-                session_id = %self.session_id,
-                payload = %event_payload(&event),
-                "engine memory inject event recorded"
-            );
             self.record_event(&execution_id, event);
         }
-        if let Some((buckets, text)) = memory.as_ref().and_then(|buckets| {
-            deterministic_memory_answer(prompt, buckets).map(|text| (buckets, text))
-        }) {
+        if let (Some(buckets), Some(text)) = (
+            memory.as_ref(),
+            deterministic_memory_answer(prompt, memory.as_ref().unwrap()),
+        ) {
             let mut events = Vec::new();
             if let Some(event) = memory_event.clone() {
                 events.push(event);
@@ -523,14 +381,13 @@ impl IotaEngine {
             });
             self.record_event(&execution_id, output_event.clone());
             events.push(output_event);
-            self.finish_execution(&execution_id, ExecutionStatus::Completed);
-            self.record_execution_active_delta(-1);
+            self.finish_execution(&execution_id, "completed");
             self.record_turn(
                 backend,
                 execution_id.as_deref(),
                 &request_hash,
                 &text,
-                ExecutionStatus::Completed.as_str(),
+                "completed",
             );
             self.active_backend = Some(backend);
             self.dialogue.push_turn(backend, prompt, &text);
@@ -566,15 +423,7 @@ impl IotaEngine {
         .await
         .context("context composition task panicked")?;
 
-        let client_started = if let Some(span) = execution_span.as_ref() {
-            opentelemetry::trace::FutureExt::with_context(
-                self.ensure_client(backend, cwd.clone()),
-                span.context(),
-            )
-            .await?
-        } else {
-            self.ensure_client(backend, cwd.clone()).await?
-        };
+        let client_started = self.ensure_client(backend, cwd.clone()).await?;
         let key = ClientKey {
             backend,
             cwd: cwd.clone(),
@@ -584,26 +433,10 @@ impl IotaEngine {
             .get_mut(&key)
             .context("ACP client missing after warm")?;
         let startup_timing = client.startup_timing();
-        let prompt_result = if let Some(span) = execution_span.as_ref() {
-            opentelemetry::trace::FutureExt::with_context(
-                client.prompt_with_cwd_timed_for_execution(
-                    &cwd,
-                    &effective_prompt,
-                    execution_id.as_deref(),
-                ),
-                span.context(),
-            )
+        match client
+            .prompt_with_cwd_timed_for_execution(&cwd, &effective_prompt, execution_id.as_deref())
             .await
-        } else {
-            client
-                .prompt_with_cwd_timed_for_execution(
-                    &cwd,
-                    &effective_prompt,
-                    execution_id.as_deref(),
-                )
-                .await
-        };
-        match prompt_result {
+        {
             Ok(mut output) => {
                 output.execution_id = execution_id.clone();
                 if let Some(event) = memory_event.clone() {
@@ -623,16 +456,10 @@ impl IotaEngine {
                     self.record_event(&execution_id, event);
                 }
                 if !has_output_event {
-                    let output_text = &output.text;
-                    tracing::info!(
-                        execution_id = execution_id.as_deref(),
-                        output_len = output_text.len(),
-                        "output.final"
-                    );
                     self.record_event(
                         &execution_id,
                         RuntimeEvent::Output(OutputEvent {
-                            text: output_text.clone(),
+                            text: output.text.clone(),
                             role: Some("assistant".to_string()),
                         }),
                     );
@@ -640,54 +467,18 @@ impl IotaEngine {
                 if let Some(session_id) = output.backend_session_id.as_deref() {
                     self.record_backend_session_id(backend, &cwd, session_id);
                 }
-                self.active_backend = Some(backend);
-                self.finish_execution_with_timing(
-                    &execution_id,
-                    ExecutionStatus::Completed,
-                    &output.timing,
-                );
-                self.record_execution_active_delta(-1);
-                if let Some(span) = execution_span.as_ref() {
-                    span.set_attribute(opentelemetry::KeyValue::new(
-                        "iota.prompt.duration_ms",
-                        output.timing.prompt_ms as i64,
-                    ));
-                    span.set_attribute(opentelemetry::KeyValue::new(
-                        "iota.total.duration_ms",
-                        output.timing.total_ms as i64,
-                    ));
-                }
+                self.finish_execution_with_timing(&execution_id, "completed", &output.timing);
                 tracing::info!(backend = %backend, execution_id = execution_id.as_deref(), total_ms = output.timing.total_ms, prompt_ms = output.timing.prompt_ms, "execution completed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &output.text,
-                    ExecutionStatus::Completed.as_str(),
+                    "completed",
                 );
+                self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &output.text);
-                if !is_explicit_memory_tool_prompt(prompt) {
-                    if let Some(span) = execution_span.as_ref() {
-                        span.in_scope(|| {
-                            self.write_episodic_memory(
-                                backend,
-                                prompt,
-                                &output.text,
-                                execution_id.as_deref(),
-                            )
-                        });
-                    } else {
-                        self.write_episodic_memory(
-                            backend,
-                            prompt,
-                            &output.text,
-                            execution_id.as_deref(),
-                        );
-                    }
-                }
-                if let Some(span) = execution_span.as_ref() {
-                    span.end_ok();
-                }
+                self.write_episodic_memory(backend, prompt, &output.text, execution_id.as_deref());
                 Ok(output)
             }
             Err(err) => {
@@ -699,18 +490,14 @@ impl IotaEngine {
                         data: None,
                     }),
                 );
-                self.finish_execution(&execution_id, ExecutionStatus::Failed);
-                self.record_execution_active_delta(-1);
-                if let Some(span) = execution_span.as_ref() {
-                    span.end_error(&err.to_string());
-                }
+                self.finish_execution(&execution_id, "failed");
                 tracing::warn!(backend = %backend, execution_id = execution_id.as_deref(), error = %err, "execution failed");
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &err.to_string(),
-                    ExecutionStatus::Failed.as_str(),
+                    "failed",
                 );
                 Err(err)
             }
@@ -729,13 +516,10 @@ impl IotaEngine {
     }
 
     pub async fn shutdown(mut self) {
-        let active = self.clients.len() as i64;
         while let Some((_, client)) = self.clients.pop_first() {
             client.shutdown().await;
         }
-        if active > 0 {
-            self.record_session_delta(-active);
-        }
+        self.record_active_sessions();
     }
 
     pub fn clients_count(&self) -> usize {
@@ -750,17 +534,14 @@ impl IotaEngine {
     }
 
     pub async fn shutdown_all_clients(&mut self) {
-        let active = self.clients.len() as i64;
         while let Some((_, client)) = self.clients.pop_first() {
             client.shutdown().await;
         }
-        if active > 0 {
-            self.record_session_delta(-active);
-        }
+        self.record_active_sessions();
     }
 
     fn try_replay_completed(&self, backend: AcpBackend, request_hash: &str) -> Option<String> {
-        let store = self.cache_store.as_ref()?;
+        let store = self.event_store.as_ref()?;
         let record = store
             .find_completed_by_request_hash(&backend.to_string(), request_hash)
             .ok()??;
@@ -851,90 +632,32 @@ impl IotaEngine {
     }
 
     fn record_event(&self, execution_id: &Option<String>, event: RuntimeEvent) {
-        if let (Some(eid), RuntimeEvent::Output(_)) = (execution_id.as_ref(), &event) {
-            if let Some(store) = &self.cache_store {
-                let _ = store.append_output(eid, &event);
-            }
-        }
-        if let RuntimeEvent::TokenUsage(ref tu) = event {
-            let m = metrics::get();
-            m.token_usage_count.add(1, &[]);
-            if let Some(input) = tu.input_tokens {
-                m.token_input.add(input, &[]);
-            }
-            if let Some(output) = tu.output_tokens {
-                m.token_output.add(output, &[]);
-            }
-            if let Some(total) = tu.total_tokens {
-                m.token_total.add(total, &[]);
-            }
-            tracing::info!(
-                input_tokens = tu.input_tokens,
-                output_tokens = tu.output_tokens,
-                total_tokens = tu.total_tokens,
-                "token.usage"
-            );
-        }
-    }
-
-    fn record_log_event(
-        &self,
-        execution_id: Option<&str>,
-        backend: AcpBackend,
-        level: &str,
-        event: &str,
-        fields: serde_json::Value,
-    ) {
-        let log = LogEvent {
-            ts: crate::utils::now_ts(),
-            level: level.to_string(),
-            target: "iota::engine".to_string(),
-            execution_id: execution_id.map(str::to_string),
-            session_id: Some(self.session_id.clone()),
-            backend: Some(backend.to_string()),
-            route: Some("engine".to_string()),
-            event: event.to_string(),
-            tool_name: None,
-            tool_call_id: None,
-            ok: fields.get("ok").and_then(serde_json::Value::as_bool),
-            latency_ms: fields.get("latency_ms").and_then(serde_json::Value::as_u64),
-            fields: fields.clone(),
-        };
-        let mut span = spans::start_phase_span(event);
-        for attr in logs::log_event_attributes(&log) {
-            span.set_attribute(attr);
-        }
-        match level {
-            "error" | "warn" => spans::end_span_error(&mut span, event),
-            _ => spans::end_span_ok(&mut span),
-        }
-        match level {
-            "error" => tracing::error!(backend = %backend, fields = %fields, "{}", event),
-            "warn" => tracing::warn!(backend = %backend, fields = %fields, "{}", event),
-            _ => tracing::info!(backend = %backend, fields = %fields, "{}", event),
+        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
+            tracing::debug!(execution_id = %execution_id, event_type = event.event_type(), "recording runtime event");
+            let _ = store.append_event(execution_id, &event);
         }
     }
 
     fn record_cache_hit(&self) {
-        metrics::get().cache_hit_count.add(1, &[]);
-        tracing::info!("cache.hit");
+        if let Some(store) = &self.event_store {
+            let _ = store.record_cache_hit();
+        }
     }
 
     fn record_cache_miss(&self) {
-        metrics::get().cache_miss_count.add(1, &[]);
-        tracing::debug!("cache.miss");
+        if let Some(store) = &self.event_store {
+            let _ = store.record_cache_miss();
+        }
     }
 
-    fn record_session_delta(&self, delta: i64) {
-        metrics::get().session_active.add(delta, &[]);
+    fn record_active_sessions(&self) {
+        if let Some(store) = &self.event_store {
+            let _ = store.set_active_sessions(self.clients.len() as u64);
+        }
     }
 
-    fn record_execution_active_delta(&self, delta: i64) {
-        metrics::get().execution_active.add(delta, &[]);
-    }
-
-    fn finish_execution(&self, execution_id: &Option<String>, status: ExecutionStatus) {
-        if let (Some(store), Some(execution_id)) = (&self.cache_store, execution_id) {
+    fn finish_execution(&self, execution_id: &Option<String>, status: &str) {
+        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
             let _ = store.finish_execution(execution_id, status);
         }
     }
@@ -942,24 +665,13 @@ impl IotaEngine {
     fn finish_execution_with_timing(
         &self,
         execution_id: &Option<String>,
-        status: ExecutionStatus,
+        status: &str,
         timing: &acp::AcpPromptTiming,
     ) {
-        self.finish_execution(execution_id, status.clone());
-        let m = metrics::get();
-        let backend_attr = self
-            .active_backend
-            .as_ref()
-            .map(|b| opentelemetry::KeyValue::new("backend", b.to_string()))
-            .unwrap_or_else(|| opentelemetry::KeyValue::new("backend", "unknown"));
-        m.prompt_duration
-            .record(timing.prompt_ms as f64 / 1000.0, &[backend_attr.clone()]);
-        if let Some(init_ms) = timing.init_ms {
-            m.init_duration
-                .record(init_ms as f64 / 1000.0, &[backend_attr]);
+        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
+            let _ = store.record_timing(execution_id, timing);
+            let _ = store.finish_execution(execution_id, status);
         }
-        let status_attr = opentelemetry::KeyValue::new("status", status.as_str().to_string());
-        m.execution_count.add(1, &[status_attr]);
     }
 
     fn extract_structured_memories(
@@ -975,40 +687,12 @@ impl IotaEngine {
         classify_memory_prompt(prompt)
             .into_iter()
             .filter_map(|classified| {
-                let mut memory_span = spans::start_memory_span("write");
-                let scope_id = classified.scope_id(cwd);
-                self.record_log_event(
-                    execution_id,
-                    backend,
-                    "info",
-                    "memory.write.call",
-                    serde_json::json!({
-                        "source": "engine-keyword",
-                        "type": classified.memory_type.as_str(),
-                        "facet": classified.facet.as_ref().map(MemoryFacet::as_str),
-                        "scope": classified.scope.as_str(),
-                        "scope_id": scope_id.clone(),
-                        "confidence": classified.confidence,
-                        "content_chars": prompt.trim().chars().count(),
-                    }),
-                );
-                tracing::info!(
-                    backend = %backend,
-                    execution_id = execution_id.unwrap_or("-"),
-                    session_id = %self.session_id,
-                    memory_type = %classified.memory_type.as_str(),
-                    facet = classified.facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
-                    scope = %classified.scope.as_str(),
-                    scope_id = %scope_id,
-                    source = "engine-keyword",
-                    "engine structured memory write started"
-                );
-                let result = store
+                store
                     .insert(MemoryInsert {
                         memory_type: classified.memory_type.clone(),
                         facet: classified.facet.clone(),
                         scope: classified.scope.clone(),
-                        scope_id,
+                        scope_id: classified.scope_id(cwd),
                         content: prompt.trim().to_string(),
                         confidence: classified.confidence,
                         source_backend: Some(backend.to_string()),
@@ -1018,61 +702,7 @@ impl IotaEngine {
                         ttl_days: classified.ttl_days,
                         supersedes: None,
                     })
-                    .map(|id| {
-                        memory_span.set_attribute(opentelemetry::KeyValue::new(
-                            "iota.memory.id",
-                            id.clone(),
-                        ));
-                        self.record_log_event(
-                            execution_id,
-                            backend,
-                            "info",
-                            "memory.write.result",
-                            serde_json::json!({
-                                "source": "engine-keyword",
-                                "memory_id": id.clone(),
-                                "ok": true,
-                            }),
-                        );
-                        tracing::info!(
-                            backend = %backend,
-                            execution_id = execution_id.unwrap_or("-"),
-                            session_id = %self.session_id,
-                            memory_id = %id,
-                            source = "engine-keyword",
-                            "engine structured memory write completed"
-                        );
-                        id
-                    })
-                    .map_err(|err| {
-                        self.record_log_event(
-                            execution_id,
-                            backend,
-                            "warn",
-                            "memory.write.result",
-                            serde_json::json!({
-                                "source": "engine-keyword",
-                                "ok": false,
-                                "error": err.to_string(),
-                            }),
-                        );
-                        tracing::warn!(
-                            backend = %backend,
-                            execution_id = execution_id.unwrap_or("-"),
-                            session_id = %self.session_id,
-                            error = %err,
-                            source = "engine-keyword",
-                            "engine structured memory write failed"
-                        );
-                        err
-                    })
-                    .ok();
-                if result.is_some() {
-                    spans::end_span_ok(&mut memory_span);
-                } else {
-                    spans::end_span_error(&mut memory_span, "memory write failed");
-                }
-                result
+                    .ok()
             })
             .collect()
     }
@@ -1093,31 +723,7 @@ Output: {}",
             summarize(prompt, 300),
             summarize(output, 500)
         );
-        let content_chars = content.chars().count();
-        let mut memory_span = spans::start_memory_span("episodic_write");
-        self.record_log_event(
-            execution_id,
-            backend,
-            "info",
-            "memory.write.call",
-            serde_json::json!({
-                "source": "engine-episodic",
-                "type": "episodic",
-                "scope": "session",
-                "scope_id": self.session_id.clone(),
-                "confidence": 0.8,
-                "content_chars": content_chars,
-            }),
-        );
-        tracing::info!(
-            backend = %backend,
-            execution_id = execution_id.unwrap_or("-"),
-            session_id = %self.session_id,
-            content_chars,
-            source = "engine-episodic",
-            "engine episodic memory write started"
-        );
-        match store.insert(MemoryInsert {
+        let _ = store.insert(MemoryInsert {
             memory_type: MemoryType::Episodic,
             facet: None,
             scope: MemoryScope::Session,
@@ -1130,103 +736,7 @@ Output: {}",
             metadata_json: None,
             ttl_days: 7,
             supersedes: None,
-        }) {
-            Ok(id) => {
-                memory_span
-                    .set_attribute(opentelemetry::KeyValue::new("iota.memory.id", id.clone()));
-                self.record_log_event(
-                    execution_id,
-                    backend,
-                    "info",
-                    "memory.write.result",
-                    serde_json::json!({
-                        "source": "engine-episodic",
-                        "memory_id": id.clone(),
-                        "ok": true,
-                    }),
-                );
-                tracing::info!(
-                    backend = %backend,
-                    execution_id = execution_id.unwrap_or("-"),
-                    session_id = %self.session_id,
-                    memory_id = %id,
-                    source = "engine-episodic",
-                    "engine episodic memory write completed"
-                );
-                spans::end_span_ok(&mut memory_span);
-            }
-            Err(err) => {
-                self.record_log_event(
-                    execution_id,
-                    backend,
-                    "warn",
-                    "memory.write.result",
-                    serde_json::json!({
-                        "source": "engine-episodic",
-                        "ok": false,
-                        "error": err.to_string(),
-                    }),
-                );
-                tracing::warn!(
-                    backend = %backend,
-                    execution_id = execution_id.unwrap_or("-"),
-                    session_id = %self.session_id,
-                    error = %err,
-                    source = "engine-episodic",
-                    "engine episodic memory write failed"
-                );
-                spans::end_span_error(&mut memory_span, &err.to_string());
-            }
-        }
-        let keep = self.effective_config.episodic_compaction_keep();
-        match store.compact_episodic_scope(MemoryScope::Session, &self.session_id, keep) {
-            Ok(deleted) => {
-                self.record_log_event(
-                    execution_id,
-                    backend,
-                    "info",
-                    "memory.compaction",
-                    serde_json::json!({
-                        "scope": "session",
-                        "scope_id": self.session_id.clone(),
-                        "keep_latest": keep,
-                        "deleted": deleted,
-                        "ok": true,
-                    }),
-                );
-                tracing::info!(
-                    backend = %backend,
-                    execution_id = execution_id.unwrap_or("-"),
-                    session_id = %self.session_id,
-                    keep_latest = keep,
-                    deleted,
-                    "engine episodic memory compaction completed"
-                );
-            }
-            Err(err) => {
-                self.record_log_event(
-                    execution_id,
-                    backend,
-                    "warn",
-                    "memory.compaction",
-                    serde_json::json!({
-                        "scope": "session",
-                        "scope_id": self.session_id.clone(),
-                        "keep_latest": keep,
-                        "ok": false,
-                        "error": err.to_string(),
-                    }),
-                );
-                tracing::warn!(
-                    backend = %backend,
-                    execution_id = execution_id.unwrap_or("-"),
-                    session_id = %self.session_id,
-                    keep_latest = keep,
-                    error = %err,
-                    "engine episodic memory compaction failed"
-                );
-            }
-        }
+        });
     }
 
     async fn ensure_client(&mut self, backend: AcpBackend, cwd: PathBuf) -> Result<bool> {
@@ -1241,7 +751,7 @@ Output: {}",
         match self.clients.entry(key) {
             Entry::Vacant(entry) => {
                 entry.insert(client);
-                self.record_session_delta(1);
+                self.record_active_sessions();
             }
             Entry::Occupied(_) => {}
         }
@@ -1250,16 +760,13 @@ Output: {}",
 
     async fn start_client(&self, backend: AcpBackend, cwd: PathBuf) -> Result<AcpClient> {
         let path = config_path()?;
-        let section = self
-            .effective_config
-            .backend_config(backend)
-            .with_context(|| {
-                format!(
-                    "Missing backend section for {} in {}",
-                    backend,
-                    path.display()
-                )
-            })?;
+        let section = backend_config(&self.config, backend).with_context(|| {
+            format!(
+                "Missing backend section for {} in {}",
+                backend,
+                path.display()
+            )
+        })?;
         if !section.enabled {
             bail!("Backend {} is disabled in {}", backend, path.display());
         }
@@ -1284,12 +791,12 @@ Output: {}",
             backend_process_env_with_context(
                 backend,
                 section,
-                self.effective_config.backend_context_config(backend),
+                backend_context_config(&self.config, backend),
             ),
             Some(normalized_acp_command(backend, section, acp_config)),
-            self.effective_config.context_mcp_servers(backend),
-            self.effective_config.context_session_options(backend),
-            self.effective_config.context_tool_whitelist(backend),
+            config::context_mcp_servers(&self.config, backend),
+            config::context_session_options(&self.config, backend),
+            config::context_tool_whitelist(&self.config, backend),
             self.show_native,
             self.timeout_ms,
         )
@@ -1321,7 +828,7 @@ impl ClassifiedMemory {
 }
 
 fn classify_memory_prompt(prompt: &str) -> Vec<ClassifiedMemory> {
-    let lower = prompt.to_ascii_lowercase();
+    let lower = prompt.to_lowercase();
     let mut memories = Vec::new();
     let is_procedure =
         prompt.contains("实验步骤") || lower.contains("steps:") || lower.contains("procedure");
@@ -1394,15 +901,11 @@ fn is_memory_write_only_prompt(prompt: &str) -> bool {
         && !prompt.contains("请")
 }
 
-fn is_explicit_memory_tool_prompt(prompt: &str) -> bool {
-    prompt.contains("iota_memory_write")
-}
-
 fn deterministic_memory_answer(prompt: &str, buckets: &RecallBuckets) -> Option<String> {
     if !is_memory_query(prompt) {
         return None;
     }
-    let lower = prompt.to_ascii_lowercase();
+    let lower = prompt.to_lowercase();
     let mut lines = Vec::new();
     let all_info = prompt.contains("所有信息");
     if all_info {
@@ -1453,13 +956,6 @@ fn push_memory_lines(
     lines.push(format!("{}：", label));
     for record in records {
         lines.push(format!("- {}", record.content.trim()));
-    }
-}
-
-fn event_payload(event: &RuntimeEvent) -> serde_json::Value {
-    match event {
-        RuntimeEvent::Memory(memory) => memory.payload.clone(),
-        other => serde_json::json!({"event_type": other.event_type()}),
     }
 }
 
@@ -1534,5 +1030,44 @@ fn memory_bucket_summary(records: &[crate::store::memory::MemoryRecord]) -> serd
 }
 
 #[cfg(test)]
-#[path = "engine_tests.rs"]
-mod tests;
+mod tests {
+    use super::*;
+    use crate::store::memory::MemoryRecord;
+
+    #[test]
+    fn memory_inject_payload_uses_configured_budget() {
+        let buckets = RecallBuckets {
+            identity: vec![memory_record("one")],
+            preference: vec![memory_record("two")],
+            ..Default::default()
+        };
+        let payload = memory_inject_payload(&buckets, 5);
+        let budget = payload.get("budget").unwrap();
+
+        assert_eq!(budget.get("memory_chars").and_then(|v| v.as_u64()), Some(5));
+        assert_eq!(budget.get("total_chars").and_then(|v| v.as_u64()), Some(6));
+        assert_eq!(
+            budget.get("truncated").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            budget.get("excluded_count").and_then(|v| v.as_u64()),
+            Some(1)
+        );
+    }
+
+    fn memory_record(content: &str) -> MemoryRecord {
+        MemoryRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            memory_type: "semantic".to_string(),
+            facet: Some("identity".to_string()),
+            scope: "user".to_string(),
+            scope_id: "local-user".to_string(),
+            content: content.to_string(),
+            confidence: 1.0,
+            created_at: 1,
+            updated_at: 1,
+            expires_at: 999,
+        }
+    }
+}

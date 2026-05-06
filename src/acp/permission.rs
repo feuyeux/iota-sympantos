@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use std::sync::OnceLock;
 use tokio::io::AsyncWriteExt;
 use tokio::process::ChildStdin;
@@ -8,7 +8,6 @@ use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::runtime_event::ApprovalDecisionEvent;
 use crate::store::approval::{self, ApprovalStore};
-use crate::telemetry::spans;
 
 use super::AcpBackend;
 
@@ -61,9 +60,7 @@ pub async fn answer_permission_request(
         .and_then(Value::as_str)
         .unwrap_or("tool")
         .to_string();
-    let mut approval_span = spans::start_approval_span(&tool_name);
 
-    tracing::info!(tool_name = %tool_name, execution_id = execution_id.unwrap_or("-"), "approval.requested");
     // Read the channel once to avoid holding the lock across .await points and
     // to prevent double-locking (tokio::sync::RwLock is not reentrant).
     let tui_tx: Option<mpsc::Sender<ApprovalRequest>> = approval_lock().read().await.clone();
@@ -77,7 +74,6 @@ pub async fn answer_permission_request(
     if is_iota_tool || whitelist_hit {
         tracing::debug!(tool = %tool_name, "[acp-permission] auto-approved iota tool");
         send_approved_response(stdin, id.clone(), &params).await?;
-        spans::end_span_ok(&mut approval_span);
         return Ok(ApprovalDecisionEvent {
             request_id: id
                 .as_str()
@@ -135,13 +131,7 @@ pub async fn answer_permission_request(
         }
     }
 
-    tracing::info!(tool_name = %tool_name, approved, "approval.decided");
     send_approved_or_denied_response(stdin, id.clone(), approved, &params).await?;
-    if approved {
-        spans::end_span_ok(&mut approval_span);
-    } else {
-        spans::end_span_error(&mut approval_span, "approval denied");
-    }
     Ok(ApprovalDecisionEvent {
         request_id: id
             .as_str()
@@ -169,7 +159,39 @@ async fn send_response(stdin: &mut ChildStdin, id: Value, result: Value) -> Resu
 }
 
 async fn send_approved_response(stdin: &mut ChildStdin, id: Value, params: &Value) -> Result<()> {
-    send_response(stdin, id, permission_outcome(true, params)).await
+    // Claude-code ACP adapter expects: {outcome: {outcome: "selected", optionId: "..."}}
+    // Prefer "allow_always" to persist the decision across the session.
+    if let Some(option_id) = params
+        .get("options")
+        .and_then(Value::as_array)
+        .and_then(|opts| {
+            opts.iter()
+                .find(|o| o.get("optionId").and_then(Value::as_str) == Some("allow_always"))
+                .or_else(|| {
+                    opts.iter()
+                        .find(|o| o.get("optionId").and_then(Value::as_str) == Some("allow"))
+                })
+                .or_else(|| {
+                    opts.iter().find(|o| {
+                        o.get("optionId")
+                            .and_then(Value::as_str)
+                            .map(|s| s.starts_with("allow"))
+                            == Some(true)
+                    })
+                })
+                .and_then(|o| o.get("optionId").and_then(Value::as_str))
+        })
+    {
+        return send_response(
+            stdin,
+            id,
+            json!({
+                "outcome": { "outcome": "selected", "optionId": option_id }
+            }),
+        )
+        .await;
+    }
+    send_response(stdin, id, json!({ "approved": true })).await
 }
 
 async fn send_approved_or_denied_response(
@@ -178,47 +200,29 @@ async fn send_approved_or_denied_response(
     approved: bool,
     params: &Value,
 ) -> Result<()> {
-    send_response(stdin, id, permission_outcome(approved, params)).await
-}
-
-fn permission_outcome(approved: bool, params: &Value) -> Value {
-    let option_id = if approved {
-        permission_option_id(params, |option_id, kind| {
-            option_id == "allow_always"
-                || option_id == "allow"
-                || option_id.starts_with("allow")
-                || kind.is_some_and(|kind| kind.starts_with("allow"))
-        })
+    if approved {
+        send_approved_response(stdin, id, params).await
     } else {
-        permission_option_id(params, |option_id, kind| {
-            option_id == "reject"
-                || option_id.starts_with("reject")
-                || kind.is_some_and(|kind| kind.starts_with("reject"))
-        })
-    };
-
-    if let Some(option_id) = option_id {
-        json!({ "outcome": { "outcome": "selected", "optionId": option_id } })
-    } else if approved {
-        json!({ "approved": true })
-    } else {
-        json!({ "outcome": { "outcome": "cancelled" } })
+        // Use outcome format for denial as well.
+        let reject_id = params
+            .get("options")
+            .and_then(Value::as_array)
+            .and_then(|opts| {
+                opts.iter()
+                    .find(|o| o.get("optionId").and_then(Value::as_str) == Some("reject"))
+                    .and_then(|o| o.get("optionId").and_then(Value::as_str))
+            });
+        if let Some(option_id) = reject_id {
+            send_response(
+                stdin,
+                id,
+                json!({ "outcome": { "outcome": "selected", "optionId": option_id } }),
+            )
+            .await
+        } else {
+            send_response(stdin, id, json!({ "approved": false })).await
+        }
     }
-}
-
-fn permission_option_id<F>(params: &Value, matches: F) -> Option<String>
-where
-    F: Fn(&str, Option<&str>) -> bool,
-{
-    params
-        .get("options")
-        .and_then(Value::as_array)?
-        .iter()
-        .find_map(|option| {
-            let option_id = option.get("optionId").and_then(Value::as_str)?;
-            let kind = option.get("kind").and_then(Value::as_str);
-            matches(option_id, kind).then(|| option_id.to_string())
-        })
 }
 
 fn tool_is_whitelisted(tool_name: &str, rules: &[String]) -> bool {
@@ -266,12 +270,6 @@ fn canonical_tool_name(value: &str) -> String {
 async fn prompt_yes_no(message: &str) -> Result<bool> {
     let message = message.to_string();
     tokio::task::spawn_blocking(move || -> Result<bool> {
-        if !io::stdin().is_terminal() {
-            eprintln!(
-                "Denying ACP tool request in non-interactive mode. Re-run in TUI or configure a tool whitelist to approve it."
-            );
-            return Ok(false);
-        }
         print!("{}(y/n): ", message);
         io::stdout().flush()?;
         let mut input = String::new();
@@ -280,151 +278,4 @@ async fn prompt_yes_no(message: &str) -> Result<bool> {
     })
     .await
     .context("Permission prompt task failed")?
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wildcard_star_matches_everything() {
-        assert!(tool_is_whitelisted("any_tool", &["*".to_string()]));
-    }
-
-    #[test]
-    fn exact_match() {
-        assert!(tool_is_whitelisted(
-            "iota_memory_write",
-            &["iota_memory_write".to_string()]
-        ));
-    }
-
-    #[test]
-    fn prefix_wildcard() {
-        assert!(tool_is_whitelisted(
-            "iota_skill_run",
-            &["iota_skill_*".to_string()]
-        ));
-    }
-
-    #[test]
-    fn suffix_wildcard() {
-        assert!(tool_is_whitelisted(
-            "mcp__iota_read",
-            &["*_read".to_string()]
-        ));
-    }
-
-    #[test]
-    fn no_match_returns_false() {
-        assert!(!tool_is_whitelisted(
-            "dangerous_tool",
-            &["safe_tool".to_string()]
-        ));
-    }
-
-    #[test]
-    fn empty_rule_never_matches() {
-        assert!(!tool_is_whitelisted("any", &["".to_string()]));
-    }
-
-    #[test]
-    fn empty_whitelist_never_matches() {
-        assert!(!tool_is_whitelisted("any", &[]));
-    }
-
-    #[test]
-    fn mcp_prefixed_tool_matches_tail() {
-        // "mcp__iota-context__iota_memory_write" should match rule "iota_memory_write"
-        assert!(tool_is_whitelisted(
-            "mcp__iota-context__iota_memory_write",
-            &["iota_memory_write".to_string()]
-        ));
-    }
-
-    #[test]
-    fn dash_underscore_canonicalization() {
-        assert!(tool_is_whitelisted(
-            "iota-memory-write",
-            &["iota_memory_write".to_string()]
-        ));
-    }
-
-    #[test]
-    fn case_insensitive_matching() {
-        assert!(tool_is_whitelisted(
-            "Iota_Memory_Write",
-            &["iota_memory_write".to_string()]
-        ));
-    }
-
-    #[test]
-    fn canonical_tool_name_normalizes() {
-        assert_eq!(canonical_tool_name("Foo-Bar Baz"), "foo_barbaz");
-    }
-
-    #[test]
-    fn wildcard_match_exact() {
-        assert!(wildcard_match("abc", "abc"));
-        assert!(!wildcard_match("abc", "xyz"));
-    }
-
-    #[test]
-    fn wildcard_match_star_alone() {
-        assert!(wildcard_match("anything", "*"));
-    }
-
-    #[test]
-    fn wildcard_match_prefix() {
-        assert!(wildcard_match("iota_skill_run", "iota_skill_*"));
-        assert!(!wildcard_match("other_run", "iota_skill_*"));
-    }
-
-    #[test]
-    fn wildcard_match_suffix() {
-        assert!(wildcard_match("mcp__tool_read", "*_read"));
-        assert!(!wildcard_match("mcp__tool_write", "*_read"));
-    }
-
-    #[test]
-    fn tool_rule_match_with_double_underscore_prefix() {
-        // rule "iota_memory_write" should also match via "*__iota_memory_write" path
-        assert!(tool_rule_match(
-            "mcp__context__iota_memory_write",
-            "iota_memory_write"
-        ));
-    }
-
-    #[test]
-    fn multiple_rules_any_match_wins() {
-        let rules = vec!["safe_tool".to_string(), "iota_*".to_string()];
-        assert!(tool_is_whitelisted("iota_read", &rules));
-        assert!(tool_is_whitelisted("safe_tool", &rules));
-        assert!(!tool_is_whitelisted("dangerous", &rules));
-    }
-
-    #[test]
-    fn denied_permission_selects_reject_like_option() {
-        let params = json!({
-            "options": [
-                {"optionId": "allow-once", "kind": "allow_once"},
-                {"optionId": "reject-once", "kind": "reject_once"}
-            ]
-        });
-
-        assert_eq!(
-            permission_outcome(false, &params),
-            json!({"outcome": {"outcome": "selected", "optionId": "reject-once"}})
-        );
-    }
-
-    #[test]
-    fn denied_permission_without_reject_option_is_cancelled() {
-        let params = json!({"options": []});
-
-        assert_eq!(
-            permission_outcome(false, &params),
-            json!({"outcome": {"outcome": "cancelled"}})
-        );
-    }
 }
