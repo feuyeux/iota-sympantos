@@ -88,6 +88,7 @@ fn route_memory_write(arguments: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .map(parse_memory_facet)
         .transpose()?;
+    validate_memory_shape(memory_type.clone(), facet.clone())?;
     let scope = parse_memory_scope(required_string(arguments, "scope")?)?;
     let scope_id = arguments
         .get("scope_id")
@@ -316,6 +317,16 @@ fn required_confidence(arguments: &Value) -> Result<f64> {
         bail!("confidence must be between 0 and 1");
     }
     Ok(confidence)
+}
+
+fn validate_memory_shape(memory_type: MemoryType, facet: Option<MemoryFacet>) -> Result<()> {
+    if memory_type == MemoryType::Semantic && facet.is_none() {
+        bail!("semantic memory requires a facet");
+    }
+    if memory_type != MemoryType::Semantic && facet.is_some() {
+        bail!("only semantic memory may set facet");
+    }
+    Ok(())
 }
 
 fn value_as_f64(value: &Value) -> Option<f64> {

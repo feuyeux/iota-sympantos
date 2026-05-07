@@ -109,13 +109,13 @@
 [memory:read:result] id=call_function_8hglqvifb4la_1 ok=true record_count=5 value=...
 ```
 
-后续建议完成情况（同日追加）：
+追加修复完成情况（同日追加）：
 
 | 建议 | 实现 | 验证 |
 |------|------|------|
-| backend tool write schema / 客户端校验 | `iota_memory_write` 的 MCP schema 和运行时入口都要求 `content`、`type`、`scope`、`confidence`；`confidence` 必须在 `[0,1]` 内 | `cargo test memory_write` 通过；缺少 confidence 的直连 `context-mcp` 调用返回 `isError=true`、`confidence is required` |
+| backend tool write schema / 客户端校验 | `iota_memory_write` 的 MCP schema 和运行时入口都要求 `content`、`type`、`scope`、`confidence`；`confidence` 必须在 `[0,1]` 内；schema 和运行时都约束 `semantic` 必须带 `facet`，`episodic/procedural` 不得带 `facet` | `cargo test memory_write` 通过；缺少 confidence 的直连 `context-mcp` 调用返回 `isError=true`、`confidence is required` |
 | backend 管理的 sidecar route 日志进入主日志 | 默认 `iota-context` MCP server 注入 `RUST_LOG=iota::context::server=info`；ACP backend stderr 会在非 `--show-native` 模式下转发 memory route 相关行 | `cargo test context_mcp_server_enables_memory_route_logging` 通过 |
-| `observability logging tools` 按工具名过滤 | 新增 `--tool NAME` / `--tool-name NAME` | `cargo run -- observability logging tools --limit 3 --tool iota_memory_write` 只返回 `iota_memory_write` |
+| `observability logging tools` 按工具名过滤和 call/result 审计 | 新增 `--tool NAME` / `--tool-name NAME`；新增 `--mode calls|results|pairs`，其中 `pairs` 会按 execution 和 tool call id 输出 call/result 成对审计视图 | `cargo run -- observability logging tools --limit 3 --tool iota_memory_write --mode pairs` 只返回 `iota_memory_write` 闭环记录 |
 
 ---
 
@@ -345,7 +345,7 @@ trace 中 budget：
 .\target\release\iota.exe observability logging events 6b8a00be-6ff4-4653-92a6-5e0f1a51ce3e
 .\target\release\iota.exe observability tracing breakdown 6b8a00be-6ff4-4653-92a6-5e0f1a51ce3e
 .\target\release\iota.exe observability logging tools --limit 20
-.\target\release\iota.exe observability logging tools --limit 3 --tool iota_memory_write
+.\target\release\iota.exe observability logging tools --limit 3 --tool iota_memory_write --mode pairs
 ```
 
 本地 EventStore 全量统计（包含历史运行，不只本实验）：
@@ -387,7 +387,7 @@ EventStore 事件流检查：
 | 8 | `tool` | ACP 后端原始泛化事件 |
 | 10 | `iota_memory_write` | 从 `tool_call_update.rawInput` 归一化出的真实工具事件 |
 
-后续补充：`observability logging tools --limit 3 --tool iota_memory_write` 已支持按真实工具名过滤，只返回 `iota_memory_write` 记录。
+后续补充：`observability logging tools --limit 3 --tool iota_memory_write --mode pairs` 已支持按真实工具名过滤，并输出 `tool_call` / `tool_result` 成对审计视图。
 
 判定：通过。修复后工具调用和工具结果都可在 EventStore 中以真实工具名审计。
 
@@ -667,16 +667,3 @@ EventStore 结论：
 结论：核心 memory 延续、去重、过滤、budget、observability 和完整日志链路均通过。本轮已修复上一轮暴露的 RuntimeEvent 工具名/结果归一化问题，并新增控制台 memory read/write 结构化日志。
 
 ---
-
-## 六、后续建议
-
-本节原三项建议已完成：
-
-1. `iota_memory_write` 已增加 schema 和运行时校验，缺少 `type`、`scope`、`confidence` 会直接返回错误；`confidence` 超出 `[0,1]` 也会拒绝。
-2. 默认 `iota-context` sidecar 已携带 memory route 日志过滤配置，ACP backend stderr 已支持 selective forwarding。
-3. `observability logging tools` 已支持 `--tool` / `--tool-name`，可直接审计 `iota_memory_write` / `iota_memory_search`。
-
-剩余可改进项：
-
-1. 为 `observability logging tools` 增加 `tool_result` 查询模式，形成 call/result 成对审计视图。
-2. 为 MCP tool schema 增加更严格的 `semantic`/`facet` 条件表达；当前由存储层 taxonomy 校验兜底。

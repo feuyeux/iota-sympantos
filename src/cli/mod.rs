@@ -3,6 +3,7 @@ use prometheus::{
     Encoder, Gauge, Histogram, HistogramOpts, IntCounter, Registry, TextEncoder, opts,
 };
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::process::Stdio;
 use tracing_subscriber::EnvFilter;
 
@@ -360,7 +361,7 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("help");
     if matches!(sub, "-h" | "--help" | "help") {
         println!(
-            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging tools [--limit N] [--tool NAME]\n                                                              tool_call events across recent executions\n  iota observability logging approvals [--limit N]     approval_request/decision events"
+            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs]\n                                                              Tool call/result audit events\n  iota observability logging approvals [--limit N]     approval_request/decision events"
         );
         return Ok(());
     }
@@ -400,37 +401,10 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
         "tools" => {
-            use crate::runtime_event::RuntimeEvent;
-            #[derive(serde::Serialize)]
-            struct ToolEntry {
-                execution_id: String,
-                backend: String,
-                seq: i64,
-                tool_name: String,
-                arguments: serde_json::Value,
-            }
             let tool_filter = parse_tool_filter(args);
+            let mode = parse_tool_audit_mode(args)?;
             let executions = store.recent_executions(limit.saturating_mul(5))?;
-            let mut entries: Vec<ToolEntry> = Vec::new();
-            'outer: for exec in &executions {
-                for (seq, _, event) in store.execution_events(&exec.execution_id)? {
-                    if let RuntimeEvent::ToolCall(tc) = event {
-                        if tool_filter.is_some_and(|name| name != tc.name.as_str()) {
-                            continue;
-                        }
-                        entries.push(ToolEntry {
-                            execution_id: exec.execution_id.clone(),
-                            backend: exec.backend.clone(),
-                            seq,
-                            tool_name: tc.name,
-                            arguments: tc.arguments,
-                        });
-                        if entries.len() >= limit {
-                            break 'outer;
-                        }
-                    }
-                }
-            }
+            let entries = collect_tool_audit_entries(store, &executions, limit, tool_filter, mode)?;
             println!("{}", serde_json::to_string_pretty(&entries)?);
         }
         "approvals" => {
@@ -475,6 +449,134 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
         ),
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolAuditMode {
+    Calls,
+    Results,
+    Pairs,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "event_type", rename_all = "snake_case")]
+enum ToolAuditEntry {
+    ToolCall {
+        execution_id: String,
+        backend: String,
+        seq: i64,
+        tool_name: String,
+        id: String,
+        arguments: serde_json::Value,
+    },
+    ToolResult {
+        execution_id: String,
+        backend: String,
+        seq: i64,
+        tool_name: String,
+        id: String,
+        ok: bool,
+        result: serde_json::Value,
+    },
+    ToolPair {
+        execution_id: String,
+        backend: String,
+        tool_name: String,
+        id: String,
+        call_seq: Option<i64>,
+        result_seq: i64,
+        arguments: serde_json::Value,
+        ok: bool,
+        result: serde_json::Value,
+    },
+}
+
+fn collect_tool_audit_entries(
+    store: &EventStore,
+    executions: &[crate::store::events::ExecutionRecord],
+    limit: usize,
+    tool_filter: Option<&str>,
+    mode: ToolAuditMode,
+) -> Result<Vec<ToolAuditEntry>> {
+    use crate::runtime_event::RuntimeEvent;
+
+    let mut entries = Vec::new();
+    'outer: for exec in executions {
+        let events = store.execution_events(&exec.execution_id)?;
+        if mode == ToolAuditMode::Pairs {
+            let mut calls: BTreeMap<(String, String), (i64, serde_json::Value)> = BTreeMap::new();
+            for (seq, _, event) in events {
+                match event {
+                    RuntimeEvent::ToolCall(call) => {
+                        calls.insert((call.id, call.name), (seq, call.arguments));
+                    }
+                    RuntimeEvent::ToolResult(result) => {
+                        if tool_filter.is_some_and(|name| name != result.name.as_str()) {
+                            continue;
+                        }
+                        let key = (result.id.clone(), result.name.clone());
+                        let (call_seq, arguments) = calls
+                            .get(&key)
+                            .map(|(seq, arguments)| (Some(*seq), arguments.clone()))
+                            .unwrap_or((None, serde_json::Value::Null));
+                        entries.push(ToolAuditEntry::ToolPair {
+                            execution_id: exec.execution_id.clone(),
+                            backend: exec.backend.clone(),
+                            tool_name: result.name,
+                            id: result.id,
+                            call_seq,
+                            result_seq: seq,
+                            arguments,
+                            ok: result.ok,
+                            result: result.result,
+                        });
+                        if entries.len() >= limit {
+                            break 'outer;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
+        for (seq, _, event) in events {
+            match event {
+                RuntimeEvent::ToolCall(call) if mode == ToolAuditMode::Calls => {
+                    if tool_filter.is_some_and(|name| name != call.name.as_str()) {
+                        continue;
+                    }
+                    entries.push(ToolAuditEntry::ToolCall {
+                        execution_id: exec.execution_id.clone(),
+                        backend: exec.backend.clone(),
+                        seq,
+                        tool_name: call.name,
+                        id: call.id,
+                        arguments: call.arguments,
+                    });
+                }
+                RuntimeEvent::ToolResult(result) if mode == ToolAuditMode::Results => {
+                    if tool_filter.is_some_and(|name| name != result.name.as_str()) {
+                        continue;
+                    }
+                    entries.push(ToolAuditEntry::ToolResult {
+                        execution_id: exec.execution_id.clone(),
+                        backend: exec.backend.clone(),
+                        seq,
+                        tool_name: result.name,
+                        id: result.id,
+                        ok: result.ok,
+                        result: result.result,
+                    });
+                }
+                _ => {}
+            }
+            if entries.len() >= limit {
+                break 'outer;
+            }
+        }
+    }
+    Ok(entries)
 }
 
 // ── tracing ───────────────────────────────────────────────────────────────────
@@ -867,6 +969,32 @@ fn parse_tool_filter(args: &[String]) -> Option<&str> {
     args.windows(2).find_map(|pair| {
         matches!(pair[0].as_str(), "--tool" | "--tool-name").then_some(pair[1].as_str())
     })
+}
+
+fn parse_tool_audit_mode(args: &[String]) -> Result<ToolAuditMode> {
+    if args.iter().any(|arg| arg == "--results") {
+        return Ok(ToolAuditMode::Results);
+    }
+    if args.iter().any(|arg| arg == "--pairs") {
+        return Ok(ToolAuditMode::Pairs);
+    }
+    if args.iter().any(|arg| arg == "--calls") {
+        return Ok(ToolAuditMode::Calls);
+    }
+    let Some(mode) = args.windows(2).find_map(|pair| {
+        matches!(pair[0].as_str(), "--mode" | "--events").then_some(pair[1].as_str())
+    }) else {
+        return Ok(ToolAuditMode::Calls);
+    };
+    match mode {
+        "calls" | "call" | "tool_call" => Ok(ToolAuditMode::Calls),
+        "results" | "result" | "tool_result" => Ok(ToolAuditMode::Results),
+        "pairs" | "pair" | "paired" => Ok(ToolAuditMode::Pairs),
+        other => anyhow::bail!(
+            "invalid tools audit mode '{}'; expected calls, results, or pairs",
+            other
+        ),
+    }
 }
 
 async fn run_skill_command(args: &[String]) -> Result<()> {
@@ -1397,5 +1525,34 @@ mod tests {
         ];
 
         assert_eq!(parse_tool_filter(&args), Some("iota_memory_write"));
+    }
+
+    #[test]
+    fn parses_tool_audit_modes() {
+        assert_eq!(
+            parse_tool_audit_mode(&["tools".to_string()]).unwrap(),
+            ToolAuditMode::Calls
+        );
+        assert_eq!(
+            parse_tool_audit_mode(&[
+                "tools".to_string(),
+                "--mode".to_string(),
+                "results".to_string()
+            ])
+            .unwrap(),
+            ToolAuditMode::Results
+        );
+        assert_eq!(
+            parse_tool_audit_mode(&["tools".to_string(), "--pairs".to_string()]).unwrap(),
+            ToolAuditMode::Pairs
+        );
+        assert!(
+            parse_tool_audit_mode(&[
+                "tools".to_string(),
+                "--mode".to_string(),
+                "unknown".to_string()
+            ])
+            .is_err()
+        );
     }
 }

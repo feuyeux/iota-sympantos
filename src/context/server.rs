@@ -169,6 +169,7 @@ fn call_tool(
                 .and_then(Value::as_str)
                 .map(parse_memory_facet)
                 .transpose()?;
+            validate_memory_shape(memory_type.clone(), facet.clone())?;
             let scope = parse_memory_scope(required_string(args, "scope")?)?;
             let scope_id = args
                 .get("scope_id")
@@ -342,7 +343,17 @@ fn tools() -> Vec<Value> {
                     "source_session_id": {"type": "string"},
                     "source_execution_id": {"type": "string"},
                     "supersedes": {"type": "string"}
-                }
+                },
+                "allOf": [
+                    {
+                        "if": {"properties": {"type": {"const": "semantic"}}, "required": ["type"]},
+                        "then": {"required": ["facet"]}
+                    },
+                    {
+                        "if": {"properties": {"type": {"enum": ["episodic", "procedural"]}}, "required": ["type"]},
+                        "then": {"not": {"required": ["facet"]}}
+                    }
+                ]
             }
         }),
         json!({
@@ -445,6 +456,19 @@ fn required_confidence(args: &Value) -> std::result::Result<f64, String> {
         return Err("confidence must be between 0 and 1".to_string());
     }
     Ok(confidence)
+}
+
+fn validate_memory_shape(
+    memory_type: MemoryType,
+    facet: Option<MemoryFacet>,
+) -> std::result::Result<(), String> {
+    if memory_type == MemoryType::Semantic && facet.is_none() {
+        return Err("semantic memory requires a facet".to_string());
+    }
+    if memory_type != MemoryType::Semantic && facet.is_some() {
+        return Err("only semantic memory may set facet".to_string());
+    }
+    Ok(())
 }
 
 fn default_memory_scope_id(

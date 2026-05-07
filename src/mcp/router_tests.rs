@@ -74,3 +74,33 @@ fn memory_write_rejects_out_of_range_confidence() {
     .to_string();
     assert!(err.contains("confidence must be between 0 and 1"));
 }
+
+#[test]
+fn memory_write_rejects_invalid_type_facet_shape() {
+    let missing_facet = route_tool_call(
+        "iota_memory_write",
+        &json!({
+            "content": "remember this",
+            "type": "semantic",
+            "scope": "project",
+            "confidence": 0.9
+        }),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(missing_facet.contains("semantic memory requires a facet"));
+
+    let illegal_facet = route_tool_call(
+        "iota_memory_write",
+        &json!({
+            "content": "remember this",
+            "type": "procedural",
+            "facet": "domain",
+            "scope": "project",
+            "confidence": 0.9
+        }),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(illegal_facet.contains("only semantic memory may set facet"));
+}
