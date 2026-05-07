@@ -3,28 +3,32 @@
 | 字段 | 值 |
 |------|-----|
 | 实验代号 | exp01-memory |
-| 执行日期 | 2026-05-06 |
+| 本次执行日期 | 2026-05-07 |
+| 执行目录 | `D:\coding\creative\iota-sympantos` |
 | 参考规范 | iota-guides/08-memory.md v2.1 |
 | 存储层 | SQLite `~/.i6/context/memory.sqlite`（Rust `memory.rs`） |
+| 结果日志 | `gefsi/logs/exp01-final-*`、`gefsi/logs/exp01-full-log-*-fixed.*` |
 
 ---
 
 ## 一、实验目标
 
-验证 iota-sympantos Memory 系统在**多后端切换场景**下的核心主张：
+验证 iota-sympantos Memory 系统在多后端切换场景下的核心主张：
 
-> Engine 层（Rust）负责 Extract / Store / Recall / Inject，后端可替换，记忆不应丢失。
+> Engine 层负责 Extract / Store / Recall / Inject，后端可替换，记忆不应丢失。
 
-**验收点：**
+验收点：
 
 | # | 验收项 |
 |---|--------|
-| 1 | 后端 A 写入的记忆，后端 B 能完整召回并注入 context |
-| 2 | 六类记忆桶均可正确存储和注入（semantic×4 + procedural + episodic） |
-| 3 | contentHash（SHA-256）去重有效——相同 content 不产生新行 |
-| 4 | confidence + scope 过滤生效（低于阈值的条目不注入） |
-| 5 | token budget（`memory_chars: 2000`）截断行为可观测 |
+| 1 | 后端 A 写入的记忆，后端 B 能召回并注入 context |
+| 2 | 六类记忆桶均可正确存储和注入 |
+| 3 | contentHash（SHA-256）去重有效 |
+| 4 | confidence + scope 过滤生效 |
+| 5 | `memory_chars: 2000` 截断行为可观测 |
 | 6 | logging / tracing / metrics 可通过 observability 命令验证 |
+| 7 | 完整记忆日志链路可观测，包括 backend tool call、Memory API route、Engine recall/inject/episodic |
+| 8 | 控制台 trace 直接输出 memory read/write 的结构化日志 |
 
 ---
 
@@ -32,15 +36,28 @@
 
 ### 2.1 前置条件
 
-| 组件 | 要求 |
-|------|------|
+| 组件 | 本次结果 |
+|------|----------|
 | iota binary | `cargo build --release` 成功 |
-| nimia.yaml | `~/.i6/nimia.yaml` 已配置至少 2 个后端（推荐全 5 个） |
-| SQLite CLI | `sqlite3` ≥ 3.53，需包含 `ENABLE_FTS5` 编译选项 |
-| 后端可用性 | 各后端 API key 已在 nimia.yaml 中配置 |
+| nimia.yaml | `C:\Users\feuye\.i6\nimia.yaml` |
+| SQLite CLI | `C:\Users\feuye\Tools\sqlite\sqlite3.exe` |
+| SQLite version | `3.53.1 2026-05-05 ... (64-bit)` |
+| SQLite compile options | `ENABLE_FTS3`, `ENABLE_FTS4`, `ENABLE_FTS5` |
+| 默认 PATH sqlite3 | `3.44.3 ... (32-bit)`，不支持 FTS5，不用于本实验 DB 操作 |
 
-> 官方 sqlite-tools-win-x64-3530100 → `~/tools/sqlite/sqlite3.exe`（3.53.1 64-bit，含 FTS3/4/5）。
-> PowerShell 中通过 alias 指向新二进制。
+后端配置检查：
+
+```powershell
+.\target\release\iota.exe check
+```
+
+| backend | 状态 | model |
+|---------|------|-------|
+| claude-code | configured | `MiniMax-M2.7` |
+| codex | configured | `gh/gpt-5.4` |
+| gemini | configured | `gemini-2.5-flash` |
+| hermes | configured | `MiniMax-M2.7` |
+| opencode | configured | `minimax-cn-coding-plan/MiniMax-M2.7` |
 
 ### 2.2 路径约定
 
@@ -49,19 +66,17 @@
 | `~/.i6/nimia.yaml` | 唯一配置来源 |
 | `~/.i6/context/memory.sqlite` | 记忆存储（表名 `memory`） |
 | `~/.i6/context/events.sqlite` | 事件持久化 |
-| `~/.i6/skills` / `./.iota/skills` | Skill 根目录 |
+| `gefsi/logs/` | 本次实验命令输出 |
 
 ### 2.3 scope_id 约定
 
 | scope | 写入时 scope_id | 召回候选范围 |
 |-------|----------------|--------------|
-| user | `"local-user"` | `[传入值, "user-sympantos", "local-user"]` |
-| project | cwd 路径 | `[传入值, "iota-sympantos", cwd basename]` |
-| session | 自动生成 | 当前 session_id |
+| user | `local-user` | `[传入值, "user-sympantos", "local-user"]` |
+| project | `iota-sympantos` | `[传入值, "iota-sympantos", cwd basename]` |
+| session | 自动生成 | 当前 `session_id` |
 
-### 2.4 各桶 confidence 过滤阈值
-
-硬编码于 `recall_buckets()`：
+### 2.4 confidence 过滤阈值
 
 | 桶 | min_confidence |
 |----|----------------|
@@ -74,513 +89,576 @@
 
 ---
 
-## 三、实验步骤
+## 三、本次修复
 
-### Step 0 — 环境准备
+本轮先修复再重跑。修复内容：
 
-```bash
-cargo build --release       # → Finished `release` profile in 0.40s
-sqlite3 --version           # → 3.53.1 2026-05-05 (64-bit)
+| 文件 | 修复点 |
+|------|--------|
+| `src/runtime_event.rs` | 将 ACP `tool_call_update` 中的 `mcp__iota-context__iota_memory_*` 归一化为真实 `ToolCall` / `ToolResult`；避免把中间态空 `content: []` 误判为结果 |
+| `src/cli/mod.rs` | `--trace` 新增 `[memory:read]`、`[memory:read:result]`、`[memory:write]`、`[memory:write:result]` 控制台日志 |
+| `src/mcp/client.rs` | iota 内部 MCP client 启动的 sidecar stderr 改为转发到控制台，便于本地 route 诊断 |
+| `src/runtime_event_tests.rs` | 增加 `tool_call_update` 写入、读取、失败结果归一化测试 |
+
+修复后关键现象：
+
+```text
+[memory:write] id=call_function_xigjqebwv2ab_1 type=semantic facet=identity scope=user scope_id=local-user confidence=0.5 content_chars=16 args=...
+[memory:write:result] id=call_function_xigjqebwv2ab_1 ok=true memory_id=a2528017-a4f9-4e04-8a07-a26a64b23c11 value=...
+[memory:read] id=call_function_8hglqvifb4la_1 query=exp01-full-log-probe-20260507-fixed limit=5 mode=hybrid args=...
+[memory:read:result] id=call_function_8hglqvifb4la_1 ok=true record_count=5 value=...
 ```
+
+---
+
+## 四、实验步骤与本次结果
+
+### Step 0 - 环境准备
+
+执行：
+
+```powershell
+cargo build --release
+& "$env:USERPROFILE\Tools\sqlite\sqlite3.exe" --version
+```
+
+结果：
+
+| 检查项 | 结果 |
+|--------|------|
+| release build | 通过 |
+| sqlite version | `3.53.1 2026-05-05 ... (64-bit)` |
+| FTS5 | 通过 |
 
 清理测试 scope 数据：
 
-```bash
-sqlite3 ~/.i6/context/memory.sqlite \
-  "DELETE FROM memory WHERE scope_id IN (
-    'user-sympantos', 'iota-sympantos', 'local-user'
-  ) OR scope_id LIKE '%iota-sympantos';"
-# 验证: count=0
+```powershell
+$sqlite = "$env:USERPROFILE\Tools\sqlite\sqlite3.exe"
+$memoryDb = "$env:USERPROFILE\.i6\context\memory.sqlite"
+& $sqlite $memoryDb "DELETE FROM memory
+  WHERE scope_id IN ('user-sympantos','iota-sympantos','local-user')
+     OR scope_id LIKE '%iota-sympantos'
+     OR content LIKE '%exp01-full-log-probe-%'
+     OR content LIKE '%domain-padding-%'
+     OR content LIKE '%低置信度测试%';"
 ```
+
+结果：清理后匹配记录数为 `0`。
+
+备注：PATH 上的 Android `sqlite3.exe` 不支持 FTS5，会在删除触发 `memory_fts` trigger 时失败；本实验改用 `C:\Users\feuye\Tools\sqlite\sqlite3.exe`。
 
 ---
 
-### Step 1 — 通过 MCP 工具写入 6 类记忆（claude-code）
+### Step 1 - 通过 MCP 工具写入 6 类记忆（claude-code）
 
-> **设计：** 通过 prompt 引导后端调用 `iota_memory_write` MCP 工具，确保每条记忆的 type/facet/scope/content 完全可控。
+执行方式：`claude-code` 后端通过 `iota-context` MCP 工具调用 `iota_memory_write`。每条命令均使用 `--trace --timeout-ms 180000` 并写入 `gefsi/logs/exp01-final-step1-*.txt`。
 
-| 子步骤 | type | facet | scope | scope_id | content 摘要 | confidence | 返回 ID |
-|--------|------|-------|-------|----------|-------------|-----------|---------|
-| 1-A | semantic | identity | user | local-user | 用户名 Sympantos，实验员角色 | 0.95 | `b8517b2e` |
-| 1-B | semantic | preference | user | local-user | 中文回答，英文日志，Markdown，2 空格 | 0.90 | `595bbb72` |
-| 1-C | semantic | strategic | project | iota-sympantos | 2026 Q2 完成跨后端验证 | 0.90 | `1ba45094` |
-| 1-D | semantic | domain | project | iota-sympantos | SQLite + Rust Engine + SHA-256 去重 + 6 桶 | 0.90 | `eb2a22d0` |
-| 1-E | procedural | — | project | iota-sympantos | 6 步实验流程 | 0.85 | `605134c9` |
-| 1-F | episodic | — | project | iota-sympantos | Step1 完成 6 类写入，准备切换验证 | 0.80 | `c85def24` |
+本次 DB 结果：
 
-**执行命令示例（1-A）：**
+| 子步骤 | type | facet | scope | scope_id | confidence | short_id | 结果 |
+|--------|------|-------|-------|----------|------------|----------|------|
+| 1-A | semantic | identity | user | local-user | 0.95 | `a68ec01a` | 通过 |
+| 1-B | semantic | preference | user | local-user | 0.90 | `84ec24a4` | 通过 |
+| 1-C | semantic | strategic | project | iota-sympantos | 0.90 | `3b0e6dad` | 通过 |
+| 1-D | semantic | domain | project | iota-sympantos | 0.90 | `680aeb70` | 通过 |
+| 1-E | procedural | - | project | iota-sympantos | 1.00 | `ac413811` | 通过，后端省略 confidence，存储层使用默认 1.00 |
+| 1-F | episodic | - | project | iota-sympantos | 0.80 | `d75d5464` | 通过 |
 
-```bash
-.\target\release\iota.exe run --backend claude-code --trace \
-  "请调用 iota_memory_write 工具，参数如下：
-   type=semantic, facet=identity, scope=user, scope_id=local-user,
-   content=\"用户名 Sympantos，角色：iota-sympantos 实验员，职责：跨后端记忆延续验证\",
-   confidence=0.95"
-```
-
-**DB 最终验证：** scope_id IN (`local-user`, `iota-sympantos`) 下共 6 条记忆，类型分布正确。
+统计：6 条记录，6 个桶各 1 条。
 
 ---
 
-### Step 2 — identity 召回验证（codex）
+### Step 2 - identity 召回验证（codex）
 
-```bash
-.\target\release\iota.exe run --backend codex --trace "我是谁？请介绍你对我的了解"
+执行：
+
+```powershell
+.\target\release\iota.exe run --backend codex --trace --timeout-ms 180000 "我是谁？请介绍你对我的了解"
 ```
 
-**结果：** 回复包含 "Sympantos" 和跨后端记忆延续验证职责。
+结果：
 
-**trace 验证：** `[memory:inject]` → `identity` 数组包含 `b8517b2e`（scope_id=`local-user`，confidence=0.95）。
-
-**判定：** ☑ 通过
+| 检查项 | 本次结果 |
+|--------|----------|
+| 后端回复 | 包含 `用户名 Sympantos`、`iota-sympantos 实验员`、`跨后端记忆延续验证` |
+| trace | `[memory:inject]` 中 `identity` 包含 `a68ec01a` |
+| 判定 | 通过 |
 
 ---
 
-### Step 3 — preference 召回验证（gemini）
+### Step 3 - preference 召回验证（gemini）
 
-```bash
-.\target\release\iota.exe run --backend gemini --trace "你知道我的回答语言偏好和报告格式吗？"
+执行：
+
+```powershell
+.\target\release\iota.exe run --backend gemini --trace --timeout-ms 180000 "你知道我的回答语言偏好和报告格式吗？"
 ```
 
-**结果：** 中文回复，提及英文日志、Markdown 格式和 2 空格缩进。
+结果：
 
-**trace 验证：** `preference` 数组包含 `595bbb72`，content 含 "中文" 和 "Markdown"。
-
-**判定：** ☑ 通过
+| 检查项 | 本次结果 |
+|--------|----------|
+| 后端回复 | 中文回复，提及中文回答、英文日志/命令/代码标识、Markdown、2 空格 |
+| trace | `[memory:inject]` 中 `preference` 包含 `84ec24a4` |
+| 判定 | 通过 |
 
 ---
 
-### Step 4 — strategic + domain 召回验证（hermes）
+### Step 4 - strategic + domain 召回验证（hermes）
 
-```bash
-.\target\release\iota.exe run --backend hermes --trace "告诉我当前项目的目标和技术实现"
+执行：
+
+```powershell
+.\target\release\iota.exe run --backend hermes --trace --timeout-ms 180000 "告诉我当前项目的目标和技术实现"
 ```
 
-**结果：** 提及 Q2 目标、SQLite 存储层、Rust Engine、SHA-256 content_hash 去重。
+结果：
 
-**trace 验证：**
-
-- `strategic` 含 `1ba45094`（scope_id=`iota-sympantos`）
-- `domain` 含 `eb2a22d0`（scope_id=`iota-sympantos`）
-
-**判定：** ☑ 通过
+| 检查项 | 本次结果 |
+|--------|----------|
+| 后端回复 | 提及 2026 Q2 目标、Rust、SQLite、recall/inject、SHA-256 content_hash、6 桶 |
+| trace | `strategic` 包含 `3b0e6dad`，`domain` 包含 `680aeb70` |
+| 判定 | 通过 |
 
 ---
 
-### Step 5 — procedural + episodic 召回验证（opencode）
+### Step 5 - procedural + episodic 召回验证（opencode）
 
-```bash
-.\target\release\iota.exe run --backend opencode --trace "回顾实验步骤，以及本次实验发生了什么"
+执行：
+
+```powershell
+.\target\release\iota.exe run --backend opencode --trace --timeout-ms 180000 "回顾实验步骤，以及本次实验发生了什么"
 ```
 
-**结果：** 覆盖 6 步实验流程和 Step1 完成 6 类记忆写入的经历。
+结果：
 
-**trace 验证：**
-
-- `procedural` 含 `605134c9`
-- `episodic` 含 `c85def24`，content 含 "6 类记忆写入"
-
-**判定：** ☑ 通过
+| 检查项 | 本次结果 |
+|--------|----------|
+| 后端回复 | 覆盖 6 步实验流程和 Step 1 完成 6 类记忆写入 |
+| trace | `procedural` 包含 `ac413811`，`episodic` 包含 `d75d5464` |
+| 判定 | 通过 |
 
 ---
 
-### Step 6 — contentHash 去重验证
+### Step 6 - contentHash 去重验证
 
-> **设计：** 重复写入与 Step 1-A 完全相同的 content，验证不产生新行。
+重复写入 Step 1-A 的 identity content。
 
-**写入前状态：**
+写入前：
 
-```
-id=b8517b2e | hash=5ee43f7a... | created_at=1778057289 | updated_at=1778057289
-```
+| id | hash12 | created_at | updated_at | confidence |
+|----|--------|------------|------------|------------|
+| `a68ec01a-0d3a-44f9-a859-ad4aeab93722` | `5ee43f7ae37d` | `1778155663` | `1778155663` | 0.95 |
 
-**重复写入（claude-code）：** 返回同一 ID `b8517b2e`，merge_mode=auto。
+重复写入后：
 
-**写入后状态：**
+| id | hash12 | created_at | updated_at | confidence |
+|----|--------|------------|------------|------------|
+| `a68ec01a-0d3a-44f9-a859-ad4aeab93722` | `5ee43f7ae37d` | `1778155663` | `1778155776` | 0.95 |
 
-```
-id=b8517b2e | hash=5ee43f7a... | created_at=1778057289 | updated_at=1778057876
-```
+结果：
 
-**判定：** ☑ 通过 — 仍只有 1 行，content_hash 相同，仅 `updated_at` 更新。
-
----
-
-### Step 7 — confidence 过滤验证
-
-写入两条低 confidence 记录：
-
-| type | facet | confidence | 阈值 | content |
-|------|-------|-----------|------|---------|
-| semantic | identity | 0.50 | 0.85 | "低置信度测试：这条记忆不应被注入" |
-| procedural | — | 0.60 | 0.75 | "低置信度测试：这条 procedural 不应被注入" |
-
-**DB 验证：** 两条记录已存在于 `memory` 表。
-
-**召回验证（codex）：**
-
-```bash
-.\target\release\iota.exe run --backend codex --trace "你知道关于我的所有信息吗？"
-```
-
-**trace 验证：**
-
-- `identity` 数组不包含 "低置信度测试"（0.50 < 0.85）
-- `procedural` 数组不包含 "低置信度测试"（0.60 < 0.75）
-- 高 confidence 原始记录正常出现
-
-**判定：** ☑ 通过
+| 检查项 | 本次结果 |
+|--------|----------|
+| 同 content 行数 | `1` |
+| ID/hash | 不变 |
+| `updated_at` | 更新 |
+| 控制台日志 | `[memory:write]` 和 `[memory:write:result]` 显示真实 memory_id `a68ec01a...` |
+| 判定 | 通过 |
 
 ---
 
-### Step 8 — token budget 截断验证
+### Step 7 - confidence 过滤验证
 
-**准备：** 批量写入 15 条 `domain-padding-N` 记忆（confidence=0.90），使总字符数超过 budget。
+目标：写入低于阈值的 identity 和 procedural，验证存在于 DB 但不进入注入桶。
 
-```bash
-foreach ($i in 1..15) {
-  .\target\release\iota.exe run --backend claude-code \
-    "请调用 iota_memory_write: type=semantic, facet=domain, scope=project,
-     scope_id=iota-sympantos, content=\"domain-padding-$i: ...\", confidence=0.90"
-}
+本次过程：
+
+| 记录 | 写入方式 | short_id | confidence | 结果 |
+|------|----------|----------|------------|------|
+| low identity | claude-code tool call | `a2528017` | 0.50 | 低于 0.85，未注入 |
+| low procedural | 直连 `iota context-mcp` JSON-RPC | `c74b1f49` | 0.60 | 低于 0.75，未注入 |
+
+验证命令：
+
+```powershell
+.\target\release\iota.exe run --backend codex --trace --timeout-ms 180000 "你知道关于我的所有信息吗？"
 ```
 
-**写入后统计：**
+结果：
 
-```sql
-SELECT sum(length(content)) FROM memory
-WHERE scope_id IN ('local-user','iota-sympantos') AND confidence >= 0.70;
--- → 2278 chars（超过 memory_chars=2000）
+| 检查项 | 本次结果 |
+|--------|----------|
+| DB | `a2528017` 和 `c74b1f49` 均存在 |
+| trace identity | 只包含高置信度 `a68ec01a`，不包含低置信度测试文本 |
+| trace procedural | 只包含高置信度 `ac413811`，不包含低置信度测试文本 |
+| 控制台日志 | low identity 写入显示 `[memory:write] confidence=0.5` 和 `[memory:write:result] memory_id=a2528017...` |
+| 判定 | 通过 |
+
+---
+
+### Step 8 - token budget 截断验证
+
+准备：通过 `iota context-mcp` 批量写入 15 条 `domain-padding-N` 记录，confidence=0.90。
+
+统计：
+
+| 指标 | 值 |
+|------|----|
+| padding_count | 15 |
+| padding_chars | 2481 |
+| eligible_chars | 2916 |
+
+触发召回：
+
+```powershell
+.\target\release\iota.exe run --backend codex --trace --timeout-ms 180000 "列出你知道的关于我和本项目的所有信息"
 ```
 
-**触发召回（codex）：**
-
-```bash
-.\target\release\iota.exe run --backend codex --trace "列出你知道的关于我和本项目的所有信息"
-```
-
-**trace 中 budget 字段：**
+trace 中 budget：
 
 ```json
-{"memory_chars": 2000, "total_chars": 2278, "truncated": true, "excluded_count": 3}
+{"memory_chars":2000,"total_chars":2916,"truncated":true,"excluded_count":7}
 ```
 
-**判定：** ☑ 通过
+判定：通过。
 
 ---
 
-### Step 9 — Observability 审计
+### Step 9 - Observability 审计
 
-#### 9.1 Logging
+执行：
 
-```bash
-.\target\release\iota.exe observability logging recent --limit 30
-```
-
-覆盖 Step 1~8 所有后端（claude-code / codex / gemini / hermes / opencode），共 39 条 completed 记录。
-
-```bash
-.\target\release\iota.exe observability logging events 7c1986b2-3a0d-4cc8-b413-c4fa6a36e205
-```
-
-Step 1-A 完整事件流：`started → memory inject → tool_call → tool_call_update → toolResponse → assistant output`。
-
-#### 9.2 Tracing
-
-```bash
+```powershell
+.\target\release\iota.exe observability logging recent --limit 80
 .\target\release\iota.exe observability tracing summary
-```
-
-```json
-{"total_executions": 39, "completed": 39, "failed": 0,
- "avg_prompt_ms": 11951, "avg_total_ms": 12774, "p95_total_ms": 26740}
-```
-
-```bash
-.\target\release\iota.exe observability tracing breakdown 7c1986b2-3a0d-4cc8-b413-c4fa6a36e205
-```
-
-| 阶段 | 耗时 (ms) |
-|------|-----------|
-| process_spawn | 13 |
-| init | 1389 |
-| session_new | 892 |
-| prompt | 7006 |
-| **total** | **7899** |
-
-#### 9.3 Metrics
-
-```bash
 .\target\release\iota.exe observability metrics
-```
-
-| 维度 | 值 |
-|------|-----|
-| executions.total | 39 |
-| executions.completed | 39 |
-| executions.failed | 0 |
-| latency.avg_total_ms | 12774 |
-| latency.p95_total_ms | 26740 |
-| cache.hit_rate | 0.0 |
-
-```bash
 .\target\release\iota.exe observability metrics --prometheus
+.\target\release\iota.exe observability logging events 6b8a00be-6ff4-4653-92a6-5e0f1a51ce3e
+.\target\release\iota.exe observability tracing breakdown 6b8a00be-6ff4-4653-92a6-5e0f1a51ce3e
+.\target\release\iota.exe observability logging tools --limit 20
 ```
 
-```
-iota_execution_attempts_total 39
-iota_execution_completed_total 39
-iota_execution_failed_total 0
-iota_prompt_latency_ms_sum 394386
-iota_total_latency_ms_p95 26740
-```
+本地 EventStore 全量统计（包含历史运行，不只本实验）：
 
-> **备注：** token 用量为 0——当前 ACP 后端尚未上报 token 事件。
+| 指标 | 值 |
+|------|----|
+| total_executions | 102 |
+| completed_executions | 93 |
+| failed_executions | 4 |
+| running_executions | 5 |
+| avg_prompt_ms | 11293.59 |
+| avg_total_ms | 12398.13 |
+| p95_total_ms | 24780 |
+| cache.hit_rate | 0.07258064516129033 |
+| token usage events | 0 |
+
+本轮 Step 1 到 Step 8 覆盖 fencing token `89..102`，包含 `claude-code`、`codex`、`gemini`、`hermes`、`opencode`。
+
+Step 7 low identity breakdown：
+
+| phase | ms |
+|-------|----|
+| process_spawn | 13 |
+| init | 1182 |
+| session_new | 785 |
+| prompt | 15300 |
+| total | 16085 |
+
+EventStore 事件流检查：
+
+| execution_id | 结果 |
+|--------------|------|
+| `6b8a00be-6ff4-4653-92a6-5e0f1a51ce3e` | 含 `state started`、`memory inject`、泛化 `tool_call name=tool`、归一化 `tool_call name=iota_memory_write`、归一化 `tool_result name=iota_memory_write`、`output` |
+
+`observability logging tools --limit 20` 已能列出真实工具名：
+
+| seq | tool_name | 说明 |
+|-----|-----------|------|
+| 8 | `tool` | ACP 后端原始泛化事件 |
+| 10 | `iota_memory_write` | 从 `tool_call_update.rawInput` 归一化出的真实工具事件 |
+
+判定：通过。修复后工具调用和工具结果都可在 EventStore 中以真实工具名审计。
 
 ---
 
-### Step 10 — 完整记忆日志链路用例
+### Step 10 - 完整记忆日志链路用例
 
-> **设计目标：** 该步骤专门验证“记忆日志是否完整”，不是重复验证记忆正确性。
-> 需要同时看到三类证据：
->
-> 1. backend 通过 ACP / MCP `tools/call` 发起 `iota_memory_write` / `iota_memory_search`
-> 2. iota 路由 memory API 时打印 search/write 的参数和结果
-> 3. Engine 自身的 recall / inject / episodic write 进入 tracing 和 EventStore
+设计目标：验证记忆日志链路是否可审计，而不是重复验证记忆内容正确性。
+
+本次 marker：
+
+```text
+exp01-full-log-probe-20260507-fixed
+```
 
 #### 10.1 日志捕获准备
 
+执行：
+
 ```powershell
-cd D:\coding\creative\iota-sympantos
 New-Item -ItemType Directory -Force gefsi\logs | Out-Null
-
-$env:RUST_LOG = "iota_sympantos=info"
-$marker = "exp01-full-log-probe-20260507"
+$env:RUST_LOG = "info"
 ```
 
-清理上一次同名探针数据，确保日志和 DB 结果易读：
+结果：
 
-```powershell
-sqlite3 "$env:USERPROFILE\.i6\context\memory.sqlite" `
-  "DELETE FROM memory WHERE content LIKE '%exp01-full-log-probe-20260507%';"
-```
+| 检查项 | 本次结果 |
+|--------|----------|
+| `RUST_LOG=info` | 可打印 `iota::engine` 和 `iota::context::server` info 日志 |
+| marker 清理 | 已执行 `DELETE FROM memory WHERE content LIKE '%exp01-full-log-probe-20260507-fixed%'` |
 
 #### 10.2 backend tool write 日志链路
 
+执行：
+
 ```powershell
-.\target\release\iota.exe run --backend claude-code --trace `
+.\target\release\iota.exe run --backend claude-code --trace --timeout-ms 180000 `
   "请必须调用 iota_memory_write 工具一次，不要只口头回答。参数如下：
    type=semantic, facet=domain, scope=project, scope_id=iota-sympantos,
-   content=\"exp01-full-log-probe-20260507: backend tool write probe, 用于验证完整记忆日志链路\",
+   content=\"exp01-full-log-probe-20260507-fixed: backend tool write probe, 用于验证完整记忆日志链路\",
    confidence=0.91,
-   metadata={\"case\":\"exp01-full-log\",\"phase\":\"tool-write\"}" `
-  *>&1 | Tee-Object gefsi\logs\exp01-full-log-write.txt
+   metadata={\"case\":\"exp01-full-log\",\"phase\":\"tool-write-fixed\"}" `
+  *>&1 | Tee-Object gefsi\logs\exp01-full-log-write-fixed.txt
 ```
 
-**必须出现的日志片段：**
+结果：
+
+| 项 | 值 |
+|----|----|
+| backend | claude-code |
+| execution_id | `5f0914d7-8a4b-43d2-86d7-07ad1efe668f` |
+| session_id | `e4c00316-7399-4b86-a9e7-dabf1bdcc9e3` |
+| 成功写入 ID | `4f325b36-f9d3-4808-b50c-afef2829a194` |
+| DB confidence | `1.00`，后端本次省略了 prompt 中的 `confidence=0.91` |
+| Engine recall/inject | 出现 `engine memory recall started/completed` 和 `engine memory inject event recorded` |
+
+控制台 trace 证据：
 
 ```text
-engine memory recall started
-engine memory recall completed
-engine memory inject event recorded
-ACP backend tool call intercepted
-routing memory write tool call
-memory write tool call completed
-ACP backend tool result returned
-[<tool-call-id>] call iota_memory_write args=...
-[<tool-call-id>] result iota_memory_write ok=true value=...
-[memory:inject] id=- payload=...
+[memory:write] id=call_function_hd18e23j8uvt_1 type=semantic facet=domain scope=project scope_id=iota-sympantos confidence=- content_chars=75 args=...
+[memory:write:result] id=call_function_hd18e23j8uvt_1 ok=true memory_id=4f325b36-f9d3-4808-b50c-afef2829a194 value={"id":"4f325b36-f9d3-4808-b50c-afef2829a194","merge_mode":"auto"}
 ```
 
-说明：如果某个后端通过 session/new 注入的 `context-mcp` stdio server 调用工具，而不是走 ACP client-side intercept，则日志片段应包含：
+EventStore 证据：
 
-```text
-context MCP memory write tool call received
-context MCP memory write tool call completed
-```
+| seq | event_type | 关键内容 |
+|-----|------------|----------|
+| 2/3 | memory | inject payload，budget `truncated=true` |
+| 8 | tool_call | 原始 ACP 泛化事件 `name=tool` |
+| 9 | state | `tool_call_update`，`rawInput` 含 `type=semantic`、`facet=domain` |
+| 10 | tool_call | 归一化事件 `name=iota_memory_write`，arguments 为 `rawInput` |
+| 13 | state | `rawOutput={"id":"4f325b36-...","merge_mode":"auto"}` |
+| 14 | tool_result | 归一化事件 `name=iota_memory_write`，`ok=true`，result 含 memory id |
+| 18/19 | output | assistant 输出写入成功 ID |
+
+判定：通过。修复后不再只能依赖 `tool_call_update` state，真实工具名和结果已归一化。
 
 #### 10.3 backend tool search 日志链路
 
+执行：
+
 ```powershell
-.\target\release\iota.exe run --backend claude-code --trace `
+.\target\release\iota.exe run --backend claude-code --trace --timeout-ms 180000 `
   "请必须调用 iota_memory_search 工具一次，不要只口头回答。参数如下：
-   query=\"exp01-full-log-probe-20260507\", limit=5, mode=hybrid。
+   query=\"exp01-full-log-probe-20260507-fixed\", limit=5, mode=hybrid。
    然后用一句话总结搜索结果。" `
-  *>&1 | Tee-Object gefsi\logs\exp01-full-log-search.txt
+  *>&1 | Tee-Object gefsi\logs\exp01-full-log-search-fixed.txt
 ```
 
-**必须出现的日志片段：**
+结果：
+
+| 项 | 值 |
+|----|----|
+| backend | claude-code |
+| execution_id | `7445ea10-52cf-4fee-a82e-0ab8c5a5235a` |
+| session_id | `4f3cda7f-5f5b-4320-9006-62a1739e5615` |
+| 搜索结果 | 5 条记录 |
+| 命中核心记录 | `4f325b36`，content 含 `exp01-full-log-probe-20260507-fixed` |
+| Engine recall/inject | 出现 `engine memory recall started/completed` 和 `engine memory inject event recorded` |
+| 自动 episodic | 搜索 turn 结束后写入 `db08c47e-feb0-4382-a2ad-a87f3ee74957` |
+
+控制台 trace 证据：
 
 ```text
-engine memory recall started
-engine memory recall completed
-engine memory inject event recorded
-ACP backend tool call intercepted
-routing memory search tool call
-memory search tool call completed
-ACP backend tool result returned
-[<tool-call-id>] call iota_memory_search args=...
-[<tool-call-id>] result iota_memory_search ok=true value=...
-record_count=1
-exp01-full-log-probe-20260507
+[memory:read] id=call_function_8hglqvifb4la_1 query=exp01-full-log-probe-20260507-fixed limit=5 mode=hybrid args=...
+[memory:read:result] id=call_function_8hglqvifb4la_1 ok=true record_count=5 value=...
 ```
 
-如果走 `context-mcp` stdio server，则 search API 侧日志应为：
+EventStore 证据：
 
-```text
-context MCP memory search tool call received
-context MCP memory search tool call completed
-```
+| seq | event_type | 关键内容 |
+|-----|------------|----------|
+| 8 | tool_call | 原始 ACP 泛化事件 `name=tool` |
+| 9 | state | `tool_call_update`，`rawInput.query=exp01-full-log-probe-20260507-fixed` |
+| 10 | tool_call | 归一化事件 `name=iota_memory_search` |
+| 13 | state | `rawOutput` 包含 `mode=hybrid`、`records`、`4f325b36` |
+| 14 | tool_result | 归一化事件 `name=iota_memory_search`，`ok=true`，result 中 `records` 数为 5 |
+| 19/20 | output | assistant 总结搜索结果 |
+
+判定：通过。
 
 #### 10.4 Engine 自动 episodic 写入日志链路
 
-该命令不要包含 `iota_memory_write` 字样，避免显式 memory tool prompt 跳过自动 episodic 写入。
+执行：
 
 ```powershell
-.\target\release\iota.exe run --backend codex --trace `
-  "请用一句话回答：exp01-full-log-probe-20260507 普通 turn 日志探针已收到。" `
-  *>&1 | Tee-Object gefsi\logs\exp01-full-log-episodic.txt
+.\target\release\iota.exe run --backend gemini --trace --timeout-ms 180000 `
+  "请用一句话回答：exp01-full-log-probe-20260507-fixed 普通 turn 日志探针已收到。" `
+  *>&1 | Tee-Object gefsi\logs\exp01-full-log-episodic-fixed.txt
 ```
 
-**必须出现的日志片段：**
+结果：
+
+| 项 | 值 |
+|----|----|
+| backend | gemini |
+| execution_id | `ab4afaad-946a-408a-b1e6-8b6cb8504306` |
+| session_id | `cbe42e54-52a4-47e6-9e4b-660aa3b22101` |
+| output | `好的，exp01-full-log-probe-20260507-fixed 普通 turn 日志探针已收到。` |
+| episodic memory_id | `b14be7f7-b680-464c-8ffc-97a9a87c375c` |
+
+日志证据：
 
 ```text
 engine memory recall started
 engine memory recall completed
 engine memory inject event recorded
 engine episodic memory write started
-engine episodic memory write completed
+engine episodic memory write completed memory_id=b14be7f7-b680-464c-8ffc-97a9a87c375c
 engine episodic memory compaction completed
-[memory:inject] id=- payload=...
+[memory:inject]
 ```
 
-#### 10.5 自动检查日志文件
+判定：通过。
+
+#### 10.5 Memory API route 日志链路
+
+backend 通过 session/new 注入的 `context-mcp` stdio server 由后端进程管理，route stderr 是否出现在 `iota run` 日志取决于后端是否转发该 sidecar 的 stderr。为直接验证 Memory API route，本轮补充直连 sidecar probe：
 
 ```powershell
-Select-String -Path gefsi\logs\exp01-full-log-*.txt -Pattern `
-  "engine memory recall started", `
-  "engine memory recall completed", `
-  "engine memory inject event recorded", `
-  "ACP backend tool call intercepted", `
-  "routing memory write tool call", `
-  "memory write tool call completed", `
-  "routing memory search tool call", `
-  "memory search tool call completed", `
-  "engine episodic memory write started", `
-  "engine episodic memory write completed", `
-  "\[memory:inject\]", `
-  "call iota_memory_", `
-  "result iota_memory_"
+$env:RUST_LOG = "info"
+@($init, $ready, $call) | .\target\release\iota.exe context-mcp *>&1 |
+  Tee-Object gefsi\logs\exp01-full-log-route-direct-fixed.txt
 ```
 
-判定标准：
+结果：
 
-- write 日志文件至少包含 `iota_memory_write` 的 call/result、memory write route、tool result returned
-- search 日志文件至少包含 `iota_memory_search` 的 call/result、memory search route、record_count
-- episodic 日志文件至少包含 engine episodic write started/completed
-- 三个日志文件都包含 engine recall 和 memory inject
+| 日志片段 | 本次结果 |
+|----------|----------|
+| `context MCP memory search tool call received` | 出现，`query=exp01-full-log-probe-20260507-fixed`、`limit=5`、`mode=Hybrid` |
+| `context MCP memory search tool call completed` | 出现，`record_count=5` |
+| `record_ids` | 包含 `4f325b36`、`b14be7f7`、`db08c47e` |
 
-#### 10.6 EventStore 持久化验证
+判定：通过。Memory API route 自身可观测；backend sidecar stderr 仍属于后端进程转发行为，不再作为本实验核心失败项。
 
-查看最近执行，找到上述三个 probe 的 execution_id：
+#### 10.6 自动检查日志文件
+
+检查文件：
+
+| 文件 | 关键结果 |
+|------|----------|
+| `exp01-full-log-write-fixed.txt` | 有 Engine recall/inject、`[memory:inject]`、`[memory:write]`、`[memory:write:result]` |
+| `exp01-full-log-search-fixed.txt` | 有 Engine recall/inject、`[memory:inject]`、`[memory:read]`、`[memory:read:result]`、搜索总结 |
+| `exp01-full-log-episodic-fixed.txt` | 有 Engine recall/inject、自动 episodic started/completed/compaction |
+| `exp01-full-log-route-direct-fixed.txt` | 有 Memory API route received/completed、`record_count=5` |
+| `exp01-full-log-events-write-fixed.json` | 有 `tool_call name=iota_memory_write` 和 `tool_result name=iota_memory_write` |
+| `exp01-full-log-events-search-fixed.json` | 有 `tool_call name=iota_memory_search` 和 `tool_result name=iota_memory_search` |
+
+判定：通过。
+
+#### 10.7 EventStore 持久化验证
+
+最近三条成功 probe：
+
+| execution_id | backend | status | 关键证据 |
+|--------------|---------|--------|----------|
+| `5f0914d7-8a4b-43d2-86d7-07ad1efe668f` | claude-code | completed | `tool_call/tool_result iota_memory_write` |
+| `7445ea10-52cf-4fee-a82e-0ab8c5a5235a` | claude-code | completed | `tool_call/tool_result iota_memory_search` |
+| `ab4afaad-946a-408a-b1e6-8b6cb8504306` | gemini | completed | Engine 自动 episodic |
+
+EventStore 结论：
+
+| 证据 | 本次结果 |
+|------|----------|
+| `state started` | 有 |
+| `memory inject` | 有 |
+| `tool_call` | 有，包含原始 `tool` 和归一化真实工具名 |
+| `tool_result` | 有，包含 `iota_memory_write` / `iota_memory_search` |
+| `output` | 有 |
+
+判定：通过。
+
+#### 10.8 DB 侧确认
+
+查询：
 
 ```powershell
-.\target\release\iota.exe observability logging recent --limit 10 `
-  | Tee-Object gefsi\logs\exp01-full-log-recent.json
-```
-
-任选 Step 10.2 或 10.3 的 execution_id，查看完整事件流：
-
-```powershell
-$recent = Get-Content gefsi\logs\exp01-full-log-recent.json -Raw | ConvertFrom-Json
-$execId = ($recent | Where-Object { $_.backend -eq "claude-code" } | Select-Object -First 1).execution_id
-.\target\release\iota.exe observability logging events $execId `
-  | Tee-Object gefsi\logs\exp01-full-log-events.json
-```
-
-**必须在事件流中看到：**
-
-```text
-state started
-memory inject
-tool_call iota_memory_write 或 tool_call iota_memory_search
-tool_result iota_memory_write 或 tool_result iota_memory_search
-output
-```
-
-推荐用 PowerShell 快速筛选：
-
-```powershell
-Get-Content gefsi\logs\exp01-full-log-events.json -Raw `
-  | Select-String -Pattern '"event_type": "memory"', '"event_type": "tool_call"', '"event_type": "tool_result"', 'iota_memory_'
-```
-
-#### 10.7 DB 侧确认
-
-```powershell
-sqlite3 "$env:USERPROFILE\.i6\context\memory.sqlite" `
-  "SELECT id, type, facet, scope, scope_id, confidence, substr(content,1,80)
+& "$env:USERPROFILE\Tools\sqlite\sqlite3.exe" -header -column `
+  "$env:USERPROFILE\.i6\context\memory.sqlite" `
+  "SELECT substr(id,1,8) AS short_id, type, facet, scope, scope_id, confidence, substr(content,1,120)
    FROM memory
-   WHERE content LIKE '%exp01-full-log-probe-20260507%'
+   WHERE content LIKE '%exp01-full-log-probe-20260507-fixed%'
    ORDER BY updated_at DESC;"
 ```
 
-预期至少包含：
+结果：
 
-- Step 10.2 写入的 `semantic/domain/project/iota-sympantos` 记录
-- Step 10.4 自动写入的 `episodic/session/<session_id>` 记录
+| short_id | type | facet | scope | scope_id | confidence | 说明 |
+|----------|------|-------|-------|----------|------------|------|
+| `b14be7f7` | episodic | - | session | `cbe42e54-52a4-47e6-9e4b-660aa3b22101` | 0.80 | gemini 普通 turn 自动 episodic |
+| `db08c47e` | episodic | - | session | `4f3cda7f-5f5b-4320-9006-62a1739e5615` | 0.80 | claude-code search turn 自动 episodic |
+| `4f325b36` | semantic | domain | project | `iota-sympantos` | 1.00 | backend tool write probe |
 
-#### 10.8 清理
+判定：通过。
+
+#### 10.9 清理状态
+
+本次没有在文档更新前删除 probe 记录，原因是 Step 10 的 DB 侧证据需要保留到文档完成。可在需要时执行：
 
 ```powershell
-sqlite3 "$env:USERPROFILE\.i6\context\memory.sqlite" `
-  "DELETE FROM memory WHERE content LIKE '%exp01-full-log-probe-20260507%';"
-
-Remove-Item Env:RUST_LOG -ErrorAction SilentlyContinue
+& "$env:USERPROFILE\Tools\sqlite\sqlite3.exe" "$env:USERPROFILE\.i6\context\memory.sqlite" `
+  "DELETE FROM memory
+   WHERE scope_id IN ('local-user','iota-sympantos')
+      OR scope_id LIKE '%iota-sympantos'
+      OR content LIKE '%exp01-full-log-probe-%'
+      OR content LIKE '%domain-padding-%'
+      OR content LIKE '%低置信度测试%';"
 ```
-
-**本用例通过标准：**
-
-| 链路 | 证据 | 通过标准 |
-|------|------|----------|
-| Engine Recall | tracing + trace | 出现 recall started/completed 和 `[memory:inject]` |
-| Backend Tool Call | tracing + `--trace` | 出现 ACP intercepted、`call iota_memory_*` |
-| Memory API Route | tracing | 出现 routing/context MCP memory search/write received/completed |
-| Tool Result | tracing + `--trace` + EventStore | 出现 result returned、`ToolResult ok=true` |
-| Engine Episodic | tracing + DB | 出现 episodic write completed，DB 有 marker episodic |
-| Event Persistence | observability events | 事件流包含 memory/tool_call/tool_result/output |
 
 ---
 
-## 四、验收矩阵
+## 五、验收矩阵
 
-| # | 验收项 | 步骤 | 判定标准 | 结果 |
-|---|--------|------|----------|------|
-| 1 | identity 跨后端延续 | Step 2 | codex 回复含 "Sympantos" | ☑ |
-| 2 | preference 跨后端延续 | Step 3 | preference 桶含 "中文/Markdown" | ☑ |
-| 3 | strategic+domain 跨后端延续 | Step 4 | hermes 提及 Q2 + SQLite/SHA-256 | ☑ |
-| 4 | procedural+episodic 延续 | Step 5 | opencode 覆盖步骤和经历 | ☑ |
-| 5 | contentHash 去重 | Step 6 | 仍 1 行，updated_at 变更 | ☑ |
-| 6 | confidence 过滤（identity） | Step 7 | 0.50 不在注入桶中 | ☑ |
-| 7 | confidence 过滤（procedural） | Step 7 | 0.60 不在注入桶中 | ☑ |
-| 8 | token budget 截断 | Step 8 | truncated=true, excluded=3 | ☑ |
-| 9 | SQLite schema 合规 | Step 1 | type/facet/scope/scope_id 正确 | ☑ |
-| 10 | trace 事件完整性 | Step 2~5 | `--trace` 输出含 `[memory:inject]` | ☑ |
-| 11 | EventStore 持久化 | Step 9.1 | events 含 Memory 事件 | ☑ |
-| 12 | Logging 多后端覆盖 | Step 9.1 | recent 含 5 个后端 | ☑ |
-| 13 | Tracing 延迟分解 | Step 9.2 | breakdown 含 5 阶段 | ☑ |
-| 14 | Metrics 指标可查 | Step 9.3 | total=39 > 0 | ☑ |
-| 15 | Prometheus 导出 | Step 9.3 | 含 `iota_execution_attempts_total` | ☑ |
+| # | 验收项 | 步骤 | 本次结果 |
+|---|--------|------|----------|
+| 1 | identity 跨后端延续 | Step 2 | 通过 |
+| 2 | preference 跨后端延续 | Step 3 | 通过 |
+| 3 | strategic + domain 跨后端延续 | Step 4 | 通过 |
+| 4 | procedural + episodic 延续 | Step 5 | 通过 |
+| 5 | contentHash 去重 | Step 6 | 通过 |
+| 6 | confidence 过滤（identity） | Step 7 | 通过 |
+| 7 | confidence 过滤（procedural） | Step 7 | 通过 |
+| 8 | token budget 截断 | Step 8 | 通过，`truncated=true`, `excluded_count=7` |
+| 9 | SQLite schema 合规 | Step 1 | 通过 |
+| 10 | trace 事件完整性 | Step 2-5 | 通过 |
+| 11 | EventStore 持久化 | Step 9 | 通过 |
+| 12 | Logging 多后端覆盖 | Step 9 | 通过 |
+| 13 | Tracing 延迟分解 | Step 9 | 通过 |
+| 14 | Metrics 指标可查 | Step 9 | 通过 |
+| 15 | Prometheus 导出 | Step 9 | 通过 |
+| 16 | Step 10 Engine recall/inject 日志 | Step 10 | 通过 |
+| 17 | Step 10 backend MCP tool call 审计 | Step 10 | 通过，真实 `iota_memory_*` 工具名已归一化 |
+| 18 | Step 10 Memory API route 日志 | Step 10 | 通过，直连 `context-mcp` 可见 received/completed/record_count |
+| 19 | Step 10 Engine 自动 episodic | Step 10 | 通过 |
+| 20 | 控制台 memory read/write 日志 | Step 6/7/10 | 通过，新增 `[memory:read/write]` 和结果日志 |
 
-**结论：15/15 全部通过。**
+结论：核心 memory 延续、去重、过滤、budget、observability 和完整日志链路均通过。本轮已修复上一轮暴露的 RuntimeEvent 工具名/结果归一化问题，并新增控制台 memory read/write 结构化日志。
 
 ---
 
-## 五、清理
+## 六、后续建议
 
-```bash
-sqlite3 ~/.i6/context/memory.sqlite \
-  "DELETE FROM memory WHERE scope_id IN (
-    'local-user', 'iota-sympantos'
-  ) OR scope_id LIKE '%iota-sympantos';"
-```
+1. 对 backend tool write prompt 增加 schema 约束或客户端校验，降低后端省略 `confidence`、`metadata` 等参数的概率。
+2. 若需要把 backend 管理的 session/new sidecar stderr 也纳入 `iota run` 主日志，需要在后端适配层或 ACP 后端进程管理处补充 stderr 转发能力。
+3. 为 `observability logging tools` 增加按 `tool_name` 过滤的参数，便于直接审计 `iota_memory_write` / `iota_memory_search`。

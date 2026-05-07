@@ -146,16 +146,20 @@ fn print_trace_events(events: &[RuntimeEvent]) {
     for event in events {
         match event {
             RuntimeEvent::ToolCall(call) => {
-                eprintln!("[{}] call {} args={}", call.id, call.name, call.arguments);
+                if !print_memory_tool_call(call) {
+                    eprintln!("[{}] call {} args={}", call.id, call.name, call.arguments);
+                }
             }
             RuntimeEvent::ToolResult(result) => {
-                eprintln!(
-                    "[{}] result {} ok={} value={}",
-                    result.id,
-                    result.name,
-                    result.ok,
-                    trace_result_value(&result.result)
-                );
+                if !print_memory_tool_result(result) {
+                    eprintln!(
+                        "[{}] result {} ok={} value={}",
+                        result.id,
+                        result.name,
+                        result.ok,
+                        trace_result_value(&result.result)
+                    );
+                }
             }
             RuntimeEvent::Output(output) if output.role.as_deref() == Some("engine") => {
                 eprintln!("[skill:output] {} bytes", output.text.len());
@@ -171,6 +175,107 @@ fn print_trace_events(events: &[RuntimeEvent]) {
             _ => {}
         }
     }
+}
+
+fn print_memory_tool_call(call: &crate::runtime_event::ToolCallEvent) -> bool {
+    match call.name.as_str() {
+        "iota_memory_search" => {
+            eprintln!(
+                "[memory:read] id={} query={} limit={} mode={} args={}",
+                call.id,
+                json_field(&call.arguments, "query"),
+                json_field(&call.arguments, "limit"),
+                json_field(&call.arguments, "mode"),
+                call.arguments
+            );
+            true
+        }
+        "iota_memory_write" => {
+            let content_chars = call
+                .arguments
+                .get("content")
+                .and_then(serde_json::Value::as_str)
+                .map(|content| content.chars().count().to_string())
+                .unwrap_or_else(|| "-".to_string());
+            eprintln!(
+                "[memory:write] id={} type={} facet={} scope={} scope_id={} confidence={} content_chars={} args={}",
+                call.id,
+                json_field(&call.arguments, "type"),
+                json_field(&call.arguments, "facet"),
+                json_field(&call.arguments, "scope"),
+                json_field(&call.arguments, "scope_id"),
+                json_field(&call.arguments, "confidence"),
+                content_chars,
+                call.arguments
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
+fn print_memory_tool_result(result: &crate::runtime_event::ToolResultEvent) -> bool {
+    match result.name.as_str() {
+        "iota_memory_search" => {
+            eprintln!(
+                "[memory:read:result] id={} ok={} record_count={} value={}",
+                result.id,
+                result.ok,
+                memory_record_count(&result.result)
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                trace_result_value(&result.result)
+            );
+            true
+        }
+        "iota_memory_write" => {
+            eprintln!(
+                "[memory:write:result] id={} ok={} memory_id={} value={}",
+                result.id,
+                result.ok,
+                memory_result_id(&result.result).unwrap_or("-"),
+                trace_result_value(&result.result)
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
+fn json_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .map(|value| match value {
+            serde_json::Value::String(text) => text.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn memory_result_id(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            value
+                .get("structuredContent")
+                .and_then(|structured| structured.get("id"))
+                .and_then(serde_json::Value::as_str)
+        })
+}
+
+fn memory_record_count(value: &serde_json::Value) -> Option<usize> {
+    value
+        .get("records")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .or_else(|| {
+            value
+                .get("structuredContent")
+                .and_then(|structured| structured.get("records"))
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len)
+        })
 }
 
 fn trace_result_value(value: &serde_json::Value) -> String {

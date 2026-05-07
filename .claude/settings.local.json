@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "mcp__iota-context__iota_memory_write"
+      "mcp__iota-context__iota_memory_write",
+      "mcp__iota-context__iota_memory_search"
     ]
   }
 }
