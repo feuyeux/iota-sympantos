@@ -163,27 +163,19 @@ fn call_tool(
                 .get("content")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "content is required".to_string())?;
-            let memory_type = parse_memory_type(
-                args.get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("episodic"),
-            )?;
+            let memory_type = parse_memory_type(required_string(args, "type")?)?;
             let facet = args
                 .get("facet")
                 .and_then(Value::as_str)
                 .map(parse_memory_facet)
                 .transpose()?;
-            let scope = parse_memory_scope(
-                args.get("scope")
-                    .and_then(Value::as_str)
-                    .unwrap_or("session"),
-            )?;
+            let scope = parse_memory_scope(required_string(args, "scope")?)?;
             let scope_id = args
                 .get("scope_id")
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| default_memory_scope_id(&scope, args, workspace));
-            let confidence = args.get("confidence").and_then(value_as_f64).unwrap_or(1.0);
+            let confidence = required_confidence(args)?;
             let ttl_days = args.get("ttl_days").and_then(Value::as_i64).unwrap_or(7);
             let merge_mode = args
                 .get("merge_mode")
@@ -335,7 +327,7 @@ fn tools() -> Vec<Value> {
             "description": "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id is optional. Defaults match Engine recall: user → \"local-user\", project → current cwd path, session → source_session_id/session_id if provided.",
             "inputSchema": {
                 "type": "object",
-                "required": ["content", "type", "scope"],
+                "required": ["content", "type", "scope", "confidence"],
                 "properties": {
                     "content":    {"type": "string"},
                     "type":       {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
@@ -344,7 +336,12 @@ fn tools() -> Vec<Value> {
                     "scope_id":   {"type": "string"},
                     "merge_mode": {"type": "string", "enum": ["auto", "add", "update", "none"]},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "ttl_days":   {"type": "integer"}
+                    "ttl_days":   {"type": "integer"},
+                    "metadata":   {"type": "object"},
+                    "source_backend": {"type": "string"},
+                    "source_session_id": {"type": "string"},
+                    "source_execution_id": {"type": "string"},
+                    "supersedes": {"type": "string"}
                 }
             }
         }),
@@ -430,6 +427,24 @@ fn parse_memory_search_mode(value: &str) -> std::result::Result<MemorySearchMode
         "hybrid" => Ok(MemorySearchMode::Hybrid),
         other => Err(format!("invalid memory search mode {}", other)),
     }
+}
+
+fn required_string<'a>(args: &'a Value, key: &str) -> std::result::Result<&'a str, String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{} is required", key))
+}
+
+fn required_confidence(args: &Value) -> std::result::Result<f64, String> {
+    let confidence = args
+        .get("confidence")
+        .and_then(value_as_f64)
+        .ok_or_else(|| "confidence is required".to_string())?;
+    if !(0.0..=1.0).contains(&confidence) {
+        return Err("confidence must be between 0 and 1".to_string());
+    }
+    Ok(confidence)
 }
 
 fn default_memory_scope_id(

@@ -29,3 +29,48 @@ fn memory_scope_id_defaults_match_engine_recall_keys() {
         std::env::current_dir().unwrap().display().to_string()
     );
 }
+
+#[test]
+fn memory_write_requires_type_scope_and_confidence() {
+    let missing_type = route_tool_call(
+        "iota_memory_write",
+        &json!({
+            "content": "remember this",
+            "scope": "project",
+            "confidence": 0.9
+        }),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(missing_type.contains("type is required"));
+
+    let missing_confidence = route_tool_call(
+        "iota_memory_write",
+        &json!({
+            "content": "remember this",
+            "type": "semantic",
+            "facet": "domain",
+            "scope": "project"
+        }),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(missing_confidence.contains("confidence is required"));
+}
+
+#[test]
+fn memory_write_rejects_out_of_range_confidence() {
+    let err = route_tool_call(
+        "iota_memory_write",
+        &json!({
+            "content": "remember this",
+            "type": "semantic",
+            "facet": "domain",
+            "scope": "project",
+            "confidence": 1.2
+        }),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("confidence must be between 0 and 1"));
+}

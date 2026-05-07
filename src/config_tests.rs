@@ -11,6 +11,21 @@ fn mcp_servers_default_to_backend_capability() {
 }
 
 #[test]
+fn context_mcp_server_enables_memory_route_logging() {
+    let config = NimiaConfig::default();
+    let servers = context_mcp_servers(&config, AcpBackend::Gemini);
+    let context = servers
+        .iter()
+        .find(|server| server.name == "iota-context")
+        .expect("iota-context server should be present");
+
+    assert_eq!(
+        context.env.get("RUST_LOG").map(String::as_str),
+        Some("iota::context::server=info")
+    );
+}
+
+#[test]
 fn mcp_try_enables_claude_and_codex() {
     let config = NimiaConfig {
         context_engine: Some(ContextEngineConfig::default()),

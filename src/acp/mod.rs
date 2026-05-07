@@ -473,8 +473,13 @@ impl AcpClient {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if show_native && !line.trim().is_empty() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if show_native {
                     eprintln!("[acp stderr] {}", line);
+                } else if should_forward_backend_stderr(&line) {
+                    eprintln!("[acp stderr:{}] {}", backend, line);
                 }
             }
         });
@@ -876,4 +881,10 @@ fn is_backend_alias(value: &str) -> bool {
 
 fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
+}
+
+fn should_forward_backend_stderr(line: &str) -> bool {
+    line.contains("context MCP memory")
+        || line.contains("iota::context::server")
+        || line.contains("[mcp stderr:")
 }

@@ -902,7 +902,7 @@ fn command_to_mcp_server(
         name: default_name.to_string(),
         command,
         args,
-        env: BTreeMap::new(),
+        env: default_mcp_server_env(default_name),
     })
 }
 
@@ -914,6 +914,16 @@ fn default_context_mcp_servers() -> Vec<AcpMcpServer> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+fn default_mcp_server_env(default_name: &str) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    if default_name == "iota-context" {
+        let rust_log = std::env::var("IOTA_CONTEXT_MCP_RUST_LOG")
+            .unwrap_or_else(|_| "iota::context::server=info".to_string());
+        env.insert("RUST_LOG".to_string(), rust_log);
+    }
+    env
 }
 
 fn default_context_injection() -> ContextInjection {

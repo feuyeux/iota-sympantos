@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
 use crate::skill::SkillRegistry;
@@ -82,28 +82,19 @@ fn route_memory_write(arguments: &Value) -> Result<Value> {
         .get("content")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("content is required"))?;
-    let memory_type = parse_memory_type(
-        arguments
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("episodic"),
-    )?;
+    let memory_type = parse_memory_type(required_string(arguments, "type")?)?;
     let facet = arguments
         .get("facet")
         .and_then(Value::as_str)
         .map(parse_memory_facet)
         .transpose()?;
-    let scope = parse_memory_scope(
-        arguments
-            .get("scope")
-            .and_then(Value::as_str)
-            .unwrap_or("session"),
-    )?;
+    let scope = parse_memory_scope(required_string(arguments, "scope")?)?;
     let scope_id = arguments
         .get("scope_id")
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| default_memory_scope_id(&scope, arguments));
+    let confidence = required_confidence(arguments)?;
     let merge_mode = arguments
         .get("merge_mode")
         .and_then(Value::as_str)
@@ -131,10 +122,7 @@ fn route_memory_write(arguments: &Value) -> Result<Value> {
             scope,
             scope_id,
             content: content.to_string(),
-            confidence: arguments
-                .get("confidence")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0),
+            confidence,
             source_backend: arguments
                 .get("source_backend")
                 .and_then(Value::as_str)
@@ -309,6 +297,33 @@ fn parse_memory_search_mode(value: &str) -> Result<MemorySearchMode> {
         "hybrid" => Ok(MemorySearchMode::Hybrid),
         other => Err(anyhow!("invalid memory search mode {}", other)),
     }
+}
+
+fn required_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a str> {
+    arguments
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("{} is required", key))
+}
+
+fn required_confidence(arguments: &Value) -> Result<f64> {
+    let confidence = arguments
+        .get("confidence")
+        .and_then(value_as_f64)
+        .ok_or_else(|| anyhow!("confidence is required"))?;
+    if !(0.0..=1.0).contains(&confidence) {
+        bail!("confidence must be between 0 and 1");
+    }
+    Ok(confidence)
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| {
+        value
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<f64>().ok())
+    })
 }
 
 fn default_memory_scope_id(scope: &MemoryScope, arguments: &Value) -> String {

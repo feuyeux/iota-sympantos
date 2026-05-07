@@ -360,7 +360,7 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("help");
     if matches!(sub, "-h" | "--help" | "help") {
         println!(
-            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging tools [--limit N]         tool_call events across recent executions\n  iota observability logging approvals [--limit N]     approval_request/decision events"
+            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging tools [--limit N] [--tool NAME]\n                                                              tool_call events across recent executions\n  iota observability logging approvals [--limit N]     approval_request/decision events"
         );
         return Ok(());
     }
@@ -409,11 +409,15 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
                 tool_name: String,
                 arguments: serde_json::Value,
             }
+            let tool_filter = parse_tool_filter(args);
             let executions = store.recent_executions(limit.saturating_mul(5))?;
             let mut entries: Vec<ToolEntry> = Vec::new();
             'outer: for exec in &executions {
                 for (seq, _, event) in store.execution_events(&exec.execution_id)? {
                     if let RuntimeEvent::ToolCall(tc) = event {
+                        if tool_filter.is_some_and(|name| name != tc.name.as_str()) {
+                            continue;
+                        }
                         entries.push(ToolEntry {
                             execution_id: exec.execution_id.clone(),
                             backend: exec.backend.clone(),
@@ -857,6 +861,12 @@ fn parse_limit(args: &[String]) -> Option<usize> {
     args.windows(2)
         .find_map(|pair| (pair[0] == "--limit").then(|| pair[1].parse::<usize>().ok()))
         .flatten()
+}
+
+fn parse_tool_filter(args: &[String]) -> Option<&str> {
+    args.windows(2).find_map(|pair| {
+        matches!(pair[0].as_str(), "--tool" | "--tool-name").then_some(pair[1].as_str())
+    })
 }
 
 async fn run_skill_command(args: &[String]) -> Result<()> {
@@ -1374,5 +1384,18 @@ mod tests {
 
         assert_eq!(value["version_mapping"]["acp"], "0.12.0");
         assert!(value["version_mapping"]["bin"].is_null());
+    }
+
+    #[test]
+    fn parses_observability_tool_filter() {
+        let args = vec![
+            "tools".to_string(),
+            "--limit".to_string(),
+            "5".to_string(),
+            "--tool".to_string(),
+            "iota_memory_write".to_string(),
+        ];
+
+        assert_eq!(parse_tool_filter(&args), Some("iota_memory_write"));
     }
 }
