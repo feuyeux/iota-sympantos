@@ -133,10 +133,28 @@ fn call_tool(
                 .map(parse_memory_search_mode)
                 .transpose()?
                 .unwrap_or(MemorySearchMode::Hybrid);
+            tracing::info!(
+                tool_name = "iota_memory_search",
+                query = %query,
+                limit,
+                mode = ?mode,
+                "context MCP memory search tool call received"
+            );
             let memory = memory.ok_or_else(|| "memory store is unavailable".to_string())?;
             memory
                 .search_with_mode(query, limit, mode)
-                .map(|records| json!({"records":records, "mode": format!("{:?}", mode).to_lowercase()}))
+                .map(|records| {
+                    tracing::info!(
+                        tool_name = "iota_memory_search",
+                        query = %query,
+                        limit,
+                        mode = ?mode,
+                        record_count = records.len(),
+                        record_ids = ?records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(),
+                        "context MCP memory search tool call completed"
+                    );
+                    json!({"records":records, "mode": format!("{:?}", mode).to_lowercase()})
+                })
                 .map_err(|err| err.to_string())
         }
         "iota_memory_write" => {
@@ -173,6 +191,19 @@ fn call_tool(
                 .map(parse_memory_merge_mode)
                 .transpose()?
                 .unwrap_or(MemoryMergeMode::Auto);
+            tracing::info!(
+                tool_name = "iota_memory_write",
+                memory_type = %memory_type.as_str(),
+                facet = facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
+                scope = %scope.as_str(),
+                scope_id = %scope_id,
+                merge_mode = ?merge_mode,
+                content_chars = content.chars().count(),
+                source_backend = args.get("source_backend").and_then(|value| value.as_str()).unwrap_or("-"),
+                source_session_id = args.get("source_session_id").and_then(|value| value.as_str()).unwrap_or("-"),
+                source_execution_id = args.get("source_execution_id").and_then(|value| value.as_str()).unwrap_or("-"),
+                "context MCP memory write tool call received"
+            );
             let id = memory
                 .insert_with_merge(
                     MemoryInsert {
@@ -204,6 +235,13 @@ fn call_tool(
                     merge_mode,
                 )
                 .map_err(|err| err.to_string())?;
+            tracing::info!(
+                tool_name = "iota_memory_write",
+                memory_id = id.as_deref().unwrap_or("-"),
+                merge_mode = ?merge_mode,
+                skipped = id.is_none(),
+                "context MCP memory write tool call completed"
+            );
             Ok(json!({"id": id, "merge_mode": format!("{:?}", merge_mode).to_lowercase()}))
         }
         "iota_skill_search" => {

@@ -63,14 +63,22 @@ pub struct CommandConfig {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
+pub struct BackendVersionMapping {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp: Option<String>,
+    #[serde(default, alias = "backend", skip_serializing_if = "Option::is_none")]
+    pub bin: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct BackendConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acp: Option<CommandConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub update: Option<CommandConfig>,
+    #[serde(default, alias = "versions", skip_serializing_if = "Option::is_none")]
+    pub version_mapping: Option<BackendVersionMapping>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

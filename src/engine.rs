@@ -370,14 +370,47 @@ impl IotaEngine {
                 procedural: thresholds_cfg.procedural,
                 episodic: thresholds_cfg.episodic,
             };
-            store
-                .recall_buckets_with_thresholds(
-                    "local-user",
-                    &cwd.display().to_string(),
-                    &self.session_id,
-                    thresholds,
-                )
-                .ok()
+            let project_id = cwd.display().to_string();
+            tracing::info!(
+                backend = %backend,
+                execution_id = execution_id.as_deref().unwrap_or("-"),
+                session_id = %self.session_id,
+                user_id = "local-user",
+                project_id = %project_id,
+                "engine memory recall started"
+            );
+            match store.recall_buckets_with_thresholds(
+                "local-user",
+                &project_id,
+                &self.session_id,
+                thresholds,
+            ) {
+                Ok(buckets) => {
+                    tracing::info!(
+                        backend = %backend,
+                        execution_id = execution_id.as_deref().unwrap_or("-"),
+                        session_id = %self.session_id,
+                        identity_count = buckets.identity.len(),
+                        preference_count = buckets.preference.len(),
+                        strategic_count = buckets.strategic.len(),
+                        domain_count = buckets.domain.len(),
+                        procedural_count = buckets.procedural.len(),
+                        episodic_count = buckets.episodic.len(),
+                        "engine memory recall completed"
+                    );
+                    Some(buckets)
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        backend = %backend,
+                        execution_id = execution_id.as_deref().unwrap_or("-"),
+                        session_id = %self.session_id,
+                        error = %err,
+                        "engine memory recall failed"
+                    );
+                    None
+                }
+            }
         });
         let memory_event = memory.as_ref().map(|buckets| {
             RuntimeEvent::Memory(MemoryEvent {
@@ -387,6 +420,13 @@ impl IotaEngine {
             })
         });
         if let Some(event) = memory_event.clone() {
+            tracing::info!(
+                backend = %backend,
+                execution_id = execution_id.as_deref().unwrap_or("-"),
+                session_id = %self.session_id,
+                payload = %event_payload(&event),
+                "engine memory inject event recorded"
+            );
             self.record_event(&execution_id, event);
         }
         if let Some((buckets, text)) = memory.as_ref().and_then(|buckets| {
@@ -719,6 +759,17 @@ impl IotaEngine {
         classify_memory_prompt(prompt)
             .into_iter()
             .filter_map(|classified| {
+                tracing::info!(
+                    backend = %backend,
+                    execution_id = execution_id.unwrap_or("-"),
+                    session_id = %self.session_id,
+                    memory_type = %classified.memory_type.as_str(),
+                    facet = classified.facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
+                    scope = %classified.scope.as_str(),
+                    scope_id = %classified.scope_id(cwd),
+                    source = "engine-keyword",
+                    "engine structured memory write started"
+                );
                 store
                     .insert(MemoryInsert {
                         memory_type: classified.memory_type.clone(),
@@ -733,6 +784,28 @@ impl IotaEngine {
                         metadata_json: Some("{\"extraction\":\"engine-keyword\"}".to_string()),
                         ttl_days: classified.ttl_days,
                         supersedes: None,
+                    })
+                    .map(|id| {
+                        tracing::info!(
+                            backend = %backend,
+                            execution_id = execution_id.unwrap_or("-"),
+                            session_id = %self.session_id,
+                            memory_id = %id,
+                            source = "engine-keyword",
+                            "engine structured memory write completed"
+                        );
+                        id
+                    })
+                    .map_err(|err| {
+                        tracing::warn!(
+                            backend = %backend,
+                            execution_id = execution_id.unwrap_or("-"),
+                            session_id = %self.session_id,
+                            error = %err,
+                            source = "engine-keyword",
+                            "engine structured memory write failed"
+                        );
+                        err
                     })
                     .ok()
             })
@@ -755,7 +828,15 @@ Output: {}",
             summarize(prompt, 300),
             summarize(output, 500)
         );
-        let _ = store.insert(MemoryInsert {
+        tracing::info!(
+            backend = %backend,
+            execution_id = execution_id.unwrap_or("-"),
+            session_id = %self.session_id,
+            content_chars = content.chars().count(),
+            source = "engine-episodic",
+            "engine episodic memory write started"
+        );
+        match store.insert(MemoryInsert {
             memory_type: MemoryType::Episodic,
             facet: None,
             scope: MemoryScope::Session,
@@ -768,9 +849,43 @@ Output: {}",
             metadata_json: None,
             ttl_days: 7,
             supersedes: None,
-        });
+        }) {
+            Ok(id) => tracing::info!(
+                backend = %backend,
+                execution_id = execution_id.unwrap_or("-"),
+                session_id = %self.session_id,
+                memory_id = %id,
+                source = "engine-episodic",
+                "engine episodic memory write completed"
+            ),
+            Err(err) => tracing::warn!(
+                backend = %backend,
+                execution_id = execution_id.unwrap_or("-"),
+                session_id = %self.session_id,
+                error = %err,
+                source = "engine-episodic",
+                "engine episodic memory write failed"
+            ),
+        }
         let keep = self.effective_config.episodic_compaction_keep();
-        let _ = store.compact_episodic_scope(MemoryScope::Session, &self.session_id, keep);
+        match store.compact_episodic_scope(MemoryScope::Session, &self.session_id, keep) {
+            Ok(deleted) => tracing::info!(
+                backend = %backend,
+                execution_id = execution_id.unwrap_or("-"),
+                session_id = %self.session_id,
+                keep_latest = keep,
+                deleted,
+                "engine episodic memory compaction completed"
+            ),
+            Err(err) => tracing::warn!(
+                backend = %backend,
+                execution_id = execution_id.unwrap_or("-"),
+                session_id = %self.session_id,
+                keep_latest = keep,
+                error = %err,
+                "engine episodic memory compaction failed"
+            ),
+        }
     }
 
     async fn ensure_client(&mut self, backend: AcpBackend, cwd: PathBuf) -> Result<bool> {
@@ -997,6 +1112,13 @@ fn push_memory_lines(
     lines.push(format!("{}：", label));
     for record in records {
         lines.push(format!("- {}", record.content.trim()));
+    }
+}
+
+fn event_payload(event: &RuntimeEvent) -> serde_json::Value {
+    match event {
+        RuntimeEvent::Memory(memory) => memory.payload.clone(),
+        other => serde_json::json!({"event_type": other.event_type()}),
     }
 }
 

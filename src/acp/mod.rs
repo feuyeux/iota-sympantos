@@ -17,7 +17,7 @@ pub mod session;
 pub mod wire;
 
 use crate::mcp::router;
-use crate::runtime_event::{self, RuntimeEvent};
+use crate::runtime_event::{self, RuntimeEvent, ToolCallEvent, ToolResultEvent};
 use permission as acp_permission;
 use session::{AcpMcpServer, AcpSessionOptions, session_new_params_with_options};
 use wire::{AcpWireMessage, format_acp_error, is_response_id, parse_message_line, read_next_line};
@@ -39,7 +39,7 @@ pub const ALL_BACKENDS: [AcpBackend; 5] = [
     AcpBackend::OpenCode,
 ];
 
-pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+pub const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 
 impl AcpBackend {
     pub fn parse(value: &str) -> Result<Self> {
@@ -63,7 +63,7 @@ impl AcpBackend {
                 npx,
                 vec!["-y", "@agentclientprotocol/claude-agent-acp@latest"],
             ),
-            Self::Codex => (npx, vec!["-y", "@zed-industries/codex-acp@latest"]),
+            Self::Codex => (npx, vec!["-y", "@zed-industries/codex-acp@0.12.0"]),
             Self::Gemini => (npx, vec!["-y", "@google/gemini-cli@latest", "--acp"]),
             Self::Hermes => ("hermes", vec!["acp"]),
             Self::OpenCode => (npx, vec!["-y", "opencode-ai@latest", "acp"]),
@@ -253,7 +253,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
 
 pub fn print_acp_help() {
     println!(
-        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon; starts it silently if needed\n      --trace            Print normalized skill/tool trace events to stderr\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 30000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --daemon --trace-timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
+        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon; starts it silently if needed\n      --trace            Print normalized skill/tool trace events to stderr\n      --trace-timing     Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 60000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --daemon --trace-timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
     );
 }
 
@@ -342,11 +342,45 @@ where
                 events.push(RuntimeEvent::ApprovalDecision(decision));
             }
             _ => {
-                if let (Some(id), Some(result)) = (
+                if let (Some(id), Some(intercepted)) = (
                     message.id.clone(),
                     router::try_intercept_tool_call(method, message.params.as_ref()),
                 ) {
-                    let result = result.unwrap_or_else(|err| json!({"content":[{"type":"text","text":err.to_string()}],"isError":true}));
+                    let (tool_name, tool_arguments) = acp_tool_call_parts(message.params.as_ref());
+                    let call_id = id.as_str().unwrap_or("tool-call").to_string();
+                    tracing::info!(
+                        backend = %backend,
+                        execution_id = execution_id.unwrap_or("-"),
+                        tool_call_id = %call_id,
+                        tool_name = %tool_name,
+                        arguments = %tool_arguments,
+                        "ACP backend tool call intercepted"
+                    );
+                    events.push(RuntimeEvent::ToolCall(ToolCallEvent {
+                        id: call_id.clone(),
+                        name: tool_name.clone(),
+                        arguments: tool_arguments.clone(),
+                    }));
+                    let result = intercepted.unwrap_or_else(|err| json!({"content":[{"type":"text","text":err.to_string()}],"isError":true}));
+                    let ok = !result
+                        .get("isError")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    tracing::info!(
+                        backend = %backend,
+                        execution_id = execution_id.unwrap_or("-"),
+                        tool_call_id = %call_id,
+                        tool_name = %tool_name,
+                        ok,
+                        result = %result,
+                        "ACP backend tool result returned"
+                    );
+                    events.push(RuntimeEvent::ToolResult(ToolResultEvent {
+                        id: call_id,
+                        name: tool_name,
+                        ok,
+                        result: result.clone(),
+                    }));
                     send_response(stdin, id, result).await?;
                     continue;
                 }
@@ -806,6 +840,22 @@ fn permission_request_id(message: &AcpWireMessage) -> Result<Value> {
                 .and_then(|params| params.get("requestId").cloned())
         })
         .context("ACP permission request did not include an id or requestId")
+}
+
+fn acp_tool_call_parts(params: Option<&Value>) -> (String, Value) {
+    let params = params.unwrap_or(&Value::Null);
+    let name = params
+        .get("name")
+        .or_else(|| params.get("toolName"))
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string();
+    let arguments = params
+        .get("arguments")
+        .or_else(|| params.get("input"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    (name, arguments)
 }
 
 fn read_prompt_from_stdin() -> Result<String> {

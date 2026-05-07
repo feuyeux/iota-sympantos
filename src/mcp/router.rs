@@ -37,8 +37,24 @@ pub fn route_tool_call(name: &str, arguments: &Value) -> Result<Value> {
                 .map(parse_memory_search_mode)
                 .transpose()?
                 .unwrap_or(MemorySearchMode::Hybrid);
+            tracing::info!(
+                tool_name = "iota_memory_search",
+                query = %query,
+                limit,
+                mode = ?mode,
+                "routing memory search tool call"
+            );
             let store = MemoryStore::open(&MemoryStore::default_path()?)?;
             let records = store.search_with_mode(query, limit, mode)?;
+            tracing::info!(
+                tool_name = "iota_memory_search",
+                query = %query,
+                limit,
+                mode = ?mode,
+                record_count = records.len(),
+                record_ids = ?records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(),
+                "memory search tool call completed"
+            );
             Ok(
                 json!({"content":[{"type":"text","text":serde_json::to_string(&records)?}],"structuredContent":{"records":records,"mode":format!("{:?}", mode).to_lowercase()},"isError":false}),
             )
@@ -94,6 +110,19 @@ fn route_memory_write(arguments: &Value) -> Result<Value> {
         .map(parse_memory_merge_mode)
         .transpose()?
         .unwrap_or(MemoryMergeMode::Auto);
+    tracing::info!(
+        tool_name = "iota_memory_write",
+        memory_type = %memory_type.as_str(),
+        facet = facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
+        scope = %scope.as_str(),
+        scope_id = %scope_id,
+        merge_mode = ?merge_mode,
+        content_chars = content.chars().count(),
+        source_backend = arguments.get("source_backend").and_then(|value| value.as_str()).unwrap_or("-"),
+        source_session_id = arguments.get("source_session_id").and_then(|value| value.as_str()).unwrap_or("-"),
+        source_execution_id = arguments.get("source_execution_id").and_then(|value| value.as_str()).unwrap_or("-"),
+        "routing memory write tool call"
+    );
     let store = MemoryStore::open(&MemoryStore::default_path()?)?;
     let id = store.insert_with_merge(
         MemoryInsert {
@@ -130,6 +159,13 @@ fn route_memory_write(arguments: &Value) -> Result<Value> {
         },
         merge_mode,
     )?;
+    tracing::info!(
+        tool_name = "iota_memory_write",
+        memory_id = id.as_deref().unwrap_or("-"),
+        merge_mode = ?merge_mode,
+        skipped = id.is_none(),
+        "memory write tool call completed"
+    );
     Ok(
         json!({"content":[{"type":"text","text":id.clone().unwrap_or_default()}],"structuredContent":{"id":id,"merge_mode":format!("{:?}", merge_mode).to_lowercase()},"isError":false}),
     )

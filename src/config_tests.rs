@@ -77,6 +77,27 @@ fn context_injection_rejects_unknown_values() {
 }
 
 #[test]
+fn backend_version_mapping_deserializes_from_nimia() {
+    let section: BackendConfig = serde_yaml::from_str(
+        r#"
+enabled: true
+version_mapping:
+    acp: "0.12.0"
+    bin: "0.128.0"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        section.version_mapping,
+        Some(BackendVersionMapping {
+            acp: Some("0.12.0".to_string()),
+            bin: Some("0.128.0".to_string()),
+        })
+    );
+}
+
+#[test]
 fn store_paths_join_expected_database_names() {
     let root = std::path::PathBuf::from("root").join("context");
     let paths = paths::StorePaths::new(root.clone());

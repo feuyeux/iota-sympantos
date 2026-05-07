@@ -49,7 +49,7 @@ pub fn session_new_params_with_options(
     let cwd = cwd.display().to_string();
     let mcp_servers = servers
         .iter()
-        .map(|server| render_mcp_server(backend, server, options.mcp_env_shape))
+        .map(|server| render_mcp_server(server, options.mcp_env_shape))
         .collect::<Vec<_>>();
     let requires_mcp_servers_field =
         options.always_send_empty_mcp_servers || backend == AcpBackend::Codex;
@@ -60,14 +60,7 @@ pub fn session_new_params_with_options(
     }
 }
 
-fn render_mcp_server(
-    backend: AcpBackend,
-    server: &AcpMcpServer,
-    env_shape: AcpMcpEnvShape,
-) -> Value {
-    // Codex does not support mcp_session_new MCP servers in the same way.
-    // ClaudeCode, Hermes, Gemini all require env as an array of "KEY=VALUE" strings
-    // and an explicit type="stdio".
+fn render_mcp_server(server: &AcpMcpServer, env_shape: AcpMcpEnvShape) -> Value {
     let env: Value = match env_shape {
         AcpMcpEnvShape::StringArray => server
             .env
@@ -77,23 +70,13 @@ fn render_mcp_server(
             .into(),
         AcpMcpEnvShape::Object => json!(server.env),
     };
-    if backend == AcpBackend::Gemini {
-        // Gemini does not want the "name" field in the top-level mcp server object.
-        json!({
-            "type": "stdio",
-            "command": server.command,
-            "args": server.args,
-            "env": env,
-        })
-    } else {
-        json!({
-            "name": server.name,
-            "type": "stdio",
-            "command": server.command,
-            "args": server.args,
-            "env": env,
-        })
-    }
+    json!({
+        "name": server.name,
+        "type": "stdio",
+        "command": server.command,
+        "args": server.args,
+        "env": env,
+    })
 }
 
 #[cfg(test)]
