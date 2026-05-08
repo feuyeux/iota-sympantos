@@ -886,5 +886,6 @@ fn elapsed_ms(started: Instant) -> u64 {
 fn should_forward_backend_stderr(line: &str) -> bool {
     line.contains("context MCP memory")
         || line.contains("iota::context::server")
+        || line.contains("[iota log]")
         || line.contains("[mcp stderr:")
 }

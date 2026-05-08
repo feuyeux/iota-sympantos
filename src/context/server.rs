@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+use crate::runtime_event::LogEvent;
 use crate::skill::SkillRegistry;
 use crate::store::ledger::SessionLedger;
 use crate::store::memory::{
@@ -82,10 +83,27 @@ fn handle_request(
                     id,
                     json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false}),
                 ),
-                Err(message) => ok(
-                    id,
-                    json!({"content":[{"type":"text","text":message}],"isError":true}),
-                ),
+                Err(message) => {
+                    if matches!(name, "iota_memory_search" | "iota_memory_write") {
+                        emit_route_log(
+                            "warn",
+                            if name == "iota_memory_search" {
+                                "memory.search.result"
+                            } else {
+                                "memory.write.result"
+                            },
+                            json!({
+                                "tool_name": name,
+                                "ok": false,
+                                "error": message.clone(),
+                            }),
+                        );
+                    }
+                    ok(
+                        id,
+                        json!({"content":[{"type":"text","text":message}],"isError":true}),
+                    )
+                }
             }
         }
         "resources/list" => ok(
@@ -133,6 +151,16 @@ fn call_tool(
                 .map(parse_memory_search_mode)
                 .transpose()?
                 .unwrap_or(MemorySearchMode::Hybrid);
+            emit_route_log(
+                "info",
+                "memory.search.call",
+                json!({
+                    "tool_name": "iota_memory_search",
+                    "query": query,
+                    "limit": limit,
+                    "mode": format!("{:?}", mode).to_lowercase(),
+                }),
+            );
             tracing::info!(
                 tool_name = "iota_memory_search",
                 query = %query,
@@ -144,6 +172,19 @@ fn call_tool(
             memory
                 .search_with_mode(query, limit, mode)
                 .map(|records| {
+                    emit_route_log(
+                        "info",
+                        "memory.search.result",
+                        json!({
+                            "tool_name": "iota_memory_search",
+                            "query": query,
+                            "limit": limit,
+                            "mode": format!("{:?}", mode).to_lowercase(),
+                            "record_count": records.len(),
+                            "record_ids": records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(),
+                            "ok": true,
+                        }),
+                    );
                     tracing::info!(
                         tool_name = "iota_memory_search",
                         query = %query,
@@ -184,6 +225,23 @@ fn call_tool(
                 .map(parse_memory_merge_mode)
                 .transpose()?
                 .unwrap_or(MemoryMergeMode::Auto);
+            emit_route_log(
+                "info",
+                "memory.write.call",
+                json!({
+                    "tool_name": "iota_memory_write",
+                    "type": memory_type.as_str(),
+                    "facet": facet.as_ref().map(MemoryFacet::as_str),
+                    "scope": scope.as_str(),
+                    "scope_id": scope_id.clone(),
+                    "confidence": confidence,
+                    "content_chars": content.chars().count(),
+                    "merge_mode": format!("{:?}", merge_mode).to_lowercase(),
+                    "source_backend": args.get("source_backend").and_then(Value::as_str),
+                    "source_session_id": args.get("source_session_id").and_then(Value::as_str),
+                    "source_execution_id": args.get("source_execution_id").and_then(Value::as_str),
+                }),
+            );
             tracing::info!(
                 tool_name = "iota_memory_write",
                 memory_type = %memory_type.as_str(),
@@ -234,6 +292,17 @@ fn call_tool(
                 merge_mode = ?merge_mode,
                 skipped = id.is_none(),
                 "context MCP memory write tool call completed"
+            );
+            emit_route_log(
+                "info",
+                "memory.write.result",
+                json!({
+                    "tool_name": "iota_memory_write",
+                    "memory_id": id.clone(),
+                    "merge_mode": format!("{:?}", merge_mode).to_lowercase(),
+                    "skipped": id.is_none(),
+                    "ok": true,
+                }),
             );
             Ok(json!({"id": id, "merge_mode": format!("{:?}", merge_mode).to_lowercase()}))
         }
@@ -306,6 +375,15 @@ fn call_tool(
                 .map_err(|err| err.to_string())
         }
         _ => Err(format!("unknown tool {}", name)),
+    }
+}
+
+fn emit_route_log(level: &str, event: &str, fields: Value) {
+    let mut log = LogEvent::new(level, "iota::context::server", event);
+    log.route = Some("mcp-sidecar".to_string());
+    log.fields = fields;
+    if let Ok(line) = serde_json::to_string(&log) {
+        eprintln!("[iota log] {}", line);
     }
 }
 

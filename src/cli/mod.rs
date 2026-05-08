@@ -12,7 +12,7 @@ use crate::config::{self, NimiaConfig};
 use crate::context::server as context_server;
 use crate::daemon::{self, DaemonPromptRequest};
 use crate::engine::IotaEngine;
-use crate::runtime_event::RuntimeEvent;
+use crate::runtime_event::{LogEvent, RuntimeEvent};
 use crate::skill::SkillRegistry;
 use crate::skill::fun_server;
 use crate::store::events::EventStore;
@@ -146,13 +146,20 @@ fn print_route_timing(
 fn print_trace_events(events: &[RuntimeEvent]) {
     for event in events {
         match event {
+            RuntimeEvent::Log(log) => {
+                eprintln!("{}", render_log_event_text(log));
+            }
             RuntimeEvent::ToolCall(call) => {
-                if !print_memory_tool_call(call) {
+                if let Some(log) = memory_tool_call_log(call) {
+                    eprintln!("{}", render_log_event_text(&log));
+                } else {
                     eprintln!("[{}] call {} args={}", call.id, call.name, call.arguments);
                 }
             }
             RuntimeEvent::ToolResult(result) => {
-                if !print_memory_tool_result(result) {
+                if let Some(log) = memory_tool_result_log(result) {
+                    eprintln!("{}", render_log_event_text(&log));
+                } else {
                     eprintln!(
                         "[{}] result {} ok={} value={}",
                         result.id,
@@ -166,30 +173,27 @@ fn print_trace_events(events: &[RuntimeEvent]) {
                 eprintln!("[skill:output] {} bytes", output.text.len());
             }
             RuntimeEvent::Memory(memory) => {
-                eprintln!(
-                    "[memory:{}] id={} payload={}",
-                    memory.action,
-                    memory.memory_id.as_deref().unwrap_or("-"),
-                    memory.payload
-                );
+                eprintln!("{}", render_log_event_text(&memory_event_log(memory)));
             }
             _ => {}
         }
     }
 }
 
-fn print_memory_tool_call(call: &crate::runtime_event::ToolCallEvent) -> bool {
+fn memory_tool_call_log(call: &crate::runtime_event::ToolCallEvent) -> Option<LogEvent> {
     match call.name.as_str() {
         "iota_memory_search" => {
-            eprintln!(
-                "[memory:read] id={} query={} limit={} mode={} args={}",
-                call.id,
-                json_field(&call.arguments, "query"),
-                json_field(&call.arguments, "limit"),
-                json_field(&call.arguments, "mode"),
-                call.arguments
-            );
-            true
+            let mut log = LogEvent::new("info", "iota::memory", "memory.search.call");
+            log.route = Some("tool".to_string());
+            log.tool_name = Some(call.name.clone());
+            log.tool_call_id = Some(call.id.clone());
+            log.fields = serde_json::json!({
+                "query": json_field(&call.arguments, "query"),
+                "limit": json_field(&call.arguments, "limit"),
+                "mode": json_field(&call.arguments, "mode"),
+                "arguments": call.arguments.clone(),
+            });
+            Some(log)
         }
         "iota_memory_write" => {
             let content_chars = call
@@ -198,49 +202,133 @@ fn print_memory_tool_call(call: &crate::runtime_event::ToolCallEvent) -> bool {
                 .and_then(serde_json::Value::as_str)
                 .map(|content| content.chars().count().to_string())
                 .unwrap_or_else(|| "-".to_string());
-            eprintln!(
-                "[memory:write] id={} type={} facet={} scope={} scope_id={} confidence={} content_chars={} args={}",
-                call.id,
-                json_field(&call.arguments, "type"),
-                json_field(&call.arguments, "facet"),
-                json_field(&call.arguments, "scope"),
-                json_field(&call.arguments, "scope_id"),
-                json_field(&call.arguments, "confidence"),
-                content_chars,
-                call.arguments
-            );
-            true
+            let mut log = LogEvent::new("info", "iota::memory", "memory.write.call");
+            log.route = Some("tool".to_string());
+            log.tool_name = Some(call.name.clone());
+            log.tool_call_id = Some(call.id.clone());
+            log.fields = serde_json::json!({
+                "type": json_field(&call.arguments, "type"),
+                "facet": json_field(&call.arguments, "facet"),
+                "scope": json_field(&call.arguments, "scope"),
+                "scope_id": json_field(&call.arguments, "scope_id"),
+                "confidence": json_field(&call.arguments, "confidence"),
+                "content_chars": content_chars,
+                "arguments": call.arguments.clone(),
+            });
+            Some(log)
         }
-        _ => false,
+        _ => None,
     }
 }
 
-fn print_memory_tool_result(result: &crate::runtime_event::ToolResultEvent) -> bool {
+fn memory_tool_result_log(result: &crate::runtime_event::ToolResultEvent) -> Option<LogEvent> {
     match result.name.as_str() {
         "iota_memory_search" => {
-            eprintln!(
-                "[memory:read:result] id={} ok={} record_count={} value={}",
-                result.id,
-                result.ok,
-                memory_record_count(&result.result)
-                    .map(|count| count.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                trace_result_value(&result.result)
-            );
-            true
+            let mut log = LogEvent::new("info", "iota::memory", "memory.search.result");
+            log.route = Some("tool".to_string());
+            log.tool_name = Some(result.name.clone());
+            log.tool_call_id = Some(result.id.clone());
+            log.ok = Some(result.ok);
+            log.fields = serde_json::json!({
+                "record_count": memory_record_count(&result.result),
+                "result": trace_result_value(&result.result),
+            });
+            Some(log)
         }
         "iota_memory_write" => {
-            eprintln!(
-                "[memory:write:result] id={} ok={} memory_id={} value={}",
-                result.id,
-                result.ok,
-                memory_result_id(&result.result).unwrap_or("-"),
-                trace_result_value(&result.result)
-            );
-            true
+            let mut log = LogEvent::new("info", "iota::memory", "memory.write.result");
+            log.route = Some("tool".to_string());
+            log.tool_name = Some(result.name.clone());
+            log.tool_call_id = Some(result.id.clone());
+            log.ok = Some(result.ok);
+            log.fields = serde_json::json!({
+                "memory_id": memory_result_id(&result.result),
+                "result": trace_result_value(&result.result),
+            });
+            Some(log)
         }
-        _ => false,
+        _ => None,
     }
+}
+
+fn memory_event_log(memory: &crate::runtime_event::MemoryEvent) -> LogEvent {
+    let mut log = LogEvent::new("info", "iota::memory", format!("memory.{}", memory.action));
+    log.route = Some("engine".to_string());
+    log.fields = serde_json::json!({
+        "memory_id": memory.memory_id.clone(),
+        "payload": memory.payload.clone(),
+    });
+    log
+}
+
+fn render_log_event_text(log: &LogEvent) -> String {
+    match log.event.as_str() {
+        "memory.search.call" => format!(
+            "[memory:read] id={} query={} limit={} mode={} args={}",
+            log.tool_call_id.as_deref().unwrap_or("-"),
+            log_field(&log.fields, "query"),
+            log_field(&log.fields, "limit"),
+            log_field(&log.fields, "mode"),
+            log.fields
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        ),
+        "memory.search.result" => format!(
+            "[memory:read:result] id={} ok={} record_count={} value={}",
+            log.tool_call_id.as_deref().unwrap_or("-"),
+            log.ok
+                .map(|ok| ok.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            log_field(&log.fields, "record_count"),
+            log_field(&log.fields, "result")
+        ),
+        "memory.write.call" => format!(
+            "[memory:write] id={} type={} facet={} scope={} scope_id={} confidence={} content_chars={} args={}",
+            log.tool_call_id.as_deref().unwrap_or("-"),
+            log_field(&log.fields, "type"),
+            log_field(&log.fields, "facet"),
+            log_field(&log.fields, "scope"),
+            log_field(&log.fields, "scope_id"),
+            log_field(&log.fields, "confidence"),
+            log_field(&log.fields, "content_chars"),
+            log.fields
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null)
+        ),
+        "memory.write.result" => format!(
+            "[memory:write:result] id={} ok={} memory_id={} value={}",
+            log.tool_call_id.as_deref().unwrap_or("-"),
+            log.ok
+                .map(|ok| ok.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            log_field(&log.fields, "memory_id"),
+            log_field(&log.fields, "result")
+        ),
+        event if event.starts_with("memory.") => format!(
+            "[{}] {}",
+            event.replace('.', ":"),
+            serde_json::to_string(log).unwrap_or_else(|_| log.event.clone())
+        ),
+        _ => format!(
+            "[log:{}:{}] {}",
+            log.level,
+            log.target,
+            serde_json::to_string(log).unwrap_or_else(|_| log.event.clone())
+        ),
+    }
+}
+
+fn log_field(value: &serde_json::Value, key: &str) -> String {
+    value
+        .get(key)
+        .map(|value| match value {
+            serde_json::Value::Null => "-".to_string(),
+            serde_json::Value::String(text) => text.clone(),
+            other => other.to_string(),
+        })
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn json_field(value: &serde_json::Value, key: &str) -> String {
@@ -361,7 +449,7 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("help");
     if matches!(sub, "-h" | "--help" | "help") {
         println!(
-            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs]\n                                                              Tool call/result audit events\n  iota observability logging approvals [--limit N]     approval_request/decision events"
+            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging logs [--limit N] [--event NAME] [--scan N]\n                                                              Structured log events\n  iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs] [--scan N]\n                                                              Tool call/result audit events\n  iota observability logging approvals [--limit N]     approval_request/decision events"
         );
         return Ok(());
     }
@@ -400,10 +488,18 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
                 .collect();
             println!("{}", serde_json::to_string_pretty(&out)?);
         }
+        "logs" => {
+            let event_filter = parse_log_event_filter(args);
+            let scan = parse_scan(args).unwrap_or_else(|| default_scan_limit(limit));
+            let executions = store.recent_executions(scan)?;
+            let entries = collect_log_entries(store, &executions, limit, event_filter)?;
+            println!("{}", serde_json::to_string_pretty(&entries)?);
+        }
         "tools" => {
             let tool_filter = parse_tool_filter(args);
             let mode = parse_tool_audit_mode(args)?;
-            let executions = store.recent_executions(limit.saturating_mul(5))?;
+            let scan = parse_scan(args).unwrap_or_else(|| default_scan_limit(limit));
+            let executions = store.recent_executions(scan)?;
             let entries = collect_tool_audit_entries(store, &executions, limit, tool_filter, mode)?;
             println!("{}", serde_json::to_string_pretty(&entries)?);
         }
@@ -458,6 +554,8 @@ enum ToolAuditMode {
     Pairs,
 }
 
+const DEFAULT_OBS_SCAN_LIMIT: usize = 500;
+
 #[derive(Serialize)]
 #[serde(tag = "event_type", rename_all = "snake_case")]
 enum ToolAuditEntry {
@@ -483,12 +581,55 @@ enum ToolAuditEntry {
         backend: String,
         tool_name: String,
         id: String,
+        status: String,
         call_seq: Option<i64>,
-        result_seq: i64,
+        result_seq: Option<i64>,
         arguments: serde_json::Value,
-        ok: bool,
+        ok: Option<bool>,
         result: serde_json::Value,
     },
+}
+
+#[derive(Serialize)]
+struct LogAuditEntry {
+    execution_id: String,
+    backend: String,
+    seq: i64,
+    log: LogEvent,
+}
+
+fn collect_log_entries(
+    store: &EventStore,
+    executions: &[crate::store::events::ExecutionRecord],
+    limit: usize,
+    event_filter: Option<&str>,
+) -> Result<Vec<LogAuditEntry>> {
+    use crate::runtime_event::RuntimeEvent;
+
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    'outer: for exec in executions {
+        for (seq, _, event) in store.execution_events(&exec.execution_id)? {
+            let RuntimeEvent::Log(log) = event else {
+                continue;
+            };
+            if event_filter.is_some_and(|event| event != log.event.as_str()) {
+                continue;
+            }
+            entries.push(LogAuditEntry {
+                execution_id: exec.execution_id.clone(),
+                backend: exec.backend.clone(),
+                seq,
+                log,
+            });
+            if entries.len() >= limit {
+                break 'outer;
+            }
+        }
+    }
+    Ok(entries)
 }
 
 fn collect_tool_audit_entries(
@@ -500,6 +641,9 @@ fn collect_tool_audit_entries(
 ) -> Result<Vec<ToolAuditEntry>> {
     use crate::runtime_event::RuntimeEvent;
 
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
     let mut entries = Vec::new();
     'outer: for exec in executions {
         let events = store.execution_events(&exec.execution_id)?;
@@ -508,6 +652,9 @@ fn collect_tool_audit_entries(
             for (seq, _, event) in events {
                 match event {
                     RuntimeEvent::ToolCall(call) => {
+                        if tool_filter.is_some_and(|name| name != call.name.as_str()) {
+                            continue;
+                        }
                         calls.insert((call.id, call.name), (seq, call.arguments));
                     }
                     RuntimeEvent::ToolResult(result) => {
@@ -516,18 +663,23 @@ fn collect_tool_audit_entries(
                         }
                         let key = (result.id.clone(), result.name.clone());
                         let (call_seq, arguments) = calls
-                            .get(&key)
-                            .map(|(seq, arguments)| (Some(*seq), arguments.clone()))
+                            .remove(&key)
+                            .map(|(seq, arguments)| (Some(seq), arguments))
                             .unwrap_or((None, serde_json::Value::Null));
                         entries.push(ToolAuditEntry::ToolPair {
                             execution_id: exec.execution_id.clone(),
                             backend: exec.backend.clone(),
                             tool_name: result.name,
                             id: result.id,
+                            status: if call_seq.is_some() {
+                                "completed".to_string()
+                            } else {
+                                "missing_call".to_string()
+                            },
                             call_seq,
-                            result_seq: seq,
+                            result_seq: Some(seq),
                             arguments,
-                            ok: result.ok,
+                            ok: Some(result.ok),
                             result: result.result,
                         });
                         if entries.len() >= limit {
@@ -535,6 +687,23 @@ fn collect_tool_audit_entries(
                         }
                     }
                     _ => {}
+                }
+            }
+            for ((id, tool_name), (call_seq, arguments)) in calls {
+                entries.push(ToolAuditEntry::ToolPair {
+                    execution_id: exec.execution_id.clone(),
+                    backend: exec.backend.clone(),
+                    tool_name,
+                    id,
+                    status: "missing_result".to_string(),
+                    call_seq: Some(call_seq),
+                    result_seq: None,
+                    arguments,
+                    ok: None,
+                    result: serde_json::Value::Null,
+                });
+                if entries.len() >= limit {
+                    break 'outer;
                 }
             }
             continue;
@@ -963,6 +1132,22 @@ fn parse_limit(args: &[String]) -> Option<usize> {
     args.windows(2)
         .find_map(|pair| (pair[0] == "--limit").then(|| pair[1].parse::<usize>().ok()))
         .flatten()
+}
+
+fn parse_scan(args: &[String]) -> Option<usize> {
+    args.windows(2)
+        .find_map(|pair| (pair[0] == "--scan").then(|| pair[1].parse::<usize>().ok()))
+        .flatten()
+}
+
+fn default_scan_limit(limit: usize) -> usize {
+    DEFAULT_OBS_SCAN_LIMIT.max(limit.saturating_mul(20))
+}
+
+fn parse_log_event_filter(args: &[String]) -> Option<&str> {
+    args.windows(2).find_map(|pair| {
+        matches!(pair[0].as_str(), "--event" | "--event-name").then_some(pair[1].as_str())
+    })
 }
 
 fn parse_tool_filter(args: &[String]) -> Option<&str> {
@@ -1525,6 +1710,23 @@ mod tests {
         ];
 
         assert_eq!(parse_tool_filter(&args), Some("iota_memory_write"));
+    }
+
+    #[test]
+    fn parses_observability_scan_and_log_filter() {
+        let args = vec![
+            "logs".to_string(),
+            "--limit".to_string(),
+            "5".to_string(),
+            "--scan".to_string(),
+            "250".to_string(),
+            "--event".to_string(),
+            "memory.write.result".to_string(),
+        ];
+
+        assert_eq!(parse_scan(&args), Some(250));
+        assert_eq!(parse_log_event_filter(&args), Some("memory.write.result"));
+        assert_eq!(default_scan_limit(2), DEFAULT_OBS_SCAN_LIMIT);
     }
 
     #[test]

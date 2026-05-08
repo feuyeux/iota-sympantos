@@ -8,7 +8,9 @@ use crate::config::{
     normalized_acp_command,
 };
 use crate::context::{ComposeInput, ContextEngine, DialogueBuffer};
-use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
+use crate::runtime_event::{
+    ErrorEvent, LogEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent,
+};
 use crate::skill::{SkillCache, SkillRegistry};
 use crate::store::events::{EventStore, ExecutionStatus};
 use crate::store::ledger::SessionLedger;
@@ -371,6 +373,16 @@ impl IotaEngine {
                 episodic: thresholds_cfg.episodic,
             };
             let project_id = cwd.display().to_string();
+            self.record_log_event(
+                execution_id.as_deref(),
+                backend,
+                "info",
+                "memory.recall.started",
+                serde_json::json!({
+                    "user_id": "local-user",
+                    "project_id": project_id.clone(),
+                }),
+            );
             tracing::info!(
                 backend = %backend,
                 execution_id = execution_id.as_deref().unwrap_or("-"),
@@ -386,6 +398,20 @@ impl IotaEngine {
                 thresholds,
             ) {
                 Ok(buckets) => {
+                    self.record_log_event(
+                        execution_id.as_deref(),
+                        backend,
+                        "info",
+                        "memory.recall.completed",
+                        serde_json::json!({
+                            "identity_count": buckets.identity.len(),
+                            "preference_count": buckets.preference.len(),
+                            "strategic_count": buckets.strategic.len(),
+                            "domain_count": buckets.domain.len(),
+                            "procedural_count": buckets.procedural.len(),
+                            "episodic_count": buckets.episodic.len(),
+                        }),
+                    );
                     tracing::info!(
                         backend = %backend,
                         execution_id = execution_id.as_deref().unwrap_or("-"),
@@ -401,6 +427,13 @@ impl IotaEngine {
                     Some(buckets)
                 }
                 Err(err) => {
+                    self.record_log_event(
+                        execution_id.as_deref(),
+                        backend,
+                        "warn",
+                        "memory.recall.failed",
+                        serde_json::json!({"error": err.to_string()}),
+                    );
                     tracing::warn!(
                         backend = %backend,
                         execution_id = execution_id.as_deref().unwrap_or("-"),
@@ -420,6 +453,13 @@ impl IotaEngine {
             })
         });
         if let Some(event) = memory_event.clone() {
+            self.record_log_event(
+                execution_id.as_deref(),
+                backend,
+                "info",
+                "memory.inject",
+                event_payload(&event),
+            );
             tracing::info!(
                 backend = %backend,
                 execution_id = execution_id.as_deref().unwrap_or("-"),
@@ -710,6 +750,29 @@ impl IotaEngine {
         }
     }
 
+    fn record_log_event(
+        &self,
+        execution_id: Option<&str>,
+        backend: AcpBackend,
+        level: &str,
+        event: &str,
+        fields: serde_json::Value,
+    ) {
+        let Some(store) = &self.event_store else {
+            return;
+        };
+        let Some(execution_id) = execution_id else {
+            return;
+        };
+        let mut log = LogEvent::new(level, "iota::engine", event);
+        log.execution_id = Some(execution_id.to_string());
+        log.session_id = Some(self.session_id.clone());
+        log.backend = Some(backend.to_string());
+        log.route = Some("engine".to_string());
+        log.fields = fields;
+        let _ = store.append_event(execution_id, &RuntimeEvent::Log(log));
+    }
+
     fn record_cache_hit(&self) {
         if let Some(store) = &self.event_store {
             let _ = store.record_cache_hit();
@@ -759,6 +822,22 @@ impl IotaEngine {
         classify_memory_prompt(prompt)
             .into_iter()
             .filter_map(|classified| {
+                let scope_id = classified.scope_id(cwd);
+                self.record_log_event(
+                    execution_id,
+                    backend,
+                    "info",
+                    "memory.write.call",
+                    serde_json::json!({
+                        "source": "engine-keyword",
+                        "type": classified.memory_type.as_str(),
+                        "facet": classified.facet.as_ref().map(MemoryFacet::as_str),
+                        "scope": classified.scope.as_str(),
+                        "scope_id": scope_id.clone(),
+                        "confidence": classified.confidence,
+                        "content_chars": prompt.trim().chars().count(),
+                    }),
+                );
                 tracing::info!(
                     backend = %backend,
                     execution_id = execution_id.unwrap_or("-"),
@@ -766,7 +845,7 @@ impl IotaEngine {
                     memory_type = %classified.memory_type.as_str(),
                     facet = classified.facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
                     scope = %classified.scope.as_str(),
-                    scope_id = %classified.scope_id(cwd),
+                    scope_id = %scope_id,
                     source = "engine-keyword",
                     "engine structured memory write started"
                 );
@@ -775,7 +854,7 @@ impl IotaEngine {
                         memory_type: classified.memory_type.clone(),
                         facet: classified.facet.clone(),
                         scope: classified.scope.clone(),
-                        scope_id: classified.scope_id(cwd),
+                        scope_id,
                         content: prompt.trim().to_string(),
                         confidence: classified.confidence,
                         source_backend: Some(backend.to_string()),
@@ -786,6 +865,17 @@ impl IotaEngine {
                         supersedes: None,
                     })
                     .map(|id| {
+                        self.record_log_event(
+                            execution_id,
+                            backend,
+                            "info",
+                            "memory.write.result",
+                            serde_json::json!({
+                                "source": "engine-keyword",
+                                "memory_id": id.clone(),
+                                "ok": true,
+                            }),
+                        );
                         tracing::info!(
                             backend = %backend,
                             execution_id = execution_id.unwrap_or("-"),
@@ -797,6 +887,17 @@ impl IotaEngine {
                         id
                     })
                     .map_err(|err| {
+                        self.record_log_event(
+                            execution_id,
+                            backend,
+                            "warn",
+                            "memory.write.result",
+                            serde_json::json!({
+                                "source": "engine-keyword",
+                                "ok": false,
+                                "error": err.to_string(),
+                            }),
+                        );
                         tracing::warn!(
                             backend = %backend,
                             execution_id = execution_id.unwrap_or("-"),
@@ -828,11 +929,26 @@ Output: {}",
             summarize(prompt, 300),
             summarize(output, 500)
         );
+        let content_chars = content.chars().count();
+        self.record_log_event(
+            execution_id,
+            backend,
+            "info",
+            "memory.write.call",
+            serde_json::json!({
+                "source": "engine-episodic",
+                "type": "episodic",
+                "scope": "session",
+                "scope_id": self.session_id.clone(),
+                "confidence": 0.8,
+                "content_chars": content_chars,
+            }),
+        );
         tracing::info!(
             backend = %backend,
             execution_id = execution_id.unwrap_or("-"),
             session_id = %self.session_id,
-            content_chars = content.chars().count(),
+            content_chars,
             source = "engine-episodic",
             "engine episodic memory write started"
         );
@@ -850,41 +966,97 @@ Output: {}",
             ttl_days: 7,
             supersedes: None,
         }) {
-            Ok(id) => tracing::info!(
-                backend = %backend,
-                execution_id = execution_id.unwrap_or("-"),
-                session_id = %self.session_id,
-                memory_id = %id,
-                source = "engine-episodic",
-                "engine episodic memory write completed"
-            ),
-            Err(err) => tracing::warn!(
-                backend = %backend,
-                execution_id = execution_id.unwrap_or("-"),
-                session_id = %self.session_id,
-                error = %err,
-                source = "engine-episodic",
-                "engine episodic memory write failed"
-            ),
+            Ok(id) => {
+                self.record_log_event(
+                    execution_id,
+                    backend,
+                    "info",
+                    "memory.write.result",
+                    serde_json::json!({
+                        "source": "engine-episodic",
+                        "memory_id": id.clone(),
+                        "ok": true,
+                    }),
+                );
+                tracing::info!(
+                    backend = %backend,
+                    execution_id = execution_id.unwrap_or("-"),
+                    session_id = %self.session_id,
+                    memory_id = %id,
+                    source = "engine-episodic",
+                    "engine episodic memory write completed"
+                );
+            }
+            Err(err) => {
+                self.record_log_event(
+                    execution_id,
+                    backend,
+                    "warn",
+                    "memory.write.result",
+                    serde_json::json!({
+                        "source": "engine-episodic",
+                        "ok": false,
+                        "error": err.to_string(),
+                    }),
+                );
+                tracing::warn!(
+                    backend = %backend,
+                    execution_id = execution_id.unwrap_or("-"),
+                    session_id = %self.session_id,
+                    error = %err,
+                    source = "engine-episodic",
+                    "engine episodic memory write failed"
+                );
+            }
         }
         let keep = self.effective_config.episodic_compaction_keep();
         match store.compact_episodic_scope(MemoryScope::Session, &self.session_id, keep) {
-            Ok(deleted) => tracing::info!(
-                backend = %backend,
-                execution_id = execution_id.unwrap_or("-"),
-                session_id = %self.session_id,
-                keep_latest = keep,
-                deleted,
-                "engine episodic memory compaction completed"
-            ),
-            Err(err) => tracing::warn!(
-                backend = %backend,
-                execution_id = execution_id.unwrap_or("-"),
-                session_id = %self.session_id,
-                keep_latest = keep,
-                error = %err,
-                "engine episodic memory compaction failed"
-            ),
+            Ok(deleted) => {
+                self.record_log_event(
+                    execution_id,
+                    backend,
+                    "info",
+                    "memory.compaction",
+                    serde_json::json!({
+                        "scope": "session",
+                        "scope_id": self.session_id.clone(),
+                        "keep_latest": keep,
+                        "deleted": deleted,
+                        "ok": true,
+                    }),
+                );
+                tracing::info!(
+                    backend = %backend,
+                    execution_id = execution_id.unwrap_or("-"),
+                    session_id = %self.session_id,
+                    keep_latest = keep,
+                    deleted,
+                    "engine episodic memory compaction completed"
+                );
+            }
+            Err(err) => {
+                self.record_log_event(
+                    execution_id,
+                    backend,
+                    "warn",
+                    "memory.compaction",
+                    serde_json::json!({
+                        "scope": "session",
+                        "scope_id": self.session_id.clone(),
+                        "keep_latest": keep,
+                        "ok": false,
+                        "error": err.to_string(),
+                    }),
+                );
+                tracing::warn!(
+                    backend = %backend,
+                    execution_id = execution_id.unwrap_or("-"),
+                    session_id = %self.session_id,
+                    keep_latest = keep,
+                    error = %err,
+                    "engine episodic memory compaction failed"
+                );
+            }
         }
     }
 

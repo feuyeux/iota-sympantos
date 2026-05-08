@@ -117,6 +117,18 @@
 | backend 管理的 sidecar route 日志进入主日志 | 默认 `iota-context` MCP server 注入 `RUST_LOG=iota::context::server=info`；ACP backend stderr 会在非 `--show-native` 模式下转发 memory route 相关行 | `cargo test context_mcp_server_enables_memory_route_logging` 通过 |
 | `observability logging tools` 按工具名过滤和 call/result 审计 | 新增 `--tool NAME` / `--tool-name NAME`；新增 `--mode calls|results|pairs`，其中 `pairs` 会按 execution 和 tool call id 输出 call/result 成对审计视图 | `cargo run -- observability logging tools --limit 3 --tool iota_memory_write --mode pairs` 只返回 `iota_memory_write` 闭环记录 |
 
+2026-05-08 追加实现完整日志输出方案：
+
+| 项 | 实现 | 预期验证 |
+|----|------|----------|
+| 统一结构化日志事件 | 新增 `RuntimeEvent::Log(LogEvent)`，字段包含 `ts`、`level`、`target`、`execution_id`、`session_id`、`backend`、`route`、`event`、`tool_name`、`tool_call_id`、`ok`、`latency_ms`、`fields` | `observability logging events <execution-id>` 可看到 `event_type=log` |
+| 控制台 trace 共用结构 | `iota run --trace` 的 `[memory:read/write]` 输出由 `LogEvent` 渲染，避免和 EventStore 字段漂移 | memory tool call/result 控制台格式保持兼容 |
+| Engine memory 结构化审计 | recall started/completed/failed、inject、engine-keyword write、episodic write、compaction 均写入 `RuntimeEvent::Log` | `observability logging logs --event memory.write.result` 可查 engine 写入结果 |
+| MCP sidecar route JSONL | `context-mcp` 在 memory search/write call/result 上输出 `[iota log] {...LogEvent...}`，失败也输出 `ok=false` | 直连 `context-mcp` 或 backend stderr 转发可见结构化 route 行 |
+| tools audit 扫描完整性 | `observability logging tools` 新增 `--scan N`，默认至少扫描 500 条 execution | 稀疏工具调用不再受 `limit * 5` 取样影响 |
+| pairs 异常状态 | `--mode pairs` 新增 `status=completed/missing_call/missing_result`，`result_seq` 和 `ok` 支持为空 | 可以诊断只有 call 或只有 result 的异常链路 |
+| log 查询入口 | 新增 `observability logging logs [--event NAME] [--scan N]` | 可直接按结构化 event 名过滤日志 |
+
 ---
 
 ## 四、实验步骤与本次结果
@@ -636,6 +648,39 @@ EventStore 结论：
       OR content LIKE '%domain-padding-%'
       OR content LIKE '%低置信度测试%';"
 ```
+
+#### 10.10 结构化日志输出追加验证（2026-05-08）
+
+本轮实现统一 `LogEvent` 后追加验证：
+
+```powershell
+cargo test
+cargo build --release
+.\target\release\iota.exe run --backend codex --trace --timeout-ms 180000 "我叫 exp-log-event-20260508"
+.\target\release\iota.exe observability logging logs --limit 5 --event memory.write.result --scan 50
+.\target\release\iota.exe observability logging tools --limit 5 --tool iota_memory_write --mode pairs --scan 500
+@($init, $ready, $call) | .\target\release\iota.exe context-mcp *>&1
+```
+
+结果：
+
+| 检查项 | 本次结果 |
+|--------|----------|
+| `cargo test` | 通过，107 passed |
+| `cargo build --release` | 通过 |
+| 控制台 trace | memory-write-only turn 输出 `[memory:write] {...LogEvent...}`，event 为 `memory.write` |
+| `observability logging logs` | 查到 `event_type=log`，`event=memory.write.result`，`backend=codex`，`route=engine`，`ok=true` |
+| `observability logging tools --mode pairs --scan 500` | 返回 `status=completed`、`call_seq`、`result_seq`、`ok=true`，并按 `iota_memory_write` 过滤 |
+| `context-mcp` route JSONL | stderr 输出 `[iota log] {...}`，包含 `memory.write.call` 和 `memory.write.result`，`route=mcp-sidecar` |
+| 验证数据清理 | 已删除 `exp-log-event-20260508` 与 `exp-route-log-20260508` 记忆记录 |
+
+新增命令行为：
+
+| 命令 | 说明 |
+|------|------|
+| `observability logging logs [--event NAME] [--scan N]` | 查询持久化结构化 `LogEvent` |
+| `observability logging tools --mode pairs` | pair 输出新增 `status=completed/missing_call/missing_result` |
+| `observability logging tools --scan N` | 控制扫描 execution 窗口，默认至少 500 条 |
 
 ---
 

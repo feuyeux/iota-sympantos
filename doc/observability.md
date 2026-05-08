@@ -1,275 +1,665 @@
 # iota observability
 
-## Current Model
+## Overview
 
-iota now uses OpenTelemetry as the primary observability path. The CLI initializes `telemetry::init()` at startup and emits `tracing` logs, OTel metrics, and OTel traces to an OTLP endpoint.
+`iota observability` 提供对执行指标、性能数据和系统状态的实时观测，分三个主命令：
 
-Default endpoint:
+| 命令 | 职责 |
+|------|------|
+| `logging` | 浏览执行日志与事件流 |
+| `tracing` | 检查延迟与 timing 数据 |
+| `metrics` | 查看聚合计数与指标 |
 
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+数据持久化在 `~/.i6/context/events.sqlite`，自动保留 30 天。实现为纯本地查询：命令打开 `EventStore::default_path()` 通过类型化 Rust API 查询，不暴露任意 SQL。
+
+---
+
+## Command Reference
+
+### CLI 入口
+
+```
+iota observability <group> [subcommand] [options]
+iota obs ...          # alias
 ```
 
-Telemetry is enabled by default. Disable export with:
+简写与兼容：
+- `iota obs` = `iota observability`
+- `log` / `trace` / `metric` 均为对应主命令的别名
+- `summary` / `recent` 旧子命令软废弃，保留但不在 help 中展示
+
+### logging — 浏览执行日志与事件流
 
 ```bash
-OTEL_ENABLED=false iota run codex "ping"
+iota observability logging recent [--limit N]        # 最近 N 条执行记录
+iota observability logging errors [--limit N]        # 仅 failed 执行
+iota observability logging events <execution-id>     # 某次执行的完整事件流（seq + event_type + payload）
+iota observability logging logs [--limit N] [--event NAME] [--scan N]
+                                                     # 近期结构化 log 事件
+iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs] [--scan N]
+                                                     # 近期 tool_call/tool_result 审计
+iota observability logging approvals [--limit N]     # 近期 approval_request/decision 事件
 ```
 
-When export is disabled, iota still installs a `tracing_subscriber` fmt layer and writes logs to stderr. Local rolling file logging is enabled by default under `~/.i6/logs/` unless `IOTA_LOG_FILE=off` is set. If OTel exporter setup fails, iota falls back to stderr plus the same local file logging path and continues running.
+`logging tools --mode pairs` 的输出包含 `status`：
 
-## Running The CLI With Or Without Docker
+| status | 含义 |
+|--------|------|
+| `completed` | 同一 execution 内找到匹配的 call 和 result |
+| `missing_call` | 有 result 但未看到对应 call |
+| `missing_result` | 有 call 但未看到对应 result |
 
-The same `iota` binary and the same application config are used in both modes. Docker is only the observability backend.
+`--scan N` 控制最近 execution 的扫描窗口，默认至少扫描 500 条 execution，避免 `--tool` 过滤时因稀疏工具调用漏掉可审计记录。
 
-App/backend configuration always comes from:
+### tracing — 查看延迟与 timing 数据
 
 ```bash
-~/.i6/nimia.yaml
+iota observability tracing recent [--limit N]        # 近期执行（含 timing 字段）
+iota observability tracing slow [--limit N]          # 最慢的 N 条执行（按 total_ms DESC）
+iota observability tracing breakdown <execution-id>  # 单次执行 5 段耗时分解
+iota observability tracing summary                   # avg / p95 延迟统计
 ```
 
-Docker does not replace `nimia.yaml`, does not mount `~/.i6`, does not run ACP backends for iota, and does not change prompt routing. It only provides a place for OTel logs, traces, and metrics to be stored and queried.
+`tracing breakdown` 输出格式：
+```json
+{
+  "execution_id": "...",
+  "backend": "codex",
+  "status": "completed",
+  "phases": [
+    {"phase": "process_spawn", "ms": 120},
+    {"phase": "init",          "ms": 340},
+    {"phase": "session_new",   "ms": null},
+    {"phase": "prompt",        "ms": 1200},
+    {"phase": "total",         "ms": 1680}
+  ]
+}
+```
 
-### Without Docker
-
-Run iota normally:
+### metrics — 聚合计数与指标
 
 ```bash
-iota check
-iota run codex "ping"
-iota run --daemon codex "ping"
-iota
+iota observability metrics                           # 人类可读 JSON 聚合
+iota observability metrics --prometheus              # Prometheus exposition 格式（17 个指标）
+iota observability metrics tokens                    # token 用量详细拆解
+iota observability metrics cache                     # cache hit/miss 比率
+iota observability metrics sessions                  # active sessions / queued prompts
+iota observability metrics latency                   # 延迟均值 + p95
 ```
 
-Behavior:
+---
 
-- iota reads `~/.i6/nimia.yaml`.
-- Logs are printed to stderr.
-- Logs are also written to daily local files like `~/.i6/logs/iota.log.YYYY-MM-DD` by default.
-- If telemetry is enabled, iota attempts to export OTel logs/traces/metrics to `OTEL_EXPORTER_OTLP_ENDPOINT`, default `http://localhost:4317`.
-- If no collector is listening there, iota still runs; logs remain available locally, while traces and OTel metrics have no local durable store.
-- `iota metrics` can expose local CacheStore counters in Prometheus text format even without Docker.
-- Local SQLite stores under `~/.i6/context/` still work for memory, sessions, approvals, and CacheStore replay/dedupe.
+## Architecture Diagrams
 
-To run without OTLP export attempts:
+### Data Flow: Execution to Storage
 
-```bash
-OTEL_ENABLED=false iota run codex "ping"
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    IotaEngine::prompt_in_cwd_timed()            │
+└────────────────────┬────────────────────────────────────────────┘
+                     │
+                     ├─► request_hash = SHA256(backend || cwd || prompt)
+                     │
+                     ├─► Cache lookup: find_completed_by_request_hash()
+                     │   │
+                     │   └─► Found: record_cache_hit(), return output
+                     │
+                     ├─► Begin new execution
+                     │   │
+                     │   └─► EventStore::begin_execution_with_id()
+                     │       │
+                     │       └─► INSERT INTO executions
+                     │           (execution_id='...', status='running')
+                     │
+                     ├─► Stream ACP events
+                     │   │
+                     │   ├─► acp::read_prompt_events_for_id()
+                     │   │
+                     │   ├─► runtime_event::map_acp_events()
+                     │   │   (Output, ToolCall, TokenUsage, Error, etc.)
+                     │   │
+                     │   └─► EventStore::append_event(RuntimeEvent)
+                     │       │
+                     │       └─► INSERT INTO events
+                     │           (execution_id, seq, event_type, event_json)
+                     │
+                     ├─► Record timing
+                     │   │
+                     │   └─► EventStore::record_timing(AcpPromptTiming)
+                     │       │
+                     │       └─► UPDATE executions
+                     │           SET prompt_ms, init_ms, total_ms
+                     │
+                     └─► Finish execution
+                         │
+                         └─► EventStore::finish_execution("completed"/"failed")
+                             │
+                             └─► UPDATE executions
+                                 SET status, finished_at
 ```
 
-To disable local file logging for one command:
+### Query Path: observability command
 
-```bash
-IOTA_LOG_FILE=off iota run codex "ping"
+```
+CLI: iota observability logging/tracing/metrics
+     |
+     |-> EventStore::open(~/.i6/context/events.sqlite)
+     |
+     `-> run_observability_command(&args)
+         |
+         |-> logging: recent_executions / executions_by_status / execution_events
+         |   |-> recent and failed execution rows
+         |   |-> full event stream for one execution
+         |   `-> filtered ToolCall and Approval events from recent executions
+         |
+         |-> tracing: recent_executions / slowest_executions / get_execution / observability_summary
+         |   |-> timing rows ordered by recency or total_ms
+         |   |-> process_spawn/init/session_new/prompt/total breakdown
+         |   `-> avg and p95 latency summary
+         |
+         `-> metrics: observability_summary / prometheus_metrics
+             |-> JSON aggregate output
+             `-> Prometheus Registry + TextEncoder exposition
 ```
 
-To change file log retention:
+### Execution State Machine
 
-```bash
-IOTA_LOG_RETENTION_DAYS=14 iota run codex "ping"
-IOTA_LOG_RETENTION_DAYS=off iota run codex "ping"
+```
+                START
+                  │
+                  ▼
+         ┌─────────────────┐
+         │  begin_execution │
+         │  status='running'│
+         └────────┬────────┘
+                  │
+        ┌─────────▼─────────┐
+        │   append_event()   │  (0+ times)
+        │   RuntimeEvent  ◄──┼─ Output, TokenUsage, ToolCall, Error, etc.
+        └─────────┬─────────┘
+                  │
+        ┌─────────▼──────────┐
+        │  record_timing()    │
+        │ (latency breakdown) │
+        └─────────┬──────────┘
+                  │
+        ┌─────────▼───────────────┐
+        │  finish_execution()     │
+        │  status='completed'/'failed'
+        └─────────┬───────────────┘
+                  │
+        ┌─────────▼─────────────┐
+        │  Cache registration   │
+        │  (if successful)      │
+        │                       │
+        │ find_completed_by()   │
+        │ ──► record_cache_hit()│
+        └─────────┬─────────────┘
+                  │
+                  ▼
+               FINALIZED
+
+STALE CLEANUP (auto-executed on init):
+  Running > 1 hour ──► status='failed', finished_at=now
+                      (frees cache key lock)
 ```
 
-### With Docker
+### Event Types to Observability
 
-Start the observability services:
+```
+RuntimeEvent Enum
+├─ Output(OutputEvent)
+│  └─► Recorded in events table
+│
+├─ Log(LogEvent)
+│  └─► Structured runtime log event
+│      │
+│      ├─► Console trace renderer (`iota run --trace`)
+│      │
+│      └─► `iota observability logging logs`
+│
+├─ TokenUsage(TokenUsageEvent)  ◄───── PRIMARY OBSERVABILITY EVENT
+│  │
+│  └─► Persisted in events table
+│      │
+│      ├─► Extracted by token_usage_summary()
+│      │
+│      └─► Aggregated into:
+│          ├─ input_tokens total
+│          ├─ output_tokens total
+│          ├─ total_tokens total
+│          └─ token_usage.events count
+│
+├─ ToolCall(ToolCallEvent)
+│  └─► Recorded in events table
+│
+├─ Error(ErrorEvent)
+│  └─► Recorded in events table
+│
+└─ State(StateEvent)
+   └─► Recorded in events table
 
-```bash
-cd docker/observability
-docker compose up -d
+TIMING FLOW:
+AcpPromptTiming (from acp.rs)
+├─ process_spawn_ms (subprocess startup)
+├─ init_ms (ACP initialization)
+├─ session_new_ms (session creation)
+├─ prompt_ms (prompt processing)
+└─ total_ms (end-to-end)
+   │
+   └─► record_timing() ──► executions table
+       │
+       └─► Extracted by observability_summary() for:
+           ├─ avg_total_ms
+           ├─ avg_prompt_ms
+           ├─ p95_total_ms (percentile)
+           └─ Prometheus histogram buckets
 ```
 
-Then run the same iota commands from any working directory:
+### Database Schema Relationships
 
-```bash
-iota run codex "ping"
-iota run --daemon codex "ping"
-iota
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    executions TABLE                              │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ execution_id TEXT PRIMARY KEY                             │  │
+│  │ session_id TEXT                                           │  │
+│  │ backend TEXT                                             │  │
+│  │ request_hash TEXT  ◄──── SHA256(backend||cwd||prompt)    │  │
+│  │ status TEXT  ◄──────────── "running"/"completed"/"failed"│  │
+│  │ started_at INTEGER         (Unix timestamp)              │  │
+│  │ finished_at INTEGER        (Unix timestamp)              │  │
+│  │ fencing_token INTEGER      (monotonic counter)           │  │
+│  │ process_spawn_ms INTEGER   (timing breakdown)            │  │
+│  │ init_ms INTEGER            (timing breakdown)            │  │
+│  │ session_new_ms INTEGER     (timing breakdown)            │  │
+│  │ prompt_ms INTEGER          (timing breakdown)            │  │
+│  │ total_ms INTEGER           (end-to-end timing)           │  │
+│  └────┬─────────────────────────────────────────────────────┘  │
+│       │                                                          │
+│       │  1:M relationship                                       │
+│       │                                                          │
+│       └──────────────────┬──────────────────────────────────┐   │
+│                          │                                  │   │
+│  ┌──────────────────────▼────────────────────────────────┐ │   │
+│  │            events TABLE                              │ │   │
+│  │ ┌──────────────────────────────────────────────────┐ │ │   │
+│  │ │ execution_id TEXT (FK to executions)            │ │ │   │
+│  │ │ seq INTEGER  (per-execution sequence)           │ │ │   │
+│  │ │ event_type TEXT  (e.g. "output", "token_usage")│ │ │   │
+│  │ │ event_json TEXT  (serialized RuntimeEvent)      │ │ │   │
+│  │ │ created_at INTEGER (timestamp)                  │ │ │   │
+│  │ │ PRIMARY KEY (execution_id, seq)                │ │ │   │
+│  │ └──────────────────────────────────────────────────┘ │ │   │
+│  └─────────────────────────────────────────────────────┘ │   │
+│                                                          │   │
+│  ┌─────────────────────────────────────────────────────┐ │   │
+│  │   observability_counters TABLE                      │ │   │
+│  │ ┌───────────────────────────────────────────────┐ │ │   │
+│  │ │ name TEXT PRIMARY KEY                         │ │ │   │
+│  │ │ value INTEGER                                 │ │ │   │
+│  │ │ ("cache_hit", "cache_miss")                  │ │ │   │
+│  │ └───────────────────────────────────────────────┘ │ │   │
+│  └─────────────────────────────────────────────────────┘ │   │
+│                                                          │   │
+│  ┌─────────────────────────────────────────────────────┐ │   │
+│  │   observability_gauges TABLE                        │ │   │
+│  │ ┌───────────────────────────────────────────────┐ │ │   │
+│  │ │ name TEXT PRIMARY KEY                         │ │ │   │
+│  │ │ value INTEGER                                 │ │ │   │
+│  │ │ updated_at INTEGER                            │ │ │   │
+│  │ │ ("active_sessions", "queued_prompts")        │ │ │   │
+│  │ └───────────────────────────────────────────────┘ │ │   │
+│  └─────────────────────────────────────────────────────┘ │   │
+└──────────────────────────────────────────────────────────────┘
+
+Storage Location: ~/.i6/context/events.sqlite
+Mode: WAL (write-ahead logging)
+Synchronous: NORMAL
+Retention: 30 days (auto-purge)
 ```
 
-Behavior:
+### Prometheus Metrics Export
 
-- iota still reads `~/.i6/nimia.yaml`.
-- iota exports OTel logs/traces/metrics to `http://localhost:4317` by default.
-- The Docker stack receives those signals through the OTel Collector.
-- Logs are stored in Loki, traces in Jaeger, and metrics in Prometheus.
+```
+EventStore::prometheus_metrics()
+│
+├─► COUNTERS (increment-only)
+│   ├─ iota_execution_attempts_total
+│   ├─ iota_execution_completed_total
+│   ├─ iota_execution_failed_total
+│   ├─ iota_cache_hits_total
+│   └─ iota_cache_misses_total
+│
+├─► GAUGES (current state)
+│   ├─ iota_execution_running
+│   ├─ iota_active_sessions
+│   ├─ iota_queued_prompts
+│   ├─ iota_token_usage_events_total
+│   ├─ iota_input_tokens_total
+│   ├─ iota_output_tokens_total
+│   ├─ iota_tokens_total
+│   ├─ iota_prompt_latency_ms_avg
+│   ├─ iota_total_latency_ms_avg
+│   └─ iota_total_latency_ms_p95
+│
+└─► HISTOGRAMS (distributions)
+    ├─ iota_prompt_latency_ms
+    │  └─ Buckets: [50, 100, 250, 500, 1k, 2.5k, 5k, 10k, 30k, 60k] ms
+    │
+    └─ iota_init_latency_ms
+       └─ Buckets: [50, 100, 250, 500, 1k, 2.5k, 5k, 10k, 30k, 60k] ms
 
-Useful URLs:
+Output Format: Prometheus Text Exposition (OpenMetrics)
+```
+
+### TUI Status Display Integration
+
+```
+TUI Render Loop
+│
+├─► ConversationEntry contains ObservabilityMeta
+│   │
+│   └─► ObservabilityMeta {
+│       ├─ execution_id: Option<String>
+│       ├─ total_ms: Option<u64>
+│       ├─ prompt_ms: Option<u64>
+│       ├─ input_tokens: Option<u64>
+│       ├─ output_tokens: Option<u64>
+│       └─ total_tokens: Option<u64>
+│   }
+│
+├─► status_bar::render()
+│   │
+│   └─► observability_status(meta)
+│       │
+│       └─► Format parts:
+│           ├─ If total_ms ──► "{total_ms}ms"
+│           ├─ If total_tokens ──► "{total_tokens} tok"
+│           ├─ If execution_id ──► "exec {id[0:8]}"
+│           │
+│           └─ Output: "145ms · 520 tok · exec abc12345"
+│
+└─► Status Bar Output
+    "codex · claude-3-opus  ‖  145ms · 520 tok · exec abc12345  ‖  [↑↓]scroll [Ctrl+B]backend..."
+```
+
+---
+
+## Data Structures
+
+### ExecutionRecord (14 fields)
+
+```rust
+pub struct ExecutionRecord {
+    pub execution_id: String,
+    pub session_id: String,
+    pub backend: String,
+    pub request_hash: String,
+    pub status: String,           // "running" | "completed" | "failed"
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub fencing_token: i64,
+    pub process_spawn_ms: Option<u64>,
+    pub init_ms: Option<u64>,
+    pub session_new_ms: Option<u64>,
+    pub prompt_ms: Option<u64>,
+    pub total_ms: Option<u64>,
+}
+```
+
+### ObservabilitySummary (12 fields)
+
+```rust
+pub struct ObservabilitySummary {
+    pub total_executions: u64,
+    pub completed_executions: u64,
+    pub failed_executions: u64,
+    pub running_executions: u64,
+    pub avg_total_ms: Option<f64>,
+    pub avg_prompt_ms: Option<f64>,
+    pub p95_total_ms: Option<u64>,
+    pub token_usage: TokenUsageSummary,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub active_sessions: u64,
+    pub queued_prompts: u64,
+    pub latest: Vec<ExecutionRecord>,
+}
+```
+
+### RuntimeEvent Variants
+
+```rust
+pub enum RuntimeEvent {
+    Output(OutputEvent),
+    State(StateEvent),
+    Log(LogEvent),
+    ToolCall(ToolCallEvent),
+    ToolResult(ToolResultEvent),
+    Error(ErrorEvent),
+    Extension(ExtensionEvent),
+    TokenUsage(TokenUsageEvent),
+    Memory(MemoryEvent),
+    ApprovalRequest(ApprovalRequestEvent),
+    ApprovalDecision(ApprovalDecisionEvent),
+}
+```
+
+### LogEvent
+
+`LogEvent` 是控制台 trace、EventStore 审计和 tracing 字段的统一结构：
+
+```rust
+pub struct LogEvent {
+    pub ts: i64,
+    pub level: String,
+    pub target: String,
+    pub execution_id: Option<String>,
+    pub session_id: Option<String>,
+    pub backend: Option<String>,
+    pub route: Option<String>,
+    pub event: String,
+    pub tool_name: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub ok: Option<bool>,
+    pub latency_ms: Option<u64>,
+    pub fields: serde_json::Value,
+}
+```
+
+Memory 日志事件名保持稳定：
+
+| event | 来源 | 说明 |
+|-------|------|------|
+| `memory.recall.started` | engine | recall 查询开始 |
+| `memory.recall.completed` | engine | recall 查询完成，含各桶数量 |
+| `memory.recall.failed` | engine | recall 查询失败 |
+| `memory.inject` | engine | memory capsule 注入 payload |
+| `memory.search.call` | tool / MCP sidecar | `iota_memory_search` 调用 |
+| `memory.search.result` | tool / MCP sidecar | `iota_memory_search` 结果 |
+| `memory.write.call` | tool / engine / MCP sidecar | memory 写入请求 |
+| `memory.write.result` | tool / engine / MCP sidecar | memory 写入结果 |
+| `memory.compaction` | engine | episodic compaction 结果 |
+
+### Other Core Types
+
+- **TokenUsageSummary** — token 计数（4 字段）
+- **PrometheusMetrics** — Prometheus 导出格式（13 字段）
+- **AcpPromptTiming** — 执行时序细分（8 字段）
+
+---
+
+## SQLite Schema
+
+```sql
+CREATE TABLE executions (
+  execution_id    TEXT PRIMARY KEY,
+  session_id      TEXT NOT NULL,
+  backend         TEXT NOT NULL,
+  request_hash    TEXT NOT NULL,
+  status          TEXT NOT NULL,      -- running / completed / failed
+  started_at      INTEGER NOT NULL,
+  finished_at     INTEGER,
+  fencing_token   INTEGER NOT NULL DEFAULT 0,
+  process_spawn_ms INTEGER,
+  init_ms          INTEGER,
+  session_new_ms   INTEGER,
+  prompt_ms        INTEGER,
+  total_ms         INTEGER
+);
+
+CREATE TABLE events (
+  execution_id TEXT NOT NULL,
+  seq          INTEGER NOT NULL,
+  event_type   TEXT NOT NULL,
+  event_json   TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (execution_id, seq)
+);
+
+CREATE TABLE observability_counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE observability_gauges   (name TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+```
+
+Index: `idx_executions_running_lock` — UNIQUE (backend, request_hash) WHERE status='running'
+
+Idempotency key: `SHA256(backend || "\0" || cwd || "\0" || prompt)`
+
+---
+
+## EventStore API
+
+### Write Operations
+
+```rust
+begin_execution_with_id(backend, session_id, request_hash, execution_id?) -> String
+append_event(execution_id, event: &RuntimeEvent) -> i64
+finish_execution(execution_id, status: &str)
+record_timing(execution_id, timing: &AcpPromptTiming)
+record_cache_hit()
+record_cache_miss()
+set_active_sessions(value: u64)
+set_queued_prompts(value: u64)
+```
+
+### Query Operations
+
+```rust
+recent_executions(limit) -> Vec<ExecutionRecord>
+executions_by_status(status, limit) -> Vec<ExecutionRecord>
+execution_events(execution_id) -> Vec<(i64, String, RuntimeEvent)>
+events_since(execution_id, after_seq) -> Vec<(i64, RuntimeEvent)>
+slowest_executions(limit) -> Vec<ExecutionRecord>
+get_execution(execution_id) -> Option<ExecutionRecord>
+output_text(execution_id) -> Option<String>
+observability_summary(limit) -> ObservabilitySummary
+prometheus_metrics() -> PrometheusMetrics
+find_completed_by_request_hash(backend, request_hash) -> Option<ExecutionRecord>
+find_running_by_request_hash(backend, request_hash) -> Option<ExecutionRecord>
+```
+
+---
+
+## Write Path
 
 ```text
-Grafana:    http://localhost:3000
-Jaeger:     http://localhost:16686
-Prometheus: http://localhost:9090
-Loki API:   http://localhost:3100
+IotaEngine::prompt_in_cwd_timed_with_execution_id()
+  -> request_hash()
+  -> find_completed_by_request_hash()       # cache replay
+  -> find_running_by_request_hash()         # join in-flight equivalent work
+  -> begin_execution_with_id()              # running lock + fencing token
+  -> append_event(State started)
+  -> append_event(Output/Tool/Token/Error/Approval...)
+  -> record_timing(AcpPromptTiming)
+  -> finish_execution("completed" | "failed")
 ```
 
-### Different Ports Or Remote Observability
-
-You usually do not need a different iota config. Use environment variables only when the OTel/Loki/Jaeger endpoints differ from the defaults:
-
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:14317 iota run codex "ping"
-IOTA_LOKI_URL=http://localhost:3100 iota logs <execution_id>
-IOTA_JAEGER_URL=http://localhost:16686 iota trace <trace_id>
-IOTA_JAEGER_URL=http://localhost:16686 iota trace --execution <execution_id>
-```
-
-### End-To-End Verification
-
-The repository includes a lightweight verification script that starts the Docker stack, runs one prompt, extracts `execution_id` from `--timing`, then checks Loki, Jaeger, and Prometheus:
-
-```bash
-scripts/verify-observability.sh
-```
-
-Optional flags:
-
-```bash
-scripts/verify-observability.sh --backend codex --prompt "ping"
-scripts/verify-observability.sh --no-restart
-scripts/verify-observability.sh --down
-```
-
-Environment overrides are still supported: `IOTA_VERIFY_BACKEND`, `IOTA_VERIFY_PROMPT`, port variables, `IOTA_LOKI_URL`, `IOTA_JAEGER_URL`, and `PROMETHEUS_METRIC_QUERIES`. By default the Prometheus check tries `iota_execution_count_total` and `iota_execution_count`, because the collector/Prometheus path may normalize OTel metric names differently.
-
-Requirements: Docker, `curl`, `jq`, Cargo, a working `~/.i6/nimia.yaml`, and a reachable backend/model for the selected backend.
-
-## Where Data Is Stored
-
-### Running Without Docker
-
-If no OTLP collector is listening on `localhost:4317`, the local `iota` process still runs normally, but exported telemetry has nowhere durable to land.
-
-| Signal | Local behavior without Docker |
-|--------|-------------------------------|
-| Logs | Written to stderr by the console tracing layer and to daily files like `~/.i6/logs/iota.log.YYYY-MM-DD` by default. Also attempted as OTLP logs if telemetry is enabled. |
-| Traces | Attempted as OTLP spans to `OTEL_EXPORTER_OTLP_ENDPOINT`. No local trace database is written by iota. |
-| Metrics | Recorded with the OTel meter and attempted as OTLP metrics. `iota metrics` exposes local CacheStore counters from `~/.i6/context/events.sqlite` in Prometheus text format. |
-| Execution cache | `~/.i6/context/events.sqlite`, but this is now `CacheStore` for replay/dedupe only, not an observability event stream. |
-| Memory | `~/.i6/context/memory.sqlite` unless `context_engine.memory_db` overrides it. |
-| Sessions | `~/.i6/context/sessions.sqlite`. |
-| Approvals | `~/.i6/context/approvals.sqlite`. |
-
-`~/.i6/context/events.sqlite` keeps two cache tables: `cache_executions` and `cache_outputs`. Completed and failed cache rows older than 30 days are purged. It does not store full RuntimeEvent audit history, counters, gauges, or Prometheus samples.
-
-### Running With Docker
-
-Start the observability backend from the repository root:
-
-```bash
-cd docker/observability
-docker compose up -d
-```
-
-The stack runs:
-
-| Component | Port | Role |
-|-----------|------|------|
-| OTel Collector | `4317` gRPC, `4318` HTTP | Receives OTLP from iota and routes signals. |
-| Jaeger | `16686` | Stores and queries traces. |
-| Prometheus | `9090` | Stores metrics through remote write from the collector. |
-| Loki | `3100` | Stores logs through OTLP HTTP from the collector. |
-| Grafana | `3000` | Visualizes Jaeger, Prometheus, and Loki datasources. |
-
-With Docker running and the default endpoint unchanged:
-
-| Signal | Docker storage/query path |
-|--------|---------------------------|
-| Logs | iota -> OTLP gRPC -> Collector -> Loki. Query in Grafana Explore with the Loki datasource, or use `iota logs <execution_id>` against `IOTA_LOKI_URL` / `http://localhost:3100`. `iota logs` tries an `execution_id` label query, then a `service_name="iota"` text filter, then a service-level scan with client-side filtering. |
-| Traces | iota -> OTLP gRPC -> Collector -> Jaeger. Query in Jaeger UI, Grafana Jaeger datasource, `iota trace <trace_id>`, or `iota trace --execution <execution_id>` against `IOTA_JAEGER_URL` / `http://localhost:16686`. `trace --execution` first tries to resolve a trace id through Loki, then falls back to Jaeger tag search on `iota.execution.id`; output includes trace id, span count, and spans sorted by start time. |
-| Metrics | iota -> OTLP gRPC -> Collector -> Prometheus remote write. Query in Prometheus or Grafana. |
-
-The Docker Compose file does not mount `~/.i6`. Docker is not reading local SQLite files. It only receives telemetry over OTLP.
-
-The compose file pins images by digest instead of using `latest`, so verification runs are not silently changed by upstream image retags. Refresh the digests intentionally when upgrading the observability stack.
-
-### Migrating From The Old Stack
-
-The old SQLite/EventStore metrics stack and Promtail path are retired. If older containers still exist from a previous checkout, remove them before validating current telemetry:
-
-```bash
-docker compose -f docker/observability/docker-compose.yml down
-docker stop iota-sympantos-promtail-1 iota-sympantos-iota-metrics-exporter-1
-docker rm iota-sympantos-promtail-1 iota-sympantos-iota-metrics-exporter-1
-cd docker/observability && docker compose up -d
-```
-
-## CLI Commands
-
-The old `iota observability ...` / `iota obs ...` command group has been removed.
-
-Current observability-related commands:
-
-```bash
-iota run codex --log-events "ping"      # print normalized runtime events to stderr for this turn
-iota run codex --timing "ping"          # print route, execution_id, and ACP timing JSON to stderr
-iota logs <execution_id>                # query Loki at IOTA_LOKI_URL or http://localhost:3100
-iota trace <trace_id>                   # query Jaeger at IOTA_JAEGER_URL or http://localhost:16686
-iota trace --execution <execution_id>   # resolve through Loki or Jaeger tag search, then print traces
-iota metrics --once                     # print local CacheStore metrics in Prometheus text format
-iota metrics --listen 127.0.0.1:47662   # serve local CacheStore metrics at /metrics
-```
-
-`--log-events` is a per-run stderr diagnostic stream for normalized runtime events. It is separate from the persistent local tracing file logs under `~/.i6/logs/`.
-
-`--timing` prints route, `execution_id`, and ACP phase timing to stderr for the current run. It is not stored in SQLite by the current implementation; timing-related tracing logs and metrics are exported through OTel when telemetry is enabled.
-
-`iota metrics` is intentionally narrower than the OTel metrics pipeline: it exposes local persistent CacheStore counters such as `iota_cache_executions_total{status="completed"}` and `iota_cache_outputs_total`. Runtime histograms and token counters still belong to the OTel Collector/Prometheus path.
-
-## Environment Variables
-
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `OTEL_ENABLED` | enabled | Set to `false` or `0` to disable OTLP exporters. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP gRPC endpoint for logs, traces, and metrics. |
-| `IOTA_LOG_FILE` | `auto` | Local file logging mode: `auto`/unset writes daily files, `always` is accepted as an explicit enable, `off`/`false`/`0` disables it. |
-| `IOTA_LOG_DIR` | `~/.i6/logs` | Directory for local daily log files. `~/` is expanded at runtime. |
-| `IOTA_LOG_RETENTION_DAYS` | `30` | Deletes `iota.log.YYYY-MM-DD` files older than this many days when file logging initializes. Use `off`/`false`/`0`/`none` to disable cleanup. |
-| `IOTA_METRICS_ADDR` | `127.0.0.1:47662` | Default listen address for `iota metrics` when `--listen` is not provided. |
-| `IOTA_LOG` | `warn,iota_sympantos=info` | Preferred tracing filter. |
-| `RUST_LOG` | fallback only | Used if `IOTA_LOG` is unset. |
-| `IOTA_LOKI_URL` | `http://localhost:3100` | Base URL used by `iota logs`. |
-| `IOTA_JAEGER_URL` | `http://localhost:16686` | Base URL used by `iota trace`. |
-
-## Data Flow
+TUI 同时更新运行时 gauge：
 
 ```text
-iota process
-  -> tracing macros + OTel metrics API
-  -> telemetry::init()
-       -> tracing fmt layer to stderr
-       -> optional daily file fmt layer under ~/.i6/logs
-       -> tracing-opentelemetry span bridge
-       -> opentelemetry-appender-tracing log bridge
-       -> OTel MeterProvider
-  -> OTLP gRPC endpoint, default localhost:4317
-  -> OTel Collector
-       -> traces  -> Jaeger
-       -> metrics -> Prometheus remote write
-       -> logs    -> Loki OTLP HTTP
-  -> Grafana datasources: Jaeger, Prometheus, Loki
-
-iota metrics
-  -> CacheStore snapshot from ~/.i6/context/events.sqlite
-  -> Prometheus text format on stdout with --once, or HTTP /metrics when listening
+set_active_sessions(value)
+set_queued_prompts(value)
 ```
 
-## CacheStore Versus Observability
+---
 
-`src/store/cache.rs` preserves execution replay and join-running behavior after the old EventStore was removed.
+## Prometheus Metrics (17 total)
 
-CacheStore responsibilities:
+| Type | Metric |
+|------|--------|
+| Counter | `iota_execution_attempts_total` |
+| Counter | `iota_execution_completed_total` |
+| Counter | `iota_execution_failed_total` |
+| Counter | `iota_cache_hits_total` |
+| Counter | `iota_cache_misses_total` |
+| Gauge | `iota_execution_running` |
+| Gauge | `iota_active_sessions` |
+| Gauge | `iota_queued_prompts` |
+| Gauge | `iota_token_usage_events_total` |
+| Gauge | `iota_input_tokens_total` |
+| Gauge | `iota_output_tokens_total` |
+| Gauge | `iota_tokens_total` |
+| Gauge | `iota_prompt_latency_ms_avg` |
+| Gauge | `iota_total_latency_ms_avg` |
+| Gauge | `iota_total_latency_ms_p95` |
+| Histogram | `iota_prompt_latency_ms` (buckets: 50ms–60s) |
+| Histogram | `iota_init_latency_ms` (same buckets) |
 
-- request hash dedupe for `(backend, cwd, prompt)`
-- completed-output replay
-- running-execution lock and join-running lookup
-- stale running cleanup after one hour
-- 30 day cleanup for completed/failed cache rows
+Prometheus latency sampling 限制为最近 10,000 条。
 
-Observability responsibilities now belong to OpenTelemetry, not SQLite.
+---
 
-## Implementation Notes
+## Key Constants
 
-- Execution, memory, tool-call, approval, and ACP phase spans are emitted under the active execution context where an `execution_id` exists. Low-level ACP spans include `acp.process.spawn`, `acp.initialize`, `acp.session.new`, and `acp.prompt`.
-- `iota metrics` provides local Prometheus exposition for CacheStore counters; full runtime metrics continue through OTel Collector and Prometheus remote write.
-- `~/.i6/logs/` cleanup is controlled by `IOTA_LOG_RETENTION_DAYS` and only deletes files matching `iota.log.YYYY-MM-DD`.
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `RUNNING_EXECUTION_TTL_SECS` | 3600 | 超时 running 执行自动标记 failed |
+| `METRICS_SAMPLE_LIMIT` | 10000 | Prometheus 查询只取最近 1 万条 |
+| `RETENTION_DAYS` | 30 | 自动清理 30 天前的完成/失败记录 |
+
+---
+
+## CLI Handler — Core Components
+
+| File | Responsibility |
+|------|----------------|
+| `src/cli.rs` | Observability CLI routing and output formatting |
+| `src/event_store.rs` | SQLite schema, writes, queries, metrics aggregation |
+| `src/runtime_event.rs` | Normalized event variants |
+| `src/acp.rs` | `AcpPromptTiming` and ACP event collection |
+| `src/engine.rs` | Execution lifecycle and store write sites |
+| `src/tui/state.rs` | TUI observability state |
+| `src/tui/status_bar.rs` | TUI observability display |
+
+### Module Dependencies
+
+```
+cli.rs
+│
+├─► Uses: EventStore (observability_summary, recent_executions, prometheus_metrics)
+│   Location: event_store.rs
+│
+├─► Uses: Runtime structures (AcpPromptTiming)
+│   Location: acp.rs
+│
+└─► Produces: JSON (observability_summary, recent) or Prometheus text (metrics)
+```
+
+---
+
+## Testing
+
+```bash
+# 聚焦测试
+cargo test event_store::tests --lib
+
+# 完整验证
+cargo test
+cargo run -- observability --help
+cargo run -- observability logging --help
+cargo run -- observability tracing --help
+cargo run -- observability metrics --help
+```
+
+覆盖：执行 ID 幂等性、事件序列化顺序、timing 持久化、summary 聚合计算。
