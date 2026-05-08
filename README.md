@@ -22,6 +22,17 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 
 详见 [`doc/architecture.md`](doc/architecture.md) 和 [`doc/code-call-chains.md`](doc/code-call-chains.md)。
 
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [`doc/architecture.md`](doc/architecture.md) | 系统架构设计 |
+| [`doc/code-call-chains.md`](doc/code-call-chains.md) | 代码调用链路 |
+| [`doc/observability.md`](doc/observability.md) | Observability 系统详解 |
+| [`doc/debugging.md`](doc/debugging.md) | 调试指南 |
+| [`doc/memory-guide.md`](doc/memory-guide.md) | **记忆系统功能介绍与使用指南** |
+| [`doc/memory-quick-reference.md`](doc/memory-quick-reference.md) | 记忆系统快速参考卡 |
+
 ## 功能实验室
 
 | # | 主题 | 报告 |
@@ -69,4 +80,4 @@ iota run --daemon codex --timeout-ms 20000 "ping" # 经由 daemon（热路径）
 iota check                                        # 检查配置与后端状态
 ```
 
-`--trace-timing` 将路由与 ACP 阶段耗时以 JSON 格式输出到 stderr。
+`--timing` 将路由与 ACP 阶段耗时以 JSON 格式输出到 stderr。

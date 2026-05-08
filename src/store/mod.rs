@@ -2,7 +2,7 @@
 //!
 //! - [`memory`]   — [`MemoryStore`]: episodic/semantic/procedural memory with FTS5
 //! - [`events`]   — [`EventStore`]: execution records, runtime events, Prometheus metrics
-//! - [`approval`] — [`ApprovalStore`]: tool approval audit log and policy
+//! - [`approval`] — [`ApprovalStore`]: tool approval events and policy
 //! - [`ledger`]   — [`SessionLedger`]: sessions, backend sessions, turns, handoffs
 
 pub mod approval;

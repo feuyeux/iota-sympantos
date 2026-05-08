@@ -7,15 +7,15 @@ use crate::acp::AcpBackend;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AcpMcpEnvShape {
     #[default]
-    StringArray,
-    Object,
+    EnvVarArray,
 }
 
 impl AcpMcpEnvShape {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "string_array" | "string-array" | "array" => Some(Self::StringArray),
-            "object" | "map" => Some(Self::Object),
+            "env_var_array" | "env-var-array" | "env_array" | "env-array" | "array_object"
+            | "array-object" | "spec" | "string_array" | "string-array" | "array" | "object"
+            | "map" => Some(Self::EnvVarArray),
             _ => None,
         }
     }
@@ -51,8 +51,8 @@ pub fn session_new_params_with_options(
         .iter()
         .map(|server| render_mcp_server(server, options.mcp_env_shape))
         .collect::<Vec<_>>();
-    let requires_mcp_servers_field =
-        options.always_send_empty_mcp_servers || backend == AcpBackend::Codex;
+    let requires_mcp_servers_field = options.always_send_empty_mcp_servers
+        || matches!(backend, AcpBackend::Codex | AcpBackend::OpenCode);
     if mcp_servers.is_empty() && !requires_mcp_servers_field {
         json!({ "cwd": cwd })
     } else {
@@ -62,13 +62,12 @@ pub fn session_new_params_with_options(
 
 fn render_mcp_server(server: &AcpMcpServer, env_shape: AcpMcpEnvShape) -> Value {
     let env: Value = match env_shape {
-        AcpMcpEnvShape::StringArray => server
+        AcpMcpEnvShape::EnvVarArray => server
             .env
             .iter()
-            .map(|(key, value)| Value::String(format!("{}={}", key, value)))
+            .map(|(key, value)| json!({ "name": key, "value": value }))
             .collect::<Vec<_>>()
             .into(),
-        AcpMcpEnvShape::Object => json!(server.env),
     };
     json!({
         "name": server.name,

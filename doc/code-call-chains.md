@@ -15,7 +15,7 @@ src/main.rs
 
 ```text
 cli::run()
-  -> init_tracing()
+  -> init_logging()
   -> std::env::args().skip(1)
   -> match first arg:
        "run"                -> ACP prompt path
@@ -36,7 +36,7 @@ cli::run()
 
 - 配置只由 `config::read_config()` 读取 `~/.i6/nimia.yaml`。
 - `iota run --daemon` 不能与 `--show-native` 同用。
-- `--trace` 输出 normalized runtime events；`--trace-timing` 输出 route/ACP timing JSON。
+- `--log-events` 输出 normalized runtime events；`--timing` 输出 route/ACP timing JSON。
 
 ## 链路 1：CLI 直接运行 ACP 后端
 
@@ -48,7 +48,7 @@ iota run [backend] [options] <prompt>
        -> --backend / backend alias
        -> --cwd
        -> --show-native
-       -> --trace / --trace-timing
+       -> --log-events / --timing
        -> --timeout-ms
        -> prompt from args or stdin
   -> config::read_config()
@@ -61,7 +61,7 @@ iota run [backend] [options] <prompt>
        -> latest_session_for_cwd() or new UUID session
   -> IotaEngine::prompt_in_cwd_timed(backend, cwd, prompt)
   -> print output text
-  -> optional trace/timing to stderr
+  -> optional log events / timing to stderr
   -> IotaEngine::shutdown()
        -> AcpClient::shutdown()
 ```
@@ -220,7 +220,7 @@ iota run --daemon [backend] <prompt>
             -> wait_for_daemon()
             -> retry daemon::send_prompt()
   -> print response.text
-  -> optional trace/timing
+  -> optional log events / timing
 ```
 
 Daemon 进程链：
@@ -754,12 +754,12 @@ mcp::router::try_intercept_tool_call(method, params)
 Observability：
 
 ```text
-iota observability <logging|tracing|metrics> ...
+iota observability <logging|timing|metrics> ...
   -> cli::run_observability_command()
   -> EventStore::open(default_path)
   -> logging:
        recent / errors / events <execution-id> / tools / approvals
-  -> tracing:
+  -> timing:
        recent / slow / breakdown <execution-id> / summary
   -> metrics:
        aggregate / --prometheus / tokens / cache / sessions / latency
@@ -989,7 +989,7 @@ embed(content)
 | `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
 | `store/events.rs` | execution/events/observability | 1,3,4,12 |
 | `store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
-| `store/approval.rs` | approval audit 和风险分类 | 11 |
+| `store/approval.rs` | approval 事件和风险分类 | 11 |
 | `utils.rs` | 时间、摘要、lock recovery | 多条链路 |
 
 ## 进程间和外部调用清单

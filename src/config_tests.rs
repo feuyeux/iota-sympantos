@@ -8,6 +8,25 @@ fn mcp_servers_default_to_backend_capability() {
     };
     assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 0);
     assert_eq!(context_mcp_servers(&config, AcpBackend::Gemini).len(), 2);
+    assert_eq!(context_mcp_servers(&config, AcpBackend::OpenCode).len(), 0);
+}
+
+#[test]
+fn opencode_does_not_receive_stdio_mcp_servers() {
+    let config = NimiaConfig {
+        context_engine: Some(ContextEngineConfig::default()),
+        context_engine_backend: Some(ContextEngineBackendConfig {
+            opencode: Some(BackendContextConfig {
+                mcp_session_new: Some(serde_yaml::Value::Bool(true)),
+                always_send_empty_mcp_servers: true,
+                ..BackendContextConfig::default()
+            }),
+            ..ContextEngineBackendConfig::default()
+        }),
+        ..NimiaConfig::default()
+    };
+
+    assert_eq!(context_mcp_servers(&config, AcpBackend::OpenCode).len(), 0);
 }
 
 #[test]

@@ -5,7 +5,9 @@ use prometheus::{
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::process::Stdio;
-use tracing_subscriber::EnvFilter;
+use std::sync::OnceLock;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use crate::acp;
 use crate::config::{self, NimiaConfig};
@@ -19,8 +21,10 @@ use crate::store::events::EventStore;
 use crate::store::memory::MemoryStore;
 use crate::{native, skill, tui};
 
+static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
+
 pub async fn run() -> Result<()> {
-    init_tracing();
+    init_logging();
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if let Some(command) = args.first().map(String::as_str) {
@@ -45,10 +49,10 @@ pub async fn run() -> Result<()> {
                         .await;
                     engine.shutdown().await;
                     let output = result?;
-                    if options.trace {
-                        print_trace_events(&output.events);
+                    if options.log_events {
+                        print_log_events(&output.events);
                     }
-                    if options.trace_timing {
+                    if options.timing {
                         print_route_timing("direct", options.backend, Some(&output.timing));
                     }
                     let text = output.text;
@@ -143,7 +147,7 @@ fn print_route_timing(
     );
 }
 
-fn print_trace_events(events: &[RuntimeEvent]) {
+fn print_log_events(events: &[RuntimeEvent]) {
     for event in events {
         match event {
             RuntimeEvent::Log(log) => {
@@ -165,7 +169,7 @@ fn print_trace_events(events: &[RuntimeEvent]) {
                         result.id,
                         result.name,
                         result.ok,
-                        trace_result_value(&result.result)
+                        log_result_value(&result.result)
                     );
                 }
             }
@@ -231,7 +235,7 @@ fn memory_tool_result_log(result: &crate::runtime_event::ToolResultEvent) -> Opt
             log.ok = Some(result.ok);
             log.fields = serde_json::json!({
                 "record_count": memory_record_count(&result.result),
-                "result": trace_result_value(&result.result),
+                "result": log_result_value(&result.result),
             });
             Some(log)
         }
@@ -243,7 +247,7 @@ fn memory_tool_result_log(result: &crate::runtime_event::ToolResultEvent) -> Opt
             log.ok = Some(result.ok);
             log.fields = serde_json::json!({
                 "memory_id": memory_result_id(&result.result),
-                "result": trace_result_value(&result.result),
+                "result": log_result_value(&result.result),
             });
             Some(log)
         }
@@ -367,7 +371,7 @@ fn memory_record_count(value: &serde_json::Value) -> Option<usize> {
         })
 }
 
-fn trace_result_value(value: &serde_json::Value) -> String {
+fn log_result_value(value: &serde_json::Value) -> String {
     if let Some(content) = value.get("content").and_then(serde_json::Value::as_array) {
         let text = content
             .iter()
@@ -383,18 +387,72 @@ fn trace_result_value(value: &serde_json::Value) -> String {
 
 fn print_help() {
     println!(
-        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench-cold [rounds] [--daemon|-d]\n  iota bench-warm [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota observability <logging|tracing|metrics> [subcommand] [options]\n  iota context-mcp\n  iota fun-mcp\n  iota native-materialize --dry-run <path> <content>\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
+        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench-cold [rounds] [--daemon|-d]\n  iota bench-warm [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota observability <logging|timing|metrics> [subcommand] [options]\n  iota context-mcp\n  iota fun-mcp\n  iota native-materialize --dry-run <path> <content>\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
     );
 }
 
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("iota_sympantos=warn"))
-        .unwrap_or_else(|_| EnvFilter::new("warn"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .try_init();
+fn init_logging() {
+    let file_filter = logging_filter();
+    let stderr_filter = logging_filter();
+    let stderr_enabled =
+        std::env::var_os("RUST_LOG").is_some() || env_flag("IOTA_LOG_STDERR").unwrap_or(false);
+
+    match log_dir().and_then(|dir| {
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("Failed to create log directory {}", dir.display()))?;
+        Ok(dir)
+    }) {
+        Ok(dir) => {
+            let appender = tracing_appender::rolling::daily(dir, "iota.log");
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let file_layer = fmt::layer()
+                .with_writer(writer)
+                .with_ansi(false)
+                .with_target(true)
+                .with_filter(file_filter);
+            let stderr_layer = stderr_enabled.then(|| {
+                fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_filter(stderr_filter)
+            });
+            let _ = tracing_subscriber::registry()
+                .with(file_layer)
+                .with(stderr_layer)
+                .try_init();
+            let _ = LOG_GUARD.set(guard);
+        }
+        Err(err) => {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(stderr_filter)
+                .with_writer(std::io::stderr)
+                .try_init();
+            eprintln!("failed to initialize file logging: {err}");
+        }
+    }
+}
+
+fn logging_filter() -> EnvFilter {
+    let value = std::env::var("IOTA_LOG")
+        .or_else(|_| std::env::var("RUST_LOG"))
+        .unwrap_or_else(|_| "warn,iota_sympantos=info".to_string());
+    EnvFilter::try_new(value).unwrap_or_else(|_| EnvFilter::new("warn,iota_sympantos=info"))
+}
+
+fn log_dir() -> Result<std::path::PathBuf> {
+    if let Some(value) = std::env::var_os("IOTA_LOG_DIR").filter(|value| !value.is_empty()) {
+        return Ok(std::path::PathBuf::from(value));
+    }
+    let home = dirs::home_dir().context("Failed to get home directory")?;
+    Ok(home.join(".i6").join("logs"))
+}
+
+fn env_flag(name: &str) -> Option<bool> {
+    std::env::var(name).ok().map(|value| {
+        matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 fn run_observability_command(args: &[String]) -> Result<()> {
@@ -411,7 +469,7 @@ fn run_observability_command(args: &[String]) -> Result<()> {
     };
     match command {
         "logging" | "log" => run_obs_logging(sub_args, &store),
-        "tracing" | "trace" => run_obs_tracing(sub_args, &store),
+        "timing" => run_obs_timing(sub_args, &store),
         "metrics" | "metric" => run_obs_metrics(sub_args, &store),
         // soft-deprecated aliases kept for backwards compat
         "summary" => {
@@ -439,7 +497,7 @@ fn run_observability_command(args: &[String]) -> Result<()> {
 
 fn print_observability_help() {
     println!(
-        "Usage:\n  iota observability <command> [subcommand] [options]\n\nCommands:\n  logging   Browse execution logs and event streams\n  tracing   Inspect timing and latency data\n  metrics   View aggregated counters and gauges\n\nRun `iota observability <command> --help` for subcommand details."
+        "Usage:\n  iota observability <command> [subcommand] [options]\n\nCommands:\n  logging   Browse execution logs and event streams\n  timing    Inspect timing and latency data\n  metrics   View aggregated counters and gauges\n\nRun `iota observability <command> --help` for subcommand details."
     );
 }
 
@@ -449,7 +507,7 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("help");
     if matches!(sub, "-h" | "--help" | "help") {
         println!(
-            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging logs [--limit N] [--event NAME] [--scan N]\n                                                              Structured log events\n  iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs] [--scan N]\n                                                              Tool call/result audit events\n  iota observability logging approvals [--limit N]     approval_request/decision events"
+            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging logs [--limit N] [--event NAME] [--scan N]\n                                                              Structured log events\n  iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs] [--scan N]\n                                                              Tool call/result events\n  iota observability logging approvals [--limit N]     approval_request/decision events"
         );
         return Ok(());
     }
@@ -497,10 +555,10 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
         }
         "tools" => {
             let tool_filter = parse_tool_filter(args);
-            let mode = parse_tool_audit_mode(args)?;
+            let mode = parse_tool_event_mode(args)?;
             let scan = parse_scan(args).unwrap_or_else(|| default_scan_limit(limit));
             let executions = store.recent_executions(scan)?;
-            let entries = collect_tool_audit_entries(store, &executions, limit, tool_filter, mode)?;
+            let entries = collect_tool_event_entries(store, &executions, limit, tool_filter, mode)?;
             println!("{}", serde_json::to_string_pretty(&entries)?);
         }
         "approvals" => {
@@ -548,7 +606,7 @@ fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolAuditMode {
+enum ToolEventMode {
     Calls,
     Results,
     Pairs,
@@ -558,7 +616,7 @@ const DEFAULT_OBS_SCAN_LIMIT: usize = 500;
 
 #[derive(Serialize)]
 #[serde(tag = "event_type", rename_all = "snake_case")]
-enum ToolAuditEntry {
+enum ToolEventEntry {
     ToolCall {
         execution_id: String,
         backend: String,
@@ -591,7 +649,7 @@ enum ToolAuditEntry {
 }
 
 #[derive(Serialize)]
-struct LogAuditEntry {
+struct LogEntry {
     execution_id: String,
     backend: String,
     seq: i64,
@@ -603,7 +661,7 @@ fn collect_log_entries(
     executions: &[crate::store::events::ExecutionRecord],
     limit: usize,
     event_filter: Option<&str>,
-) -> Result<Vec<LogAuditEntry>> {
+) -> Result<Vec<LogEntry>> {
     use crate::runtime_event::RuntimeEvent;
 
     if limit == 0 {
@@ -618,7 +676,7 @@ fn collect_log_entries(
             if event_filter.is_some_and(|event| event != log.event.as_str()) {
                 continue;
             }
-            entries.push(LogAuditEntry {
+            entries.push(LogEntry {
                 execution_id: exec.execution_id.clone(),
                 backend: exec.backend.clone(),
                 seq,
@@ -632,13 +690,13 @@ fn collect_log_entries(
     Ok(entries)
 }
 
-fn collect_tool_audit_entries(
+fn collect_tool_event_entries(
     store: &EventStore,
     executions: &[crate::store::events::ExecutionRecord],
     limit: usize,
     tool_filter: Option<&str>,
-    mode: ToolAuditMode,
-) -> Result<Vec<ToolAuditEntry>> {
+    mode: ToolEventMode,
+) -> Result<Vec<ToolEventEntry>> {
     use crate::runtime_event::RuntimeEvent;
 
     if limit == 0 {
@@ -647,7 +705,7 @@ fn collect_tool_audit_entries(
     let mut entries = Vec::new();
     'outer: for exec in executions {
         let events = store.execution_events(&exec.execution_id)?;
-        if mode == ToolAuditMode::Pairs {
+        if mode == ToolEventMode::Pairs {
             let mut calls: BTreeMap<(String, String), (i64, serde_json::Value)> = BTreeMap::new();
             for (seq, _, event) in events {
                 match event {
@@ -666,7 +724,7 @@ fn collect_tool_audit_entries(
                             .remove(&key)
                             .map(|(seq, arguments)| (Some(seq), arguments))
                             .unwrap_or((None, serde_json::Value::Null));
-                        entries.push(ToolAuditEntry::ToolPair {
+                        entries.push(ToolEventEntry::ToolPair {
                             execution_id: exec.execution_id.clone(),
                             backend: exec.backend.clone(),
                             tool_name: result.name,
@@ -690,7 +748,7 @@ fn collect_tool_audit_entries(
                 }
             }
             for ((id, tool_name), (call_seq, arguments)) in calls {
-                entries.push(ToolAuditEntry::ToolPair {
+                entries.push(ToolEventEntry::ToolPair {
                     execution_id: exec.execution_id.clone(),
                     backend: exec.backend.clone(),
                     tool_name,
@@ -711,11 +769,11 @@ fn collect_tool_audit_entries(
 
         for (seq, _, event) in events {
             match event {
-                RuntimeEvent::ToolCall(call) if mode == ToolAuditMode::Calls => {
+                RuntimeEvent::ToolCall(call) if mode == ToolEventMode::Calls => {
                     if tool_filter.is_some_and(|name| name != call.name.as_str()) {
                         continue;
                     }
-                    entries.push(ToolAuditEntry::ToolCall {
+                    entries.push(ToolEventEntry::ToolCall {
                         execution_id: exec.execution_id.clone(),
                         backend: exec.backend.clone(),
                         seq,
@@ -724,11 +782,11 @@ fn collect_tool_audit_entries(
                         arguments: call.arguments,
                     });
                 }
-                RuntimeEvent::ToolResult(result) if mode == ToolAuditMode::Results => {
+                RuntimeEvent::ToolResult(result) if mode == ToolEventMode::Results => {
                     if tool_filter.is_some_and(|name| name != result.name.as_str()) {
                         continue;
                     }
-                    entries.push(ToolAuditEntry::ToolResult {
+                    entries.push(ToolEventEntry::ToolResult {
                         execution_id: exec.execution_id.clone(),
                         backend: exec.backend.clone(),
                         seq,
@@ -748,13 +806,13 @@ fn collect_tool_audit_entries(
     Ok(entries)
 }
 
-// ── tracing ───────────────────────────────────────────────────────────────────
+// ── timing ───────────────────────────────────────────────────────────────────
 
-fn run_obs_tracing(args: &[String], store: &EventStore) -> Result<()> {
+fn run_obs_timing(args: &[String], store: &EventStore) -> Result<()> {
     let sub = args.first().map(String::as_str).unwrap_or("help");
     if matches!(sub, "-h" | "--help" | "help") {
         println!(
-            "Usage:\n  iota observability tracing recent [--limit N]        Recent executions with timing fields\n  iota observability tracing slow [--limit N]          Slowest executions by total_ms\n  iota observability tracing breakdown <execution-id>  5-phase latency breakdown for one execution\n  iota observability tracing summary                   avg/p95 latency statistics"
+            "Usage:\n  iota observability timing recent [--limit N]        Recent executions with timing fields\n  iota observability timing slow [--limit N]          Slowest executions by total_ms\n  iota observability timing breakdown <execution-id>  5-phase latency breakdown for one execution\n  iota observability timing summary                   avg/p95 latency statistics"
         );
         return Ok(());
     }
@@ -774,7 +832,7 @@ fn run_obs_tracing(args: &[String], store: &EventStore) -> Result<()> {
         }
         "breakdown" => {
             let execution_id = args.get(1).ok_or_else(|| {
-                anyhow::anyhow!("Usage: iota observability tracing breakdown <execution-id>")
+                anyhow::anyhow!("Usage: iota observability timing breakdown <execution-id>")
             })?;
             let record = store
                 .get_execution(execution_id)?
@@ -833,7 +891,7 @@ fn run_obs_tracing(args: &[String], store: &EventStore) -> Result<()> {
         "summary" => {
             let s = store.observability_summary(0)?;
             #[derive(serde::Serialize)]
-            struct TracingSummary {
+            struct TimingSummary {
                 total_executions: u64,
                 completed_executions: u64,
                 failed_executions: u64,
@@ -844,7 +902,7 @@ fn run_obs_tracing(args: &[String], store: &EventStore) -> Result<()> {
             }
             println!(
                 "{}",
-                serde_json::to_string_pretty(&TracingSummary {
+                serde_json::to_string_pretty(&TimingSummary {
                     total_executions: s.total_executions,
                     completed_executions: s.completed_executions,
                     failed_executions: s.failed_executions,
@@ -856,7 +914,7 @@ fn run_obs_tracing(args: &[String], store: &EventStore) -> Result<()> {
             );
         }
         other => anyhow::bail!(
-            "Unknown tracing subcommand '{}'. Run `iota observability tracing --help`.",
+            "Unknown timing subcommand '{}'. Run `iota observability timing --help`.",
             other
         ),
     }
@@ -1156,27 +1214,27 @@ fn parse_tool_filter(args: &[String]) -> Option<&str> {
     })
 }
 
-fn parse_tool_audit_mode(args: &[String]) -> Result<ToolAuditMode> {
+fn parse_tool_event_mode(args: &[String]) -> Result<ToolEventMode> {
     if args.iter().any(|arg| arg == "--results") {
-        return Ok(ToolAuditMode::Results);
+        return Ok(ToolEventMode::Results);
     }
     if args.iter().any(|arg| arg == "--pairs") {
-        return Ok(ToolAuditMode::Pairs);
+        return Ok(ToolEventMode::Pairs);
     }
     if args.iter().any(|arg| arg == "--calls") {
-        return Ok(ToolAuditMode::Calls);
+        return Ok(ToolEventMode::Calls);
     }
     let Some(mode) = args.windows(2).find_map(|pair| {
         matches!(pair[0].as_str(), "--mode" | "--events").then_some(pair[1].as_str())
     }) else {
-        return Ok(ToolAuditMode::Calls);
+        return Ok(ToolEventMode::Calls);
     };
     match mode {
-        "calls" | "call" | "tool_call" => Ok(ToolAuditMode::Calls),
-        "results" | "result" | "tool_result" => Ok(ToolAuditMode::Results),
-        "pairs" | "pair" | "paired" => Ok(ToolAuditMode::Pairs),
+        "calls" | "call" | "tool_call" => Ok(ToolEventMode::Calls),
+        "results" | "result" | "tool_result" => Ok(ToolEventMode::Results),
+        "pairs" | "pair" | "paired" => Ok(ToolEventMode::Pairs),
         other => anyhow::bail!(
-            "invalid tools audit mode '{}'; expected calls, results, or pairs",
+            "invalid tools event mode '{}'; expected calls, results, or pairs",
             other
         ),
     }
@@ -1302,14 +1360,14 @@ async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Result<()> {
         prompt: options.prompt.clone(),
         execution_id: None,
         timeout_ms: Some(options.timeout_ms),
-        trace_timing: options.trace_timing,
+        timing: options.timing,
     };
     let daemon_addr = daemon::daemon_addr();
     let response = send_prompt_autostart_daemon(&daemon_addr, &request).await?;
-    if options.trace {
-        print_trace_events(&response.events);
+    if options.log_events {
+        print_log_events(&response.events);
     }
-    if options.trace_timing {
+    if options.timing {
         print_route_timing("daemon", options.backend, response.timing.as_ref());
     }
     if response.ok {
@@ -1590,7 +1648,7 @@ async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) -> Result<()>
                 prompt: "ping".to_string(),
                 execution_id: None,
                 timeout_ms: Some(acp::DEFAULT_TIMEOUT_MS),
-                trace_timing: false,
+                timing: false,
             };
             let started = std::time::Instant::now();
             let result = send_prompt_autostart_daemon(&daemon_addr, &request).await;
@@ -1730,26 +1788,26 @@ mod tests {
     }
 
     #[test]
-    fn parses_tool_audit_modes() {
+    fn parses_tool_event_modes() {
         assert_eq!(
-            parse_tool_audit_mode(&["tools".to_string()]).unwrap(),
-            ToolAuditMode::Calls
+            parse_tool_event_mode(&["tools".to_string()]).unwrap(),
+            ToolEventMode::Calls
         );
         assert_eq!(
-            parse_tool_audit_mode(&[
+            parse_tool_event_mode(&[
                 "tools".to_string(),
                 "--mode".to_string(),
                 "results".to_string()
             ])
             .unwrap(),
-            ToolAuditMode::Results
+            ToolEventMode::Results
         );
         assert_eq!(
-            parse_tool_audit_mode(&["tools".to_string(), "--pairs".to_string()]).unwrap(),
-            ToolAuditMode::Pairs
+            parse_tool_event_mode(&["tools".to_string(), "--pairs".to_string()]).unwrap(),
+            ToolEventMode::Pairs
         );
         assert!(
-            parse_tool_audit_mode(&[
+            parse_tool_event_mode(&[
                 "tools".to_string(),
                 "--mode".to_string(),
                 "unknown".to_string()

@@ -757,6 +757,9 @@ pub fn context_skill_roots(config: &NimiaConfig) -> Vec<PathBuf> {
 }
 
 pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<AcpMcpServer> {
+    if backend == AcpBackend::OpenCode {
+        return Vec::new();
+    }
     if !context_mcp_session_enabled(config, backend) {
         return Vec::new();
     }
@@ -791,10 +794,7 @@ pub fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) ->
             matches!(backend, AcpBackend::ClaudeCode | AcpBackend::Codex),
         );
     }
-    matches!(
-        backend,
-        AcpBackend::Gemini | AcpBackend::Hermes | AcpBackend::OpenCode
-    )
+    matches!(backend, AcpBackend::Gemini | AcpBackend::Hermes)
 }
 
 pub fn backend_context_config(
