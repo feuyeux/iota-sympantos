@@ -60,9 +60,7 @@ pub struct ComposeInput<'a> {
 impl ContextEngine {
     pub fn from_config(config: Option<&ContextEngineConfig>) -> Self {
         let enabled = config.map(|cfg| cfg.enabled).unwrap_or(true)
-            && config
-                .map(|cfg| cfg.injection.as_str() != "off")
-                .unwrap_or(true);
+            && config.map(|cfg| !cfg.injection.is_off()).unwrap_or(true);
         let budgets = config
             .and_then(|cfg| cfg.budgets.as_ref())
             .map(|budgets| ContextBudgets {
@@ -94,9 +92,9 @@ impl ContextEngine {
         capsule.push_str("<memory-tools>\n");
         capsule.push_str("You have access to the `iota_memory_write` MCP tool to persist information across sessions and backends.\n");
         capsule.push_str("Call it proactively when you learn something worth remembering — user identity, preferences, project goals, domain facts, or procedures.\n");
-        capsule.push_str("Schema: { content: string, type: \"semantic\"|\"episodic\"|\"procedural\", facet?: \"identity\"|\"preference\"|\"strategic\"|\"domain\", scope: \"user\"|\"project\"|\"session\", scope_id: string, confidence?: 0-1, ttl_days?: int }\n");
+        capsule.push_str("Schema: { content: string, type: \"semantic\"|\"episodic\"|\"procedural\", facet?: \"identity\"|\"preference\"|\"strategic\"|\"domain\", scope: \"user\"|\"project\"|\"session\", scope_id: string, merge_mode?: \"auto\"|\"add\"|\"update\"|\"none\", confidence?: 0-1, ttl_days?: int }\n");
         capsule.push_str(&format!(
-            "scope_id values: user scope → \"local-user\", project scope → \"{}\", session scope → \"{}\"\n",
+            "Default scope_id values when the user does not specify one: user scope → \"local-user\", project scope → \"{}\", session scope → \"{}\"\n",
             input.cwd.display(),
             input.session_id,
         ));
@@ -268,49 +266,5 @@ fn summarize(value: &str, limit: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn disabled_context_returns_prompt_unchanged() {
-        let engine = ContextEngine {
-            enabled: false,
-            budgets: ContextBudgets::default(),
-        };
-        let dialogue = DialogueBuffer::new(2);
-        let prompt = engine.compose_effective_prompt(ComposeInput {
-            backend: AcpBackend::Codex,
-            cwd: Path::new("."),
-            session_id: "s",
-            model: None,
-            prompt: "ping",
-            memory: None,
-            skills: None,
-            dialogue: &dialogue,
-            handoff: None,
-        });
-        assert_eq!(prompt, "ping");
-    }
-
-    #[test]
-    fn enabled_context_wraps_prompt() {
-        let engine = ContextEngine {
-            enabled: true,
-            budgets: ContextBudgets::default(),
-        };
-        let dialogue = DialogueBuffer::new(2);
-        let prompt = engine.compose_effective_prompt(ComposeInput {
-            backend: AcpBackend::Codex,
-            cwd: Path::new("."),
-            session_id: "s",
-            model: Some("m"),
-            prompt: "ping",
-            memory: None,
-            skills: None,
-            dialogue: &dialogue,
-            handoff: None,
-        });
-        assert!(prompt.contains("<iota-context>"));
-        assert!(prompt.ends_with("ping"));
-    }
-}
+#[path = "context_tests.rs"]
+mod tests;

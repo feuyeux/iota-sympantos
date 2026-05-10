@@ -321,10 +321,10 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
             break status;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
+            kill_child_tree(&mut child);
             let _ = child.wait();
-            let _ = join_output(stdout_handle, "stdout");
-            let _ = join_output(stderr_handle, "stderr");
+            drop(stdout_handle);
+            drop(stderr_handle);
             return Err(anyhow!("tool timed out after {}ms", timeout_ms));
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -339,6 +339,19 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
     } else {
         Err(anyhow!(trim_output(&text)))
     }
+}
+
+fn kill_child_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid, "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
 }
 
 fn join_output(
@@ -448,41 +461,5 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn run_command_times_out_without_waiting_for_child_completion() {
-        let started = Instant::now();
-        let err = run_command(
-            "sh",
-            &[OsString::from("-c"), OsString::from("sleep 5")],
-            None,
-            100,
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("timed out"));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn run_command_times_out_without_waiting_for_child_completion() {
-        let started = Instant::now();
-        let err = run_command(
-            "cmd",
-            &[
-                OsString::from("/C"),
-                OsString::from("ping -n 6 127.0.0.1 >NUL"),
-            ],
-            None,
-            100,
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("timed out"));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-}
+#[path = "fun_server_tests.rs"]
+mod tests;

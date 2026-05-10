@@ -7,6 +7,7 @@ use crate::acp::extract_text;
 pub enum RuntimeEvent {
     Output(OutputEvent),
     State(StateEvent),
+    Log(LogEvent),
     ToolCall(ToolCallEvent),
     ToolResult(ToolResultEvent),
     Error(ErrorEvent),
@@ -29,6 +30,56 @@ pub struct StateEvent {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEvent {
+    pub ts: i64,
+    pub level: String,
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+    pub event: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub fields: Value,
+}
+
+impl LogEvent {
+    pub fn new(
+        level: impl Into<String>,
+        target: impl Into<String>,
+        event: impl Into<String>,
+    ) -> Self {
+        Self {
+            ts: crate::utils::now_ts(),
+            level: level.into(),
+            target: target.into(),
+            execution_id: None,
+            session_id: None,
+            backend: None,
+            route: None,
+            event: event.into(),
+            tool_name: None,
+            tool_call_id: None,
+            ok: None,
+            latency_ms: None,
+            fields: Value::Object(Default::default()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +159,7 @@ impl RuntimeEvent {
         match self {
             Self::Output(_) => "output",
             Self::State(_) => "state",
+            Self::Log(_) => "log",
             Self::ToolCall(_) => "tool_call",
             Self::ToolResult(_) => "tool_result",
             Self::Error(_) => "error",
@@ -130,7 +182,7 @@ pub fn map_acp_events(method: &str, params: Option<&Value>) -> Vec<RuntimeEvent>
         return Vec::new();
     };
     match method {
-        "session/update" | "session_update" => map_session_update(params).into_iter().collect(),
+        "session/update" | "session_update" => map_session_update_events(params),
         "session/complete" | "session_complete" => {
             let mut events = vec![RuntimeEvent::State(StateEvent {
                 state: "complete".to_string(),
@@ -261,7 +313,7 @@ fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn map_session_update(params: &Value) -> Option<RuntimeEvent> {
+fn map_session_update_events(params: &Value) -> Vec<RuntimeEvent> {
     let update = params.get("update").unwrap_or(params);
     let update_type = update
         .get("sessionUpdate")
@@ -270,13 +322,15 @@ fn map_session_update(params: &Value) -> Option<RuntimeEvent> {
         .unwrap_or("unknown");
 
     match update_type {
-        "agent_message" | "agent_message_chunk" => extract_text(update).map(|text| {
-            RuntimeEvent::Output(OutputEvent {
-                text,
-                role: Some("assistant".to_string()),
+        "agent_message" | "agent_message_chunk" => {
+            extract_text(update).map_or_else(Vec::new, |text| {
+                vec![RuntimeEvent::Output(OutputEvent {
+                    text,
+                    role: Some("assistant".to_string()),
+                })]
             })
-        }),
-        "tool_call" | "tool_use" => Some(RuntimeEvent::ToolCall(ToolCallEvent {
+        }
+        "tool_call" | "tool_use" => vec![RuntimeEvent::ToolCall(ToolCallEvent {
             id: update
                 .get("id")
                 .or_else(|| update.get("toolCallId"))
@@ -294,8 +348,8 @@ fn map_session_update(params: &Value) -> Option<RuntimeEvent> {
                 .or_else(|| update.get("input"))
                 .cloned()
                 .unwrap_or(Value::Null),
-        })),
-        "tool_result" | "tool_output" => Some(RuntimeEvent::ToolResult(ToolResultEvent {
+        })],
+        "tool_result" | "tool_output" => vec![RuntimeEvent::ToolResult(ToolResultEvent {
             id: update
                 .get("id")
                 .or_else(|| update.get("toolCallId"))
@@ -317,8 +371,9 @@ fn map_session_update(params: &Value) -> Option<RuntimeEvent> {
                 .or_else(|| update.get("content"))
                 .cloned()
                 .unwrap_or(Value::Null),
-        })),
-        "error" => Some(RuntimeEvent::Error(ErrorEvent {
+        })],
+        "tool_call_update" => map_tool_call_update(update),
+        "error" => vec![RuntimeEvent::Error(ErrorEvent {
             message: update
                 .get("message")
                 .and_then(Value::as_str)
@@ -326,60 +381,133 @@ fn map_session_update(params: &Value) -> Option<RuntimeEvent> {
                 .to_string(),
             code: update.get("code").and_then(Value::as_i64),
             data: Some(update.clone()),
-        })),
-        other => Some(RuntimeEvent::State(StateEvent {
+        })],
+        other => vec![RuntimeEvent::State(StateEvent {
             state: other.to_string(),
             detail: Some(update.clone()),
-        })),
+        })],
     }
+}
+
+fn map_tool_call_update(update: &Value) -> Vec<RuntimeEvent> {
+    let mut events = vec![RuntimeEvent::State(StateEvent {
+        state: "tool_call_update".to_string(),
+        detail: Some(update.clone()),
+    })];
+    let Some(name) = tool_update_name(update) else {
+        return events;
+    };
+    let id = update
+        .get("toolCallId")
+        .or_else(|| update.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("tool-call")
+        .to_string();
+    if let Some(arguments) = tool_update_arguments(update) {
+        events.push(RuntimeEvent::ToolCall(ToolCallEvent {
+            id: id.clone(),
+            name: name.clone(),
+            arguments,
+        }));
+    }
+    if let Some(result) = tool_update_result(update) {
+        events.push(RuntimeEvent::ToolResult(ToolResultEvent {
+            id,
+            name,
+            ok: tool_update_ok(update, &result),
+            result,
+        }));
+    }
+    events
+}
+
+fn tool_update_name(update: &Value) -> Option<String> {
+    let raw = update
+        .get("name")
+        .or_else(|| update.get("toolName"))
+        .or_else(|| update.get("title"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            update
+                .get("_meta")
+                .and_then(|meta| meta.get("claudeCode"))
+                .and_then(|claude| claude.get("toolName"))
+                .and_then(Value::as_str)
+        })?;
+    Some(normalize_tool_name(raw))
+}
+
+fn normalize_tool_name(name: &str) -> String {
+    name.rsplit("__").next().unwrap_or(name).to_string()
+}
+
+fn tool_update_arguments(update: &Value) -> Option<Value> {
+    update
+        .get("rawInput")
+        .or_else(|| update.get("arguments"))
+        .or_else(|| update.get("input"))
+        .cloned()
+}
+
+fn tool_update_result(update: &Value) -> Option<Value> {
+    update
+        .get("rawOutput")
+        .and_then(parse_jsonish_string)
+        .or_else(|| update.get("result").cloned())
+        .or_else(|| {
+            tool_update_has_terminal_status(update).then(|| {
+                update
+                    .get("_meta")
+                    .and_then(|meta| meta.get("claudeCode"))
+                    .and_then(|claude| claude.get("toolResponse"))
+                    .and_then(parse_jsonish_string)
+            })?
+        })
+        .or_else(|| {
+            tool_update_has_terminal_status(update).then(|| {
+                update.get("content").and_then(|content| {
+                    if content.as_array().map(Vec::is_empty).unwrap_or(false) {
+                        None
+                    } else {
+                        Some(content.clone())
+                    }
+                })
+            })?
+        })
+}
+
+fn tool_update_has_terminal_status(update: &Value) -> bool {
+    update
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|status| {
+            status.eq_ignore_ascii_case("completed") || status.eq_ignore_ascii_case("failed")
+        })
+        .unwrap_or(false)
+}
+
+fn parse_jsonish_string(value: &Value) -> Option<Value> {
+    let text = value.as_str()?;
+    serde_json::from_str(text)
+        .ok()
+        .or_else(|| Some(Value::String(text.to_string())))
+}
+
+fn tool_update_ok(update: &Value, result: &Value) -> bool {
+    if update
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|status| status.eq_ignore_ascii_case("failed"))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    !result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn maps_agent_message_to_output() {
-        let event = map_acp_event(
-            "session/update",
-            Some(&json!({"update":{"sessionUpdate":"agent_message_chunk","content":[{"text":"hi"}]}})),
-        )
-        .unwrap();
-        assert!(matches!(event, RuntimeEvent::Output(OutputEvent { text, .. }) if text == "hi"));
-    }
-
-    #[test]
-    fn extracts_token_usage_from_session_complete_payload() {
-        let usage = token_usage_from_value(&json!({
-            "model": "test-model",
-            "usage": {
-                "prompt_tokens": 12,
-                "completion_tokens": 8
-            }
-        }))
-        .unwrap();
-        assert_eq!(usage.input_tokens, Some(12));
-        assert_eq!(usage.output_tokens, Some(8));
-        assert_eq!(usage.total_tokens, Some(20));
-        assert_eq!(usage.model.as_deref(), Some("test-model"));
-    }
-
-    #[test]
-    fn maps_session_complete_to_state() {
-        let event = map_acp_event(
-            "session/complete",
-            Some(&json!({
-                "model": "test-model",
-                "usage": {
-                    "prompt_tokens": 12,
-                    "completion_tokens": 8
-                }
-            })),
-        )
-        .unwrap();
-        assert!(
-            matches!(event, RuntimeEvent::State(StateEvent { state, .. }) if state == "complete")
-        );
-    }
-}
+#[path = "runtime_event_tests.rs"]
+mod tests;

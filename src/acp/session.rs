@@ -7,15 +7,15 @@ use crate::acp::AcpBackend;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AcpMcpEnvShape {
     #[default]
-    StringArray,
-    Object,
+    EnvVarArray,
 }
 
 impl AcpMcpEnvShape {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "string_array" | "string-array" | "array" => Some(Self::StringArray),
-            "object" | "map" => Some(Self::Object),
+            "env_var_array" | "env-var-array" | "env_array" | "env-array" | "array_object"
+            | "array-object" | "spec" | "string_array" | "string-array" | "array" | "object"
+            | "map" => Some(Self::EnvVarArray),
             _ => None,
         }
     }
@@ -49,83 +49,35 @@ pub fn session_new_params_with_options(
     let cwd = cwd.display().to_string();
     let mcp_servers = servers
         .iter()
-        .map(|server| render_mcp_server(backend, server, options.mcp_env_shape))
+        .map(|server| render_mcp_server(server, options.mcp_env_shape))
         .collect::<Vec<_>>();
-    if mcp_servers.is_empty() && !options.always_send_empty_mcp_servers {
+    let requires_mcp_servers_field = options.always_send_empty_mcp_servers
+        || matches!(backend, AcpBackend::Codex | AcpBackend::OpenCode);
+    if mcp_servers.is_empty() && !requires_mcp_servers_field {
         json!({ "cwd": cwd })
     } else {
         json!({ "cwd": cwd, "mcpServers": mcp_servers })
     }
 }
 
-fn render_mcp_server(
-    backend: AcpBackend,
-    server: &AcpMcpServer,
-    env_shape: AcpMcpEnvShape,
-) -> Value {
-    // Codex does not support mcp_session_new MCP servers in the same way.
-    // ClaudeCode, Hermes, Gemini all require env as an array of "KEY=VALUE" strings
-    // and an explicit type="stdio".
+fn render_mcp_server(server: &AcpMcpServer, env_shape: AcpMcpEnvShape) -> Value {
     let env: Value = match env_shape {
-        AcpMcpEnvShape::StringArray => server
+        AcpMcpEnvShape::EnvVarArray => server
             .env
             .iter()
-            .map(|(key, value)| Value::String(format!("{}={}", key, value)))
+            .map(|(key, value)| json!({ "name": key, "value": value }))
             .collect::<Vec<_>>()
             .into(),
-        AcpMcpEnvShape::Object => json!(server.env),
     };
-    if backend == AcpBackend::Gemini {
-        // Gemini does not want the "name" field in the top-level mcp server object.
-        json!({
-            "type": "stdio",
-            "command": server.command,
-            "args": server.args,
-            "env": env,
-        })
-    } else {
-        json!({
-            "name": server.name,
-            "type": "stdio",
-            "command": server.command,
-            "args": server.args,
-            "env": env,
-        })
-    }
+    json!({
+        "name": server.name,
+        "type": "stdio",
+        "command": server.command,
+        "args": server.args,
+        "env": env,
+    })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn server() -> AcpMcpServer {
-        let mut env = BTreeMap::new();
-        env.insert("TOKEN".to_string(), "redacted".to_string());
-        AcpMcpServer {
-            name: "iota-context".to_string(),
-            command: "iota".to_string(),
-            args: vec!["context-mcp".to_string()],
-            env,
-        }
-    }
-
-    #[test]
-    fn renders_gemini_mcp_servers_with_string_env() {
-        let params = session_new_params(AcpBackend::Gemini, &PathBuf::from("."), &[server()]);
-        let first = &params["mcpServers"][0];
-        // Gemini does not include "name" in the server object
-        assert_eq!(first["type"], "stdio");
-        assert_eq!(first["env"][0], "TOKEN=redacted");
-        assert!(first.get("name").is_none());
-    }
-
-    #[test]
-    fn renders_hermes_mcp_servers_with_string_env() {
-        let params = session_new_params(AcpBackend::Hermes, &PathBuf::from("."), &[server()]);
-        let first = &params["mcpServers"][0];
-        assert_eq!(first["name"], "iota-context");
-        assert_eq!(first["type"], "stdio");
-        assert_eq!(first["env"][0], "TOKEN=redacted");
-    }
-}
+#[path = "session_tests.rs"]
+mod tests;

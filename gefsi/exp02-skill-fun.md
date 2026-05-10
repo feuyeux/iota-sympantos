@@ -1,5 +1,7 @@
 # iota-sympantos 实验2：Skill + iota-fun 多语言执行验证
 
+Status note: this is a historical experiment report. Commands using `--trace` refer to an older CLI shape; current runtime diagnostics use `--log-events`, `--timing`, and the OTel path documented in `doc/observability.md`.
+
 **实验代号：** exp02-skill-fun  
 **日期：** 2026-05-05  
 **参考规范：** iota-guides/09-skill-fun.md v2.1  
@@ -14,6 +16,7 @@
 > 确定性能力由 Engine（Rust）按 SKILL.md 声明编排，不依赖 backend 自行推理。同一 skill 在所有后端上行为一致。
 
 验收点：
+
 1. trigger 匹配生效——包含关键词的 prompt 命中 `pet-generator` skill
 2. 7 个 iota-fun 工具（cpp/typescript/rust/zig/java/python/go）全部被调用
 3. `parallel: true` 下工具并行执行，总耗时接近单个工具耗时而非累加
@@ -27,7 +30,6 @@
 ## 二、实验环境
 
 ```
-项目路径：  /Users/han/coding/iota-sympantos
 skill 目录：skills/pet-generator/SKILL.md
 fun 目录：  skills/pet-generator/iota-fun/{cpp,typescript,rust,zig,java,python,go}
 编译缓存：  $HOME/.i6/iota-fun/
@@ -42,7 +44,7 @@ fun 目录：  skills/pet-generator/iota-fun/{cpp,typescript,rust,zig,java,pytho
 ### Step 0 — 环境准备
 
 ```bash
-cd /Users/han/coding/iota-sympantos
+cd iota-sympantos
 
 # 确认 binary 已编译
 cargo build --release 2>&1 | tail -3
@@ -72,6 +74,7 @@ iota run --backend claude-code --trace "帮我写一首诗"
 ```
 
 **检查点 1.1** — `--trace` 输出：
+
 - 1-A/1-B：出现 `[skill:pet-generator]` 匹配日志，7 个 `fun.*` 工具调用记录
 - 1-C：无 skill 匹配，走普通 backend 路径
 
@@ -98,6 +101,7 @@ time iota run --backend claude-code --trace "生成宠物"
 **检查点 2.2** — 输出模板正确填充，无 `{{action}}` 等未替换占位符。
 
 **检查点 2.3** — 首次调用记录编译时间（cpp/rust/zig 会触发编译）：
+
 ```bash
 # 确认缓存产物生成
 ls ~/.i6/iota-fun/
@@ -115,6 +119,7 @@ done
 ```
 
 **判定标准：**
+
 - Run 1（含编译）：允许较长
 - Run 2/3（缓存命中）：耗时应显著低于 7 个工具串行的理论累加时间
 - 若 7 个工具串行各耗时 ~100ms，并行总耗时应 <500ms
@@ -145,6 +150,7 @@ done
 ```
 
 **检查点 5.1** — 所有后端输出均：
+
 - 包含完整的 7 个属性（action / color / material / size / animal / lengthCm / toyShape）
 - 属性值来自合法集合（非 LLM 编造）
 - 模板结构相同（"一只正在…的、…的…"）
@@ -170,6 +176,7 @@ cp /tmp/main.py.bak skills/pet-generator/iota-fun/python/main.py
 ```
 
 **预期行为：**
+
 - `fun.python` 返回错误，`isError: true`
 - 其余 6 个工具结果正常输出
 - `{{lengthCm}}` 位置可能显示错误信息或保持占位符
@@ -296,4 +303,3 @@ Run 1: 97ms  Run 2: 106ms  Run 3: 107ms
 ### 结论
 
 Skill + iota-fun MCP 多语言执行系统**全功能验证通过**。Engine 确定性编排正常，parallel 模式下 7 工具并发 ~100ms，编译缓存生效，failurePolicy: report 降级优雅，跨后端结构一致。
-

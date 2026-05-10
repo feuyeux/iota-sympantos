@@ -2,9 +2,13 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+use crate::runtime_event::LogEvent;
 use crate::skill::SkillRegistry;
 use crate::store::ledger::SessionLedger;
-use crate::store::memory::{MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType};
+use crate::store::memory::{
+    MemoryFacet, MemoryInsert, MemoryMergeMode, MemoryScope, MemorySearchMode, MemoryStore,
+    MemoryType,
+};
 
 pub fn run_stdio() -> Result<()> {
     let stdin = io::stdin();
@@ -64,7 +68,9 @@ fn handle_request(
     workspace: &std::path::Path,
 ) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
-    match request.get("method").and_then(Value::as_str).unwrap_or("") {
+    let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+    tracing::info!(route = "mcp-sidecar", method = %method, "mcp.route.request");
+    let response = match method {
         "initialize" => ok(
             id,
             json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"iota-context","version":env!("CARGO_PKG_VERSION")}}),
@@ -79,10 +85,27 @@ fn handle_request(
                     id,
                     json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false}),
                 ),
-                Err(message) => ok(
-                    id,
-                    json!({"content":[{"type":"text","text":message}],"isError":true}),
-                ),
+                Err(message) => {
+                    if matches!(name, "iota_memory_search" | "iota_memory_write") {
+                        emit_route_log(
+                            "warn",
+                            if name == "iota_memory_search" {
+                                "memory.search.result"
+                            } else {
+                                "memory.write.result"
+                            },
+                            json!({
+                                "tool_name": name,
+                                "ok": false,
+                                "error": message.clone(),
+                            }),
+                        );
+                    }
+                    ok(
+                        id,
+                        json!({"content":[{"type":"text","text":message}],"isError":true}),
+                    )
+                }
             }
         }
         "resources/list" => ok(
@@ -109,7 +132,9 @@ fn handle_request(
             }
         }
         other => error(id, -32601, &format!("unknown method {}", other)),
-    }
+    };
+    tracing::info!(route = "mcp-sidecar", "mcp.route.response");
+    response
 }
 
 fn call_tool(
@@ -124,10 +149,57 @@ fn call_tool(
         "iota_memory_search" => {
             let query = args.get("query").and_then(Value::as_str).unwrap_or("");
             let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
+            let mode = args
+                .get("mode")
+                .and_then(Value::as_str)
+                .map(parse_memory_search_mode)
+                .transpose()?
+                .unwrap_or(MemorySearchMode::Hybrid);
+            emit_route_log(
+                "info",
+                "memory.search.call",
+                json!({
+                    "tool_name": "iota_memory_search",
+                    "query": query,
+                    "limit": limit,
+                    "mode": format!("{:?}", mode).to_lowercase(),
+                }),
+            );
+            tracing::info!(
+                tool_name = "iota_memory_search",
+                query = %query,
+                limit,
+                mode = ?mode,
+                "context MCP memory search tool call received"
+            );
             let memory = memory.ok_or_else(|| "memory store is unavailable".to_string())?;
             memory
-                .search(query, limit)
-                .map(|records| json!({"records":records}))
+                .search_with_mode(query, limit, mode)
+                .map(|records| {
+                    emit_route_log(
+                        "info",
+                        "memory.search.result",
+                        json!({
+                            "tool_name": "iota_memory_search",
+                            "query": query,
+                            "limit": limit,
+                            "mode": format!("{:?}", mode).to_lowercase(),
+                            "record_count": records.len(),
+                            "record_ids": records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(),
+                            "ok": true,
+                        }),
+                    );
+                    tracing::info!(
+                        tool_name = "iota_memory_search",
+                        query = %query,
+                        limit,
+                        mode = ?mode,
+                        record_count = records.len(),
+                        record_ids = ?records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(),
+                        "context MCP memory search tool call completed"
+                    );
+                    json!({"records":records, "mode": format!("{:?}", mode).to_lowercase()})
+                })
                 .map_err(|err| err.to_string())
         }
         "iota_memory_write" => {
@@ -136,60 +208,107 @@ fn call_tool(
                 .get("content")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "content is required".to_string())?;
-            let memory_type = parse_memory_type(
-                args.get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("episodic"),
-            )?;
+            let memory_type = parse_memory_type(required_string(args, "type")?)?;
             let facet = args
                 .get("facet")
                 .and_then(Value::as_str)
                 .map(parse_memory_facet)
                 .transpose()?;
-            let scope = parse_memory_scope(
-                args.get("scope")
-                    .and_then(Value::as_str)
-                    .unwrap_or("session"),
-            )?;
+            validate_memory_shape(memory_type.clone(), facet.clone())?;
+            let scope = parse_memory_scope(required_string(args, "scope")?)?;
             let scope_id = args
                 .get("scope_id")
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| default_memory_scope_id(&scope, args, workspace));
-            let confidence = args
-                .get("confidence")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0);
+            let confidence = required_confidence(args)?;
             let ttl_days = args.get("ttl_days").and_then(Value::as_i64).unwrap_or(7);
+            let merge_mode = args
+                .get("merge_mode")
+                .and_then(Value::as_str)
+                .map(parse_memory_merge_mode)
+                .transpose()?
+                .unwrap_or(MemoryMergeMode::Auto);
+            emit_route_log(
+                "info",
+                "memory.write.call",
+                json!({
+                    "tool_name": "iota_memory_write",
+                    "type": memory_type.as_str(),
+                    "facet": facet.as_ref().map(MemoryFacet::as_str),
+                    "scope": scope.as_str(),
+                    "scope_id": scope_id.clone(),
+                    "confidence": confidence,
+                    "content_chars": content.chars().count(),
+                    "merge_mode": format!("{:?}", merge_mode).to_lowercase(),
+                    "source_backend": args.get("source_backend").and_then(Value::as_str),
+                    "source_session_id": args.get("source_session_id").and_then(Value::as_str),
+                    "source_execution_id": args.get("source_execution_id").and_then(Value::as_str),
+                }),
+            );
+            tracing::info!(
+                tool_name = "iota_memory_write",
+                memory_type = %memory_type.as_str(),
+                facet = facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
+                scope = %scope.as_str(),
+                scope_id = %scope_id,
+                merge_mode = ?merge_mode,
+                content_chars = content.chars().count(),
+                source_backend = args.get("source_backend").and_then(|value| value.as_str()).unwrap_or("-"),
+                source_session_id = args.get("source_session_id").and_then(|value| value.as_str()).unwrap_or("-"),
+                source_execution_id = args.get("source_execution_id").and_then(|value| value.as_str()).unwrap_or("-"),
+                "context MCP memory write tool call received"
+            );
             let id = memory
-                .insert(MemoryInsert {
-                    memory_type,
-                    facet,
-                    scope,
-                    scope_id,
-                    content: content.to_string(),
-                    confidence,
-                    source_backend: args
-                        .get("source_backend")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    source_session_id: args
-                        .get("source_session_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    source_execution_id: args
-                        .get("source_execution_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    metadata_json: args.get("metadata").map(Value::to_string),
-                    ttl_days,
-                    supersedes: args
-                        .get("supersedes")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                })
+                .insert_with_merge(
+                    MemoryInsert {
+                        memory_type,
+                        facet,
+                        scope,
+                        scope_id,
+                        content: content.to_string(),
+                        confidence,
+                        source_backend: args
+                            .get("source_backend")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        source_session_id: args
+                            .get("source_session_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        source_execution_id: args
+                            .get("source_execution_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        metadata_json: args.get("metadata").map(Value::to_string),
+                        ttl_days,
+                        supersedes: args
+                            .get("supersedes")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                    },
+                    merge_mode,
+                )
                 .map_err(|err| err.to_string())?;
-            Ok(json!({"id": id}))
+            tracing::info!(
+                tool_name = "iota_memory_write",
+                memory_id = id.as_deref().unwrap_or("-"),
+                merge_mode = ?merge_mode,
+                skipped = id.is_none(),
+                "context MCP memory write tool call completed"
+            );
+            emit_route_log(
+                "info",
+                "memory.write.result",
+                json!({
+                    "tool_name": "iota_memory_write",
+                    "memory_id": id.clone(),
+                    "merge_mode": format!("{:?}", merge_mode).to_lowercase(),
+                    "skipped": id.is_none(),
+                    "ok": true,
+                }),
+            );
+            Ok(json!({"id": id, "merge_mode": format!("{:?}", merge_mode).to_lowercase()}))
         }
         "iota_skill_search" => {
             let backend = args
@@ -263,6 +382,15 @@ fn call_tool(
     }
 }
 
+fn emit_route_log(level: &str, event: &str, fields: Value) {
+    let mut log = LogEvent::new(level, "iota::context::server", event);
+    log.route = Some("mcp-sidecar".to_string());
+    log.fields = fields;
+    if let Ok(line) = serde_json::to_string(&log) {
+        eprintln!("[iota log] {}", line);
+    }
+}
+
 fn tools() -> Vec<Value> {
     vec![
         json!({
@@ -272,7 +400,8 @@ fn tools() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search keyword"},
-                    "limit": {"type": "integer", "description": "Max results (default 20)"}
+                    "limit": {"type": "integer", "description": "Max results (default 20)"},
+                    "mode": {"type": "string", "enum": ["hybrid", "vector", "keyword"], "description": "Search strategy (default hybrid)"}
                 }
             }
         }),
@@ -281,16 +410,32 @@ fn tools() -> Vec<Value> {
             "description": "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id is optional. Defaults match Engine recall: user → \"local-user\", project → current cwd path, session → source_session_id/session_id if provided.",
             "inputSchema": {
                 "type": "object",
-                "required": ["content", "type", "scope"],
+                "required": ["content", "type", "scope", "confidence"],
                 "properties": {
                     "content":    {"type": "string"},
                     "type":       {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
                     "facet":      {"type": "string", "enum": ["identity", "preference", "strategic", "domain"]},
                     "scope":      {"type": "string", "enum": ["user", "project", "session", "global"]},
                     "scope_id":   {"type": "string"},
+                    "merge_mode": {"type": "string", "enum": ["auto", "add", "update", "none"]},
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "ttl_days":   {"type": "integer"}
-                }
+                    "ttl_days":   {"type": "integer"},
+                    "metadata":   {"type": "object"},
+                    "source_backend": {"type": "string"},
+                    "source_session_id": {"type": "string"},
+                    "source_execution_id": {"type": "string"},
+                    "supersedes": {"type": "string"}
+                },
+                "allOf": [
+                    {
+                        "if": {"properties": {"type": {"const": "semantic"}}, "required": ["type"]},
+                        "then": {"required": ["facet"]}
+                    },
+                    {
+                        "if": {"properties": {"type": {"enum": ["episodic", "procedural"]}}, "required": ["type"]},
+                        "then": {"not": {"required": ["facet"]}}
+                    }
+                ]
             }
         }),
         json!({
@@ -358,6 +503,56 @@ fn parse_memory_scope(value: &str) -> std::result::Result<MemoryScope, String> {
     }
 }
 
+fn parse_memory_merge_mode(value: &str) -> std::result::Result<MemoryMergeMode, String> {
+    match value {
+        "auto" => Ok(MemoryMergeMode::Auto),
+        "add" => Ok(MemoryMergeMode::Add),
+        "update" => Ok(MemoryMergeMode::Update),
+        "none" => Ok(MemoryMergeMode::None),
+        other => Err(format!("invalid memory merge_mode {}", other)),
+    }
+}
+
+fn parse_memory_search_mode(value: &str) -> std::result::Result<MemorySearchMode, String> {
+    match value {
+        "keyword" => Ok(MemorySearchMode::Keyword),
+        "vector" => Ok(MemorySearchMode::Vector),
+        "hybrid" => Ok(MemorySearchMode::Hybrid),
+        other => Err(format!("invalid memory search mode {}", other)),
+    }
+}
+
+fn required_string<'a>(args: &'a Value, key: &str) -> std::result::Result<&'a str, String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{} is required", key))
+}
+
+fn required_confidence(args: &Value) -> std::result::Result<f64, String> {
+    let confidence = args
+        .get("confidence")
+        .and_then(value_as_f64)
+        .ok_or_else(|| "confidence is required".to_string())?;
+    if !(0.0..=1.0).contains(&confidence) {
+        return Err("confidence must be between 0 and 1".to_string());
+    }
+    Ok(confidence)
+}
+
+fn validate_memory_shape(
+    memory_type: MemoryType,
+    facet: Option<MemoryFacet>,
+) -> std::result::Result<(), String> {
+    if memory_type == MemoryType::Semantic && facet.is_none() {
+        return Err("semantic memory requires a facet".to_string());
+    }
+    if memory_type != MemoryType::Semantic && facet.is_some() {
+        return Err("only semantic memory may set facet".to_string());
+    }
+    Ok(())
+}
+
 fn default_memory_scope_id(
     scope: &MemoryScope,
     args: &Value,
@@ -374,6 +569,14 @@ fn default_memory_scope_id(
             .to_string(),
         MemoryScope::Global => "global".to_string(),
     }
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| {
+        value
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<f64>().ok())
+    })
 }
 
 fn read_resource(
@@ -422,28 +625,5 @@ fn read_resource(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn memory_scope_id_defaults_match_context_workspace() {
-        let workspace = std::path::Path::new("/tmp/iota-project");
-        assert_eq!(
-            default_memory_scope_id(&MemoryScope::User, &json!({}), workspace),
-            "local-user"
-        );
-        assert_eq!(
-            default_memory_scope_id(&MemoryScope::Project, &json!({}), workspace),
-            workspace.display().to_string()
-        );
-        assert_eq!(
-            default_memory_scope_id(
-                &MemoryScope::Session,
-                &json!({"session_id":"s1"}),
-                workspace
-            ),
-            "s1"
-        );
-    }
-}
+#[path = "server_tests.rs"]
+mod tests;

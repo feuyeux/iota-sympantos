@@ -81,23 +81,5 @@ pub fn format_acp_error(error: &AcpWireError) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_response_id_and_error() {
-        let message =
-            parse_message_line(r#"{"jsonrpc":"2.0","id":"x","result":{"ok":true}}"#, false)
-                .unwrap();
-        assert!(is_response_id(&message, "x"));
-        assert!(!is_response_id(&message, "y"));
-
-        let error = parse_message_line(
-            r#"{"jsonrpc":"2.0","id":"x","error":{"code":1,"message":"bad"}}"#,
-            false,
-        )
-        .unwrap();
-        let error = error.error.unwrap();
-        assert_eq!(format_acp_error(&error), "ACP error 1: bad");
-    }
-}
+#[path = "wire_tests.rs"]
+mod tests;

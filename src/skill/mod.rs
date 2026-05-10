@@ -14,7 +14,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
 use crate::acp::AcpBackend;
@@ -71,7 +70,7 @@ impl SkillTool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillExecution {
     #[serde(default = "default_execution_mode")]
-    pub mode: String,
+    pub mode: SkillExecutionMode,
     #[serde(default)]
     pub server: Option<String>,
     #[serde(default)]
@@ -91,6 +90,59 @@ impl Default for SkillExecution {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillExecutionMode {
+    Advisory,
+    Mcp,
+}
+
+impl SkillExecutionMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Advisory => "advisory",
+            Self::Mcp => "mcp",
+        }
+    }
+
+    pub fn is_mcp(&self) -> bool {
+        matches!(self, Self::Mcp)
+    }
+}
+
+impl Default for SkillExecutionMode {
+    fn default() -> Self {
+        Self::Advisory
+    }
+}
+
+impl Serialize for SkillExecutionMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SkillExecutionMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(match value.trim().to_ascii_lowercase().as_str() {
+            "advisory" => Self::Advisory,
+            "mcp" => Self::Mcp,
+            _ => {
+                return Err(serde::de::Error::custom(format!(
+                    "invalid skill execution mode '{}'; expected advisory or mcp",
+                    value
+                )));
+            }
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SkillOutput {
     #[serde(default)]
@@ -99,35 +151,50 @@ pub struct SkillOutput {
 
 impl SkillRegistry {
     pub fn load(workspace: &Path, configured_roots: &[PathBuf]) -> Self {
-        let mut roots = Vec::new();
-        roots.push(workspace.join("skills"));
-        roots.push(workspace.join(".iota").join("skills"));
-        roots.extend(configured_roots.iter().cloned());
-        if let Some(home) = dirs::home_dir() {
-            roots.push(home.join(".i6").join("skills"));
-        }
+        Self::load_from_roots(skill_roots(workspace, configured_roots))
+    }
+
+    pub fn load_cached(
+        workspace: &Path,
+        configured_roots: &[PathBuf],
+        cache: &mut SkillCache,
+    ) -> Self {
+        let roots = skill_roots(workspace, configured_roots);
         let signature = roots_signature(&roots);
-        let cache = skill_cache();
-        if let Ok(cache) = cache.lock() {
-            if let Some((cached_signature, registry)) = cache.as_ref() {
-                if *cached_signature == signature {
-                    return registry.clone();
-                }
-            }
+        if let Some((cached_signature, registry)) = cache.entry.as_ref()
+            && cached_signature == &signature
+        {
+            return registry.clone();
         }
 
+        let registry = Self::load_from_roots(roots);
+        cache.entry = Some((signature, registry.clone()));
+        registry
+    }
+
+    fn load_from_roots(roots: Vec<PathBuf>) -> Self {
         let mut registry = Self {
             roots,
             skills: BTreeMap::new(),
             diagnostics: Vec::new(),
         };
         registry.reload();
-        if let Ok(mut cache) = cache.lock() {
-            *cache = Some((signature, registry.clone()));
-        }
         registry
     }
+}
 
+fn skill_roots(workspace: &Path, configured_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    roots.push(workspace.join("skills"));
+    roots.push(workspace.join(".iota").join("skills"));
+    roots.extend(configured_roots.iter().cloned());
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home.join(".i6").join("skills"));
+    }
+    roots
+}
+
+impl SkillRegistry {
     pub fn reload(&mut self) {
         self.skills.clear();
         self.diagnostics.clear();
@@ -291,8 +358,8 @@ fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     Some((frontmatter, body))
 }
 
-fn default_execution_mode() -> String {
-    "advisory".to_string()
+fn default_execution_mode() -> SkillExecutionMode {
+    SkillExecutionMode::Advisory
 }
 
 fn deserialize_skill_tools<'de, D>(deserializer: D) -> Result<Vec<SkillTool>, D::Error>
@@ -323,11 +390,9 @@ where
         .collect()
 }
 
-type SkillCache = Option<(String, SkillRegistry)>;
-
-fn skill_cache() -> &'static Mutex<SkillCache> {
-    static CACHE: OnceLock<Mutex<SkillCache>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(None))
+#[derive(Debug, Clone, Default)]
+pub struct SkillCache {
+    entry: Option<(String, SkillRegistry)>,
 }
 
 fn roots_signature(roots: &[PathBuf]) -> String {
@@ -366,4 +431,28 @@ fn system_time_ms(time: SystemTime) -> Option<u128> {
     time.duration_since(SystemTime::UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_millis())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skill_execution_mode_deserializes_normalized_values() {
+        let mode: SkillExecutionMode = serde_yaml::from_str("\" McP \"").unwrap();
+        assert_eq!(mode, SkillExecutionMode::Mcp);
+        assert_eq!(serde_yaml::to_string(&mode).unwrap(), "mcp\n");
+    }
+
+    #[test]
+    fn skill_execution_mode_rejects_unknown_values() {
+        let err = serde_yaml::from_str::<SkillExecutionMode>("\"automatic\"").unwrap_err();
+        assert!(err.to_string().contains("invalid skill execution mode"));
+    }
+
+    #[test]
+    fn skill_cache_starts_empty() {
+        let cache = SkillCache::default();
+        assert!(cache.entry.is_none());
+    }
 }

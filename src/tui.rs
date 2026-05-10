@@ -39,7 +39,7 @@ use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::acp::{ALL_BACKENDS, AcpBackend, AcpPromptOutput};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
-use crate::store::events::EventStore;
+use crate::telemetry::metrics;
 use composer::{Composer, ComposerAction};
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 
@@ -103,8 +103,6 @@ struct TuiApp {
     overlay: Overlay,
     /// Currently running engine task, if a turn is active.
     turn_task: Option<JoinHandle<()>>,
-    /// Cached event store for lightweight TUI observability updates.
-    event_store: Option<EventStore>,
     /// When running_turn is true, when did it start (for elapsed display).
     turn_started_at: Option<std::time::Instant>,
     /// Queued prompt while a turn is running (Tab to queue).
@@ -158,9 +156,6 @@ impl TuiApp {
             streaming_backend: None,
             overlay: Overlay::None,
             turn_task: None,
-            event_store: EventStore::default_path()
-                .ok()
-                .and_then(|path| EventStore::open(&path).ok()),
             turn_started_at: None,
             queued_prompt: None,
             quit_confirm_tick: None,
@@ -265,7 +260,7 @@ impl TuiApp {
         if self.running_turn {
             // Tab-queue: store for after current turn finishes
             self.queued_prompt = Some(text);
-            self.record_queued_prompts();
+            self.record_queued_prompt_delta(1);
             self.history.push(ConversationEntry::SystemNotice {
                 text: "Queued (will send after current turn)".into(),
             });
@@ -284,10 +279,8 @@ impl TuiApp {
         });
     }
 
-    fn record_queued_prompts(&self) {
-        if let Some(store) = &self.event_store {
-            let _ = store.set_queued_prompts(u64::from(self.queued_prompt.is_some()));
-        }
+    fn record_queued_prompt_delta(&self, delta: i64) {
+        metrics::get().prompt_queued.add(delta, &[]);
     }
 
     // ── render ───────────────────────────────────────────────────────────────
@@ -959,7 +952,7 @@ async fn run_loop(
                 app.history.scroll_to_bottom();
                 // Fire queued prompt if any.
                 if let Some(queued) = app.queued_prompt.take() {
-                    app.record_queued_prompts();
+                    app.record_queued_prompt_delta(-1);
                     app.history.push(ConversationEntry::UserMessage { text: queued.clone() });
                     app.history.scroll_to_bottom();
                     app.running_turn = true;

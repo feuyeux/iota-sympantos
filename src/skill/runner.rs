@@ -12,7 +12,7 @@ pub struct SkillRunOutput {
 }
 
 pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<SkillRunOutput>> {
-    if skill.metadata.execution.mode != "mcp" {
+    if !skill.metadata.execution.mode.is_mcp() {
         return Ok(None);
     }
 

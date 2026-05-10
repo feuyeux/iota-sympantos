@@ -51,7 +51,7 @@ TCP JSON line protocol，两种请求类型：
 iota check --daemon
 
 # 通过 daemon 运行（自动启动）
-iota run --daemon --trace-timing codex "say hello"
+iota run --daemon --timing codex "say hello"
 
 # 自定义 daemon 地址
 export IOTA_DAEMON_ADDR='127.0.0.1:50100'
@@ -59,7 +59,7 @@ export IOTA_DAEMON_ADDR='127.0.0.1:50100'
 
 ## 3 Timing Instrumentation
 
-`--trace-timing` 输出 JSON 到 stderr：
+`--timing` 输出 JSON 到 stderr：
 
 ```json
 {"route":"daemon","daemon_hit":true,"fallback":false,"backend":"claude-code",
@@ -84,7 +84,7 @@ export IOTA_DAEMON_ADDR='127.0.0.1:50100'
 | Flag | Purpose |
 |---|---|
 | `--daemon`, `-d` | 通过 daemon 路由；daemon 不可用时静默启动 |
-| `--trace-timing` | 输出 timing JSON 到 stderr |
+| `--timing` | 输出 timing JSON 到 stderr |
 | `--show-native` | 打印原始 JSON-RPC 消息 |
 
 ## 4 Backend Processes

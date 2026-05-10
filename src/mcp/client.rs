@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::time::{Duration, timeout};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,12 +50,15 @@ impl McpSession {
             .envs(env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("Failed to start MCP server {}", command))?;
         let mut stdin = child.stdin.take().context("MCP stdin not piped")?;
         let stdout = child.stdout.take().context("MCP stdout not piped")?;
+        if let Some(stderr) = child.stderr.take() {
+            forward_mcp_stderr(command.to_string(), stderr);
+        }
         let mut lines = BufReader::new(stdout).lines();
 
         write_json(&mut stdin, json!({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iota","version":env!("CARGO_PKG_VERSION")}}})).await?;
@@ -123,12 +126,15 @@ pub async fn call_stdio_batch(
         .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("Failed to start MCP server {}", command))?;
     let mut stdin = child.stdin.take().context("MCP stdin not piped")?;
     let stdout = child.stdout.take().context("MCP stdout not piped")?;
+    if let Some(stderr) = child.stderr.take() {
+        forward_mcp_stderr(command.to_string(), stderr);
+    }
     let mut lines = BufReader::new(stdout).lines();
 
     write_json(&mut stdin, json!({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iota","version":env!("CARGO_PKG_VERSION")}}})).await?;
@@ -155,6 +161,17 @@ pub async fn call_stdio_batch(
     let _ = stdin.shutdown().await;
     let _ = child.kill().await;
     Ok(results)
+}
+
+fn forward_mcp_stderr(label: String, stderr: ChildStderr) {
+    tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if !line.trim().is_empty() {
+                eprintln!("[mcp stderr:{}] {}", label, line);
+            }
+        }
+    });
 }
 
 async fn write_json(stdin: &mut ChildStdin, value: Value) -> Result<()> {

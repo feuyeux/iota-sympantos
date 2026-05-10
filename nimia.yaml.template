@@ -1,74 +1,94 @@
 # iota-sympantos configuration template
 # Copy this to ~/.i6/nimia.yaml and customize values.
 # Backend config is read only from this file.
-# The acp section starts the ACP adapter; update declares how automation should update it.
+# The acp section starts the ACP adapter; version_mapping records adapter/bin versions.
 
 claude_code:
   enabled: true
   acp:
     command: npx
-    args: ["-y", "@agentclientprotocol/claude-agent-acp@latest"]
-  update:
-    command: npx
-    args: ["-y", "@agentclientprotocol/claude-agent-acp@latest", "--version"]
+    # https://github.com/agentclientprotocol/claude-agent-acp
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.32.0"]
+  version_mapping:
+    acp: "0.32.0"
+    bin: "2.1.123"
   model:
     provider: anthropic
     name: claude-sonnet-4
     base_url: https://api.anthropic.com
     api_key: <api-key>
+  tool_whitelist:
+    - iota_memory_write
+    - mcp__iota-context__iota_memory_write
 
 codex:
   enabled: true
   acp:
     command: npx
-    args: ["-y", "@zed-industries/codex-acp@latest"]
-  update:
-    command: npx
-    args: ["-y", "@zed-industries/codex-acp@latest", "--version"]
+    # https://github.com/zed-industries/codex-acp
+    args: ["-y", "@zed-industries/codex-acp@0.12.0"]
+  version_mapping:
+    acp: "0.12.0"
+    bin: "0.128.0"
   model:
     provider: ninerouter
     name: gh/gpt-5.5
     base_url: http://localhost:20128/v1
     api_key: <router-api-key>
+  tool_whitelist:
+    - iota_memory_write
+    - mcp__iota-context__iota_memory_write
 
 gemini:
   enabled: true
   acp:
     command: npx
-    args: ["-y", "@google/gemini-cli@latest", "--acp"]
-  update:
-    command: npx
-    args: ["-y", "@google/gemini-cli@latest", "--version"]
+    # https://github.com/google-gemini/gemini-cli
+    args: ["-y", "@google/gemini-cli@0.41.2", "--acp"]
+  version_mapping:
+    acp: "0.41.2"
+    bin: "0.41.2"
   model:
     provider: google
     name: gemini-2.5-flash
     # api_key: <gemini-api-key>
+  tool_whitelist:
+    - iota_memory_write
+    - mcp__iota-context__iota_memory_write
 
 opencode:
   enabled: true
   acp:
     command: npx
-    args: ["-y", "opencode-ai@latest", "acp"]
-  update:
-    command: npx
-    args: ["-y", "opencode-ai@latest", "--version"]
+    # https://github.com/anomalyco/opencode
+    args: ["-y", "opencode-ai@1.14.40", "acp"]
+  version_mapping:
+    acp: "1.14.40"
+    bin: "1.14.40"
   model:
     provider: opencode
     name: MiniMax-M2.7
+  tool_whitelist:
+    - iota_memory_write
+    - mcp__iota-context__iota_memory_write
 
 hermes:
   enabled: true
   acp:
     command: hermes
+    # https://github.com/nousresearch/hermes-agent
     args: ["acp"]
-  update:
-    command: hermes
-    args: ["update"]
+  version_mapping:
+    acp: "0.12.0"
+    bin: "0.12.0"
   model:
     provider: minimax-cn
     name: MiniMax-M2.7
     base_url: https://api.minimaxi.com/anthropic
     api_key: <api-key>
+  tool_whitelist:
+    - iota_memory_write
+    - iota_skill_*
 
 
 context_engine:
@@ -84,24 +104,33 @@ context_engine:
     skills_chars: 1200
     dialogue_chars: 1500
     workspace_chars: 800
+  recall_thresholds:
+    identity: 0.85
+    preference: 0.80
+    strategic: 0.80
+    domain: 0.80
+    procedural: 0.75
+    episodic: 0.70
+  episodic_compaction_keep: 40
   mcp:
     command: iota
     args: ["context-mcp"]
   fun:
     command: iota
     args: ["fun-mcp"]
+  embedding:
+    base_url: http://localhost:11434    # Ollama default
+    model: nomic-embed-text
+    # api_key: ~                        # Ollama needs no key
 
 context_engine_backend:
   gemini:
     mcp_session_new: true
-  opencode:
-    mcp_session_new: true
-    always_send_empty_mcp_servers: true
   hermes:
     mcp_session_new: true
-    mcp_env_shape: string_array
     override_home: false
   claude-code:
     mcp_session_new: try
+    always_send_empty_mcp_servers: true
   codex:
     mcp_session_new: try

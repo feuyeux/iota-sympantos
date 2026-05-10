@@ -279,11 +279,10 @@ cargo run -- fun-mcp
 
 ## Related Documentation
 
-- [09-skill-fun.md](../../../this README and SKILL.md) - Skill & iota-fun guide
-- [02-engine.md](../../../docs/iota-guides/02-engine.md) - Engine architecture
-- [src/fun_mcp.rs](../../../src/fun_mcp.rs) - Implementation
-- [skills frontmatter triggers](../../../skills frontmatter triggers) - Intent detection
-- [../iota-skill/pet-generator/SKILL.md](../SKILL.md) - Skill spec for multi-language pet generation
+- [Project architecture](../../../doc/architecture.md) - Engine, skill, and iota-fun architecture
+- [Code call chains](../../../doc/code-call-chains.md) - Runtime paths for engine-run skills and MCP tools
+- [iota-fun server implementation](../../../src/skill/fun_server.rs) - Current implementation
+- [Pet generator skill](../SKILL.md) - Skill spec for multi-language pet generation
 
 ## Contributing
 

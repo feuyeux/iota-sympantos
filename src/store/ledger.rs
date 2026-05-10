@@ -37,8 +37,7 @@ impl SessionLedger {
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        Ok(home.join(".i6").join("context").join("sessions.sqlite"))
+        Ok(crate::config::paths::StorePaths::resolve()?.sessions_db())
     }
 
     pub fn latest_session_for_cwd(&self, cwd: &Path) -> Result<Option<String>> {
@@ -152,3 +151,7 @@ impl SessionLedger {
         ).optional().context("Failed to read session summary")
     }
 }
+
+#[cfg(test)]
+#[path = "ledger_tests.rs"]
+mod tests;

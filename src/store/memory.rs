@@ -2,10 +2,13 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+use crate::config::EmbeddingConfig;
+use crate::store::embedding::{self, EmbeddingEngine};
 use crate::utils::now_ts;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -22,6 +25,15 @@ impl MemoryType {
             Self::Semantic => "semantic",
             Self::Episodic => "episodic",
             Self::Procedural => "procedural",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "semantic" => Some(Self::Semantic),
+            "episodic" => Some(Self::Episodic),
+            "procedural" => Some(Self::Procedural),
+            _ => None,
         }
     }
 }
@@ -44,6 +56,16 @@ impl MemoryFacet {
             Self::Domain => "domain",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "identity" => Some(Self::Identity),
+            "preference" => Some(Self::Preference),
+            "strategic" => Some(Self::Strategic),
+            "domain" => Some(Self::Domain),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -64,15 +86,25 @@ impl MemoryScope {
             Self::Global => "global",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "session" => Some(Self::Session),
+            "project" => Some(Self::Project),
+            "user" => Some(Self::User),
+            "global" => Some(Self::Global),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryRecord {
     pub id: String,
     #[serde(rename = "type")]
-    pub memory_type: String,
-    pub facet: Option<String>,
-    pub scope: String,
+    pub memory_type: MemoryType,
+    pub facet: Option<MemoryFacet>,
+    pub scope: MemoryScope,
     pub scope_id: String,
     pub content: String,
     pub confidence: f64,
@@ -85,6 +117,7 @@ pub struct MemoryRecord {
 pub struct MemoryStore {
     conn: Arc<Mutex<Connection>>,
     fts_available: bool,
+    embedding: EmbeddingEngine,
 }
 
 #[derive(Debug, Clone)]
@@ -113,38 +146,85 @@ pub struct RecallBuckets {
     pub episodic: Vec<MemoryRecord>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RecallThresholds {
+    pub identity: f64,
+    pub preference: f64,
+    pub strategic: f64,
+    pub domain: f64,
+    pub procedural: f64,
+    pub episodic: f64,
+}
+
+impl Default for RecallThresholds {
+    fn default() -> Self {
+        Self {
+            identity: 0.85,
+            preference: 0.80,
+            strategic: 0.80,
+            domain: 0.80,
+            procedural: 0.75,
+            episodic: 0.70,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MemoryMergeMode {
+    Auto,
+    Add,
+    Update,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MemorySearchMode {
+    Keyword,
+    Vector,
+    Hybrid,
+}
+
 impl MemoryStore {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_embedding(path, None)
+    }
+
+    pub fn open_with_embedding(path: &Path, config: Option<EmbeddingConfig>) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open memory store {}", path.display()))?;
-        let conn = Arc::new(Mutex::new(conn));
-        let store = Self {
-            conn,
-            fts_available: false,
-        };
-        let fts_available = store.init()?;
+        let fts_available = init_schema(&conn)?;
         Ok(Self {
-            conn: store.conn,
+            conn: Arc::new(Mutex::new(conn)),
             fts_available,
+            embedding: EmbeddingEngine::from_config(config),
         })
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        Ok(home.join(".i6").join("context").join("memory.sqlite"))
+        Ok(crate::config::paths::StorePaths::resolve()?.memory_db())
     }
 
     pub fn insert(&self, input: MemoryInsert) -> Result<String> {
+        self.insert_with_merge(input, MemoryMergeMode::Auto)?
+            .context("memory insert with auto-merge unexpectedly skipped")
+    }
+
+    pub fn insert_with_merge(
+        &self,
+        input: MemoryInsert,
+        merge_mode: MemoryMergeMode,
+    ) -> Result<Option<String>> {
         validate_taxonomy(&input)?;
         let now = now_ts();
         let ttl_days = input.ttl_days.max(1);
         let expires_at = now + ttl_days * 86_400;
         let content_hash = content_hash(&input.content);
-        let id = Uuid::new_v4().to_string();
         let conn = crate::utils::lock_or_recover(&self.conn);
         if let Some(existing_id) = conn
             .query_row(
@@ -159,23 +239,61 @@ impl MemoryStore {
                 |row| row.get::<_, String>(0),
             )
             .optional()? {
+            if merge_mode == MemoryMergeMode::None {
+                return Ok(None);
+            }
             conn.execute(
                 "UPDATE memory SET updated_at = ?2, expires_at = ?3, confidence = MAX(confidence, ?4) WHERE id = ?1",
                 params![existing_id, now, expires_at, input.confidence],
             )?;
-            return Ok(existing_id);
+            self.upsert_embedding(&conn, &existing_id, &input.content, now)?;
+            return Ok(Some(existing_id));
         }
-        let supersedes = input.supersedes.clone().or_else(|| {
-            latest_related_memory_id(
-                &conn,
-                input.scope.as_str(),
-                &input.scope_id,
-                input.memory_type.as_str(),
-                input.facet.as_ref().map(MemoryFacet::as_str),
-            )
-            .ok()
-            .flatten()
-        });
+
+        let related_id = latest_related_memory_id(
+            &conn,
+            input.scope.as_str(),
+            &input.scope_id,
+            input.memory_type.as_str(),
+            input.facet.as_ref().map(MemoryFacet::as_str),
+        )?;
+        if merge_mode == MemoryMergeMode::None && related_id.is_some() {
+            return Ok(None);
+        }
+
+        let should_update_related = match merge_mode {
+            MemoryMergeMode::Update => related_id.is_some(),
+            MemoryMergeMode::Auto => false,
+            _ => false,
+        };
+        if should_update_related {
+            let target_id = related_id.context("related memory id missing while updating")?;
+            conn.execute(
+                "UPDATE memory SET content = ?2, content_hash = ?3, confidence = MAX(confidence, ?4), updated_at = ?5, expires_at = ?6,
+                 source_backend = COALESCE(?7, source_backend),
+                 source_session_id = COALESCE(?8, source_session_id),
+                 source_execution_id = COALESCE(?9, source_execution_id),
+                 metadata_json = COALESCE(?10, metadata_json)
+                 WHERE id = ?1",
+                params![
+                    target_id,
+                    input.content,
+                    content_hash,
+                    input.confidence,
+                    now,
+                    expires_at,
+                    input.source_backend,
+                    input.source_session_id,
+                    input.source_execution_id,
+                    input.metadata_json,
+                ],
+            )?;
+            self.upsert_embedding(&conn, &target_id, &input.content, now)?;
+            return Ok(Some(target_id));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let supersedes = input.supersedes.clone().or(related_id);
         conn.execute(
             "INSERT INTO memory (id, type, facet, scope, scope_id, content, content_hash, confidence, source_backend, source_session_id, source_execution_id, metadata_json, ttl_days, created_at, updated_at, expires_at, supersedes, owner, visibility)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, 'local', 'private')
@@ -199,14 +317,31 @@ impl MemoryStore {
                 supersedes,
             ],
         )?;
-        Ok(id)
+        self.upsert_embedding(&conn, &id, &input.content, now)?;
+        Ok(Some(id))
     }
 
+    #[allow(dead_code)]
     pub fn recall_buckets(
         &self,
         user_id: &str,
         project_id: &str,
         session_id: &str,
+    ) -> Result<RecallBuckets> {
+        self.recall_buckets_with_thresholds(
+            user_id,
+            project_id,
+            session_id,
+            RecallThresholds::default(),
+        )
+    }
+
+    pub fn recall_buckets_with_thresholds(
+        &self,
+        user_id: &str,
+        project_id: &str,
+        session_id: &str,
+        thresholds: RecallThresholds,
     ) -> Result<RecallBuckets> {
         let user_ids = user_scope_candidates(user_id);
         let project_ids = project_scope_candidates(project_id);
@@ -215,7 +350,7 @@ impl MemoryStore {
             session_id,
             None,
             Some(MemoryType::Episodic),
-            0.70,
+            thresholds.episodic,
             20,
         )?;
         episodic.extend(self.query_many(
@@ -223,7 +358,7 @@ impl MemoryStore {
             &project_ids,
             None,
             Some(MemoryType::Episodic),
-            0.70,
+            thresholds.episodic,
             20,
         )?);
         episodic.truncate(20);
@@ -233,7 +368,7 @@ impl MemoryStore {
                 &user_ids,
                 Some(MemoryFacet::Identity),
                 Some(MemoryType::Semantic),
-                0.85,
+                thresholds.identity,
                 20,
             )?,
             preference: self.query_many(
@@ -241,7 +376,7 @@ impl MemoryStore {
                 &user_ids,
                 Some(MemoryFacet::Preference),
                 Some(MemoryType::Semantic),
-                0.80,
+                thresholds.preference,
                 30,
             )?,
             strategic: self.query_many(
@@ -249,7 +384,7 @@ impl MemoryStore {
                 &project_ids,
                 Some(MemoryFacet::Strategic),
                 Some(MemoryType::Semantic),
-                0.80,
+                thresholds.strategic,
                 30,
             )?,
             domain: self.query_many(
@@ -257,7 +392,7 @@ impl MemoryStore {
                 &project_ids,
                 Some(MemoryFacet::Domain),
                 Some(MemoryType::Semantic),
-                0.80,
+                thresholds.domain,
                 50,
             )?,
             procedural: self.query_many(
@@ -265,18 +400,55 @@ impl MemoryStore {
                 &project_ids,
                 None,
                 Some(MemoryType::Procedural),
-                0.75,
+                thresholds.procedural,
                 10,
             )?,
             episodic,
         })
     }
 
+    pub fn compact_episodic_scope(
+        &self,
+        scope: MemoryScope,
+        scope_id: &str,
+        keep_latest: usize,
+    ) -> Result<usize> {
+        let keep_latest = keep_latest.max(1) as i64;
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let deleted = conn.execute(
+            "DELETE FROM memory WHERE id IN (
+                SELECT id FROM memory
+                WHERE scope = ?1 AND scope_id = ?2 AND type = 'episodic'
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT -1 OFFSET ?3
+            )",
+            params![scope.as_str(), scope_id, keep_latest],
+        )?;
+        Ok(deleted)
+    }
+
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
+        self.search_with_mode(query, limit, MemorySearchMode::Keyword)
+    }
+
+    pub fn search_with_mode(
+        &self,
+        query: &str,
+        limit: usize,
+        mode: MemorySearchMode,
+    ) -> Result<Vec<MemoryRecord>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
         let trimmed = query.trim();
+        match mode {
+            MemorySearchMode::Keyword => self.search_keyword(trimmed, limit),
+            MemorySearchMode::Vector => self.search_vector(trimmed, limit),
+            MemorySearchMode::Hybrid => self.search_hybrid(trimmed, limit),
+        }
+    }
+
+    fn search_keyword(&self, trimmed: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
         if self.fts_available && !trimmed.is_empty() {
             match self.search_fts(trimmed, limit) {
                 Ok(records) => return Ok(records),
@@ -284,6 +456,96 @@ impl MemoryStore {
             }
         }
         self.search_like(trimmed, limit)
+    }
+
+    fn search_vector(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
+        if query.trim().is_empty() {
+            return self.search_keyword(query, limit);
+        }
+        let query_vec = self.embedding.embed(query);
+        if query_vec.is_empty() {
+            return Ok(Vec::new());
+        }
+        let query_canonical = embedding::canonicalize(query);
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.type, m.facet, m.scope, m.scope_id, m.content, m.confidence, m.created_at, m.updated_at, m.expires_at, e.vector_blob
+             FROM memory m
+             JOIN memory_embedding e ON e.memory_id = m.id
+             WHERE m.expires_at > ?1
+             ORDER BY m.updated_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![now_ts(), 800i64], |row| {
+            Ok((row_to_memory_record(row)?, row.get::<_, Vec<u8>>(10)?))
+        })?;
+
+        let mut scored = Vec::new();
+        for row in rows {
+            let (record, blob) = match row {
+                Ok(value) => value,
+                Err(err) if is_invalid_memory_taxonomy_error(&err) => {
+                    warn_invalid_memory_taxonomy(&err);
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
+            let vector = embedding::from_blob(&blob);
+            let similarity = embedding::cosine(&query_vec, &vector);
+            let overlap = token_overlap_score(&query_canonical, &record.content);
+            let score = 0.65 * similarity + 0.20 * overlap + 0.15 * record.confidence;
+            scored.push((score, record));
+        }
+        scored.sort_by(|left, right| {
+            right
+                .0
+                .partial_cmp(&left.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.1.updated_at.cmp(&left.1.updated_at))
+        });
+        Ok(scored
+            .into_iter()
+            .filter(|(score, _)| *score > 0.05)
+            .take(limit)
+            .map(|(_, record)| record)
+            .collect())
+    }
+
+    fn search_hybrid(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
+        let keyword = self.search_keyword(query, limit.saturating_mul(3).max(20))?;
+        let vector = self.search_vector(query, limit.saturating_mul(3).max(20))?;
+        let mut ranking: HashMap<String, (f64, MemoryRecord)> = HashMap::new();
+
+        for (index, record) in keyword.into_iter().enumerate() {
+            let weight = 1.0 / ((index + 1) as f64);
+            let entry = ranking
+                .entry(record.id.clone())
+                .or_insert_with(|| (0.0, record.clone()));
+            entry.0 += weight;
+            entry.1 = record;
+        }
+        for (index, record) in vector.into_iter().enumerate() {
+            let weight = 1.0 / ((index + 1) as f64) * 1.2;
+            let entry = ranking
+                .entry(record.id.clone())
+                .or_insert_with(|| (0.0, record.clone()));
+            entry.0 += weight;
+            entry.1 = record;
+        }
+
+        let mut merged = ranking.into_values().collect::<Vec<_>>();
+        merged.sort_by(|left, right| {
+            right
+                .0
+                .partial_cmp(&left.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| right.1.updated_at.cmp(&left.1.updated_at))
+        });
+        Ok(merged
+            .into_iter()
+            .take(limit)
+            .map(|(_, record)| record)
+            .collect())
     }
 
     fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
@@ -380,11 +642,34 @@ impl MemoryStore {
         Ok(records)
     }
 
-    fn init(&self) -> Result<bool> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS memory (
+    fn upsert_embedding(
+        &self,
+        conn: &Connection,
+        memory_id: &str,
+        content: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        let vector = self.embedding.embed(content);
+        if vector.is_empty() {
+            return Ok(());
+        }
+        let blob = embedding::to_blob(&vector);
+        conn.execute(
+            "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(memory_id) DO UPDATE SET
+               vector_blob = excluded.vector_blob,
+               updated_at = excluded.updated_at",
+            params![memory_id, blob, updated_at],
+        )?;
+        Ok(())
+    }
+}
+
+fn init_schema(conn: &Connection) -> Result<bool> {
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL CHECK(type IN ('semantic','episodic','procedural')),
   facet TEXT CHECK(facet IN ('identity','preference','strategic','domain')),
@@ -405,17 +690,23 @@ impl MemoryStore {
   owner TEXT NOT NULL DEFAULT 'local',
   visibility TEXT NOT NULL DEFAULT 'private'
 );
+CREATE TABLE IF NOT EXISTS memory_embedding (
+    memory_id TEXT PRIMARY KEY,
+    vector_blob BLOB NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY(memory_id) REFERENCES memory(id) ON DELETE CASCADE
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_dedup ON memory(scope, scope_id, type, facet, content_hash);
 CREATE INDEX IF NOT EXISTS idx_memory_recall_semantic ON memory(scope, scope_id, facet, confidence DESC, updated_at DESC) WHERE type = 'semantic';
 CREATE INDEX IF NOT EXISTS idx_memory_recall_procedural ON memory(scope, scope_id, confidence DESC, updated_at DESC) WHERE type = 'procedural';
 CREATE INDEX IF NOT EXISTS idx_memory_recall_episodic ON memory(scope, scope_id, created_at DESC) WHERE type = 'episodic';
+CREATE INDEX IF NOT EXISTS idx_memory_embedding_updated ON memory_embedding(updated_at DESC);
 CREATE VIEW IF NOT EXISTS memories AS SELECT * FROM memory;
 CREATE TRIGGER IF NOT EXISTS memories_delete INSTEAD OF DELETE ON memories BEGIN
   DELETE FROM memory WHERE id = old.id;
 END;",
-        )?;
-        Ok(init_fts(&conn).is_ok())
-    }
+    )?;
+    Ok(init_fts(conn).is_ok())
 }
 
 fn user_scope_candidates(user_id: &str) -> Vec<String> {
@@ -505,11 +796,16 @@ fn latest_related_memory_id(
 }
 
 fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecord> {
+    let memory_type = row.get::<_, String>(1)?;
+    let facet = row.get::<_, Option<String>>(2)?;
+    let scope = row.get::<_, String>(3)?;
     Ok(MemoryRecord {
         id: row.get(0)?,
-        memory_type: row.get(1)?,
-        facet: row.get(2)?,
-        scope: row.get(3)?,
+        memory_type: parse_memory_type_column(memory_type, 1)?,
+        facet: facet
+            .map(|value| parse_memory_facet_column(value, 2))
+            .transpose()?,
+        scope: parse_memory_scope_column(scope, 3)?,
         scope_id: row.get(4)?,
         content: row.get(5)?,
         confidence: row.get(6)?,
@@ -519,96 +815,81 @@ fn row_to_memory_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecor
     })
 }
 
+fn parse_memory_type_column(value: String, column: usize) -> rusqlite::Result<MemoryType> {
+    MemoryType::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
+}
+
+fn parse_memory_facet_column(value: String, column: usize) -> rusqlite::Result<MemoryFacet> {
+    MemoryFacet::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
+}
+
+fn parse_memory_scope_column(value: String, column: usize) -> rusqlite::Result<MemoryScope> {
+    MemoryScope::parse(&value).ok_or_else(|| invalid_memory_taxonomy_value(column, value))
+}
+
+fn invalid_memory_taxonomy_value(column: usize, value: String) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        rusqlite::types::Type::Text,
+        format!("invalid memory taxonomy value: {}", value).into(),
+    )
+}
+
+fn is_invalid_memory_taxonomy_error(err: &rusqlite::Error) -> bool {
+    matches!(
+        err,
+        rusqlite::Error::FromSqlConversionFailure(_, rusqlite::types::Type::Text, source)
+            if source
+                .to_string()
+                .starts_with("invalid memory taxonomy value:")
+    )
+}
+
+fn warn_invalid_memory_taxonomy(err: &rusqlite::Error) {
+    tracing::warn!(error = %err, "skipping memory record with unknown taxonomy value");
+}
+
 fn rows_to_records(
     rows: impl Iterator<Item = rusqlite::Result<MemoryRecord>>,
 ) -> Result<Vec<MemoryRecord>> {
     let mut records = Vec::new();
     for row in rows {
-        records.push(row?);
+        match row {
+            Ok(record) => records.push(record),
+            Err(err) if is_invalid_memory_taxonomy_error(&err) => {
+                warn_invalid_memory_taxonomy(&err);
+            }
+            Err(err) => return Err(err.into()),
+        }
     }
     Ok(records)
 }
 
+fn token_overlap_score(query_canonical: &str, content: &str) -> f64 {
+    let content_canonical = embedding::canonicalize(content);
+    let query_tokens = query_canonical
+        .split_whitespace()
+        .collect::<std::collections::HashSet<_>>();
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let content_tokens = content_canonical
+        .split_whitespace()
+        .collect::<std::collections::HashSet<_>>();
+    let overlap = query_tokens
+        .iter()
+        .filter(|token| content_tokens.contains(**token))
+        .count();
+    overlap as f64 / query_tokens.len() as f64
+}
+
 fn content_hash(content: &str) -> String {
+    let canonical = embedding::canonicalize(content);
     let mut hasher = Sha256::new();
-    hasher.update(content.trim().as_bytes());
+    hasher.update(canonical.as_bytes());
     hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deduplicates_memory_content() {
-        let store = MemoryStore::open(Path::new(":memory:")).unwrap();
-        let input = test_memory_insert(
-            MemoryType::Semantic,
-            Some(MemoryFacet::Identity),
-            MemoryScope::User,
-            "local",
-            "User prefers concise answers",
-        );
-        store.insert(input.clone()).unwrap();
-        store.insert(input).unwrap();
-        let buckets = store.recall_buckets("local", "project", "session").unwrap();
-        assert_eq!(buckets.identity.len(), 1);
-    }
-
-    #[test]
-    fn search_finds_records_and_empty_query_lists_records() {
-        let store = MemoryStore::open(Path::new(":memory:")).unwrap();
-        store
-            .insert(test_memory_insert(
-                MemoryType::Semantic,
-                Some(MemoryFacet::Domain),
-                MemoryScope::Project,
-                "project",
-                "ACP uses JSON-RPC over newline-delimited stdio",
-            ))
-            .unwrap();
-        store
-            .insert(test_memory_insert(
-                MemoryType::Procedural,
-                None,
-                MemoryScope::Project,
-                "project",
-                "Run cargo test before submitting changes",
-            ))
-            .unwrap();
-
-        let records = store.search("JSON-RPC", 10).unwrap();
-        assert!(
-            records
-                .iter()
-                .any(|record| record.content.contains("JSON-RPC"))
-        );
-
-        let all = store.search("", 10).unwrap();
-        assert_eq!(all.len(), 2);
-        assert!(store.search("cargo", 0).unwrap().is_empty());
-    }
-
-    fn test_memory_insert(
-        memory_type: MemoryType,
-        facet: Option<MemoryFacet>,
-        scope: MemoryScope,
-        scope_id: &str,
-        content: &str,
-    ) -> MemoryInsert {
-        MemoryInsert {
-            memory_type,
-            facet,
-            scope,
-            scope_id: scope_id.to_string(),
-            content: content.to_string(),
-            confidence: 1.0,
-            source_backend: None,
-            source_session_id: None,
-            source_execution_id: None,
-            metadata_json: None,
-            ttl_days: 365,
-            supersedes: None,
-        }
-    }
-}
+#[path = "memory_tests.rs"]
+mod tests;

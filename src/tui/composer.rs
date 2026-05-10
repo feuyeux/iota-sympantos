@@ -514,3 +514,7 @@ pub enum ComposerAction {
     SearchMode,
     Ignored,
 }
+
+#[cfg(test)]
+#[path = "composer_tests.rs"]
+mod tests;

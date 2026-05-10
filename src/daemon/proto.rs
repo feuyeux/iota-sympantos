@@ -19,7 +19,7 @@ pub struct DaemonPromptRequest {
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
-    pub trace_timing: bool,
+    pub timing: bool,
 }
 
 /// Response to both prompt and warm requests.

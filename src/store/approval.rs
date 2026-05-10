@@ -46,8 +46,7 @@ impl ApprovalStore {
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        Ok(home.join(".i6").join("context").join("approvals.sqlite"))
+        Ok(crate::config::paths::StorePaths::resolve()?.approvals_db())
     }
 
     pub fn open_default() -> Result<Self> {
@@ -200,45 +199,5 @@ pub fn default_decision(dimensions: &[ApprovalDimension]) -> ApprovalPolicyDecis
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use rusqlite::OptionalExtension;
-    use serde_json::json;
-
-    #[test]
-    fn records_request_with_execution_id_before_decision() {
-        let store = ApprovalStore::open(Path::new(":memory:")).unwrap();
-        let request_id = store
-            .record_request(
-                Some("exec-1"),
-                "codex",
-                "shell",
-                &json!({"command":"echo hi"}),
-            )
-            .unwrap();
-        store
-            .record_decision(&request_id, true, "test decision")
-            .unwrap();
-
-        let conn = crate::utils::lock_or_recover(&store.conn);
-        let execution_id = conn
-            .query_row(
-                "SELECT execution_id FROM approval_requests WHERE request_id = ?1",
-                params![request_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()
-            .unwrap()
-            .flatten();
-        assert_eq!(execution_id.as_deref(), Some("exec-1"));
-
-        let approved = conn
-            .query_row(
-                "SELECT approved FROM approval_decisions WHERE request_id = ?1",
-                params![request_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap();
-        assert_eq!(approved, 1);
-    }
-}
+#[path = "approval_tests.rs"]
+mod tests;

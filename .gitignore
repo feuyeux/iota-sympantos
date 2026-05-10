@@ -2,6 +2,7 @@
 .DS_Store
 .idea/
 .vscode/
+.qoder/
 __pycache__/
 *.py[cod]
 
@@ -12,3 +13,6 @@ nimia.yaml
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Generated experiment logs
+gefsi/logs/

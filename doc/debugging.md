@@ -61,14 +61,24 @@
 调试配置默认设置：
 
 ```
-RUST_LOG=debug        # 启用 tracing debug 级别日志
-RUST_BACKTRACE=1      # 启用完整 backtrace
+RUST_LOG=debug        # 启用 logging debug 级别日志，并同时输出到 stderr
+RUST_BACKTRACE=1      # 启用完整调用栈
 ```
+
+当前实现不写 `~/.i6/logs/` 文件日志，也不通过 SQLite 保存工程日志。日志默认输出到 stderr，并在 `OTEL_ENABLED` 未关闭时通过 OTLP 发往 `OTEL_EXPORTER_OTLP_ENDPOINT`，默认 `http://localhost:4317`。
+
+可用 `IOTA_LOG` 覆盖 tracing 过滤规则；未设置 `IOTA_LOG` 时会读取 `RUST_LOG`。默认过滤规则是 `warn,iota_sympantos=info`。
 
 如需过滤特定模块日志，修改 `RUST_LOG`：
 
 ```
-RUST_LOG=iota_sympantos::acp=trace,iota_sympantos::engine=debug
+RUST_LOG=iota_sympantos::acp=debug,iota_sympantos::engine=debug
+```
+
+只调整 iota 模块日志时，可使用：
+
+```
+IOTA_LOG=iota_sympantos::acp=debug,iota_sympantos::engine=debug
 ```
 
 ## TUI 调试注意事项

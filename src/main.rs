@@ -9,6 +9,7 @@ mod native;
 mod runtime_event;
 mod skill;
 mod store;
+mod telemetry;
 mod tui;
 mod utils;
 

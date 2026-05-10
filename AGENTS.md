@@ -41,10 +41,17 @@ iota-sympantos/
 │   ├── runtime_event.rs     # 统一事件类型（Output/ToolCall/Approval 等）
 │   ├── store/
 │   │   ├── mod.rs           # Store layer 入口
-│   │   ├── events.rs        # EventStore SQLite 事件持久化
+│   │   ├── cache.rs         # CacheStore execution replay/dedupe
+│   │   ├── embedding.rs     # Ollama API / 本地 trigram embedding
 │   │   ├── memory.rs        # MemoryStore（6 桶分类体系）
 │   │   ├── approval.rs      # ApprovalStore + policy
 │   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
+│   ├── telemetry/
+│   │   ├── mod.rs           # OpenTelemetry provider/exporter 初始化
+│   │   ├── console.rs       # stderr tracing layer
+│   │   ├── logs.rs          # LogEvent attribute helpers
+│   │   ├── metrics.rs       # OTel metrics instruments
+│   │   └── spans.rs         # OTel span helpers
 │   ├── context/
 │   │   ├── mod.rs           # ContextEngine + capsule 组装 + budget
 │   │   └── server.rs        # iota-context MCP sidecar（stdio）
@@ -63,8 +70,9 @@ iota-sympantos/
 ├── doc/
 │   ├── architecture.md      # 分层架构和模块职责
 │   ├── code-call-chains.md  # 入口、IPC 和调用链
-│   ├── observability.md     # 观测性命令、存储和指标文档
-│   └── acp-runtime.md       # ACP 进程模型和 benchmark
+│   └── observability.md     # OTel、Docker observability 和本地存储边界
+├── gefsi/
+│   └── exp03-acp-runtime.md # ACP 进程模型和 benchmark 验证报告
 ├── Cargo.toml
 └── ~/.i6/nimia.yaml         # 唯一配置来源
 ```
@@ -80,6 +88,7 @@ initialize → session/new → session/prompt → 流式 session/update → sess
 ```
 
 执行路径：
+
 - **直接路径**：`IotaEngine::prompt_in_cwd`，按需启动并复用 ACP 客户端
 - **Daemon 路径**：通过 `IotaEngine` 经内部 daemon（`--daemon` / `-d`）路由
 
@@ -112,6 +121,7 @@ model:
 ```
 
 运行时通过 `backend_process_env_with_context()` 将 model 配置映射为各后端所需的环境变量：
+
 - `claude-code`：api_key → `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN`；base_url → `ANTHROPIC_BASE_URL`；name → `ANTHROPIC_MODEL`
 - `codex`：api_key → `OPENAI_API_KEY` + `ROUTER_API_KEY`；base_url → `OPENAI_BASE_URL`；name → `OPENAI_MODEL`
 - `gemini`：api_key → `GEMINI_API_KEY`；name → `GEMINI_MODEL`
@@ -123,6 +133,7 @@ model:
 Hermes 使用自己的默认 `HERMES_HOME`（Windows 上 `~/AppData/Local/hermes`，Unix 上 `~/.hermes`）。**不要覆盖 `HERMES_HOME`**。
 
 nimia.yaml 中的 hermes 配置映射为 Hermes 通过 `os.getenv()` 读取的 provider 原生环境变量：
+
 - `provider` → `HERMES_INFERENCE_PROVIDER`
 - `name` → `HERMES_MODEL`
 - api_key + base_url → `render_hermes_provider_env()` 解析的 provider 相关变量
@@ -138,6 +149,8 @@ iota run <backend> ...   # 单次执行
 iota run --daemon ...    # 经 daemon 路由，自动静默启动
 iota bench-cold [轮次] [--daemon]
 iota bench-warm [轮次] [--daemon]
+iota logs <execution-id> # 查询 Loki
+iota trace <trace-id>    # 查询 Jaeger
 iota context-mcp         # 启动 iota-context MCP sidecar（stdio）
 iota fun-mcp            # 启动 iota-fun 7 语言 MCP server（stdio）
 iota native-materialize  # 将 memory/skill 投影到原生文件
@@ -196,8 +209,8 @@ iota __daemon           # 内部 daemon 入口
 | Phase | 内容 | 文件 | 状态 |
 |-------|------|------|-------|
 | 1 | RuntimeEvent 归一化 | `runtime_event.rs` | ✅ |
-| 1 | EventStore SQLite 持久化 | `store/events.rs` | ✅ |
-| 1 | Execution idempotency + lock + fencing | `store/events.rs` | ✅ |
+| 1 | CacheStore SQLite replay/dedupe | `store/cache.rs` | ✅ |
+| 1 | Execution idempotency + lock + fencing | `store/cache.rs` | ✅ |
 | 2 | Context Capsule + budget | `context/mod.rs` | ✅ |
 | 3 | MemoryStore（6 桶分类） | `store/memory.rs` | ✅ |
 | 3 | 6 桶 Recall 查询 | `store/memory.rs` | ✅ |
@@ -214,6 +227,7 @@ iota __daemon           # 内部 daemon 入口
 | 7 | SessionLedger + handoff | `store/ledger.rs` | ✅ |
 | 8 | Native materializer | `native/mod.rs` | ✅ |
 | 9 | Config 扩展（context_engine） | `config.rs` | ✅ |
+| 10 | OTel telemetry stack | `telemetry/*`, `docker/observability/*` | ✅ |
 
 **所有 Phase 均已实现。**
 

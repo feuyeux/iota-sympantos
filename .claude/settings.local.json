@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__iota-context__iota_memory_write",
+      "mcp__iota-context__iota_memory_search",
+      "Bash(curl -s \"wttr.in/Beijing?format=%l:+%c+%t+%h+%w&lang=zh\")"
+    ]
+  }
+}
