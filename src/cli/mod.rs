@@ -154,13 +154,22 @@ async fn run_logs_command(args: &[String]) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Usage: iota logs <execution_id>"))?;
     let loki_url =
         std::env::var("IOTA_LOKI_URL").unwrap_or_else(|_| "http://localhost:3100".to_string());
-    let query = format!(r#"{{iota_execution_id="{}"}}"#, execution_id);
-    let url = format!(
-        "{}/loki/api/v1/query_range?query={}&limit=1000",
-        loki_url,
-        urlencoding::encode(&query)
-    );
     let client = reqwest::Client::new();
+    let body = query_loki_logs(&client, &loki_url, r#"{service_name="iota"}"#).await?;
+    print_loki_lines(&body, execution_id);
+    Ok(())
+}
+
+async fn query_loki_logs(
+    client: &reqwest::Client,
+    loki_url: &str,
+    query: &str,
+) -> Result<serde_json::Value> {
+    let url = format!(
+        "{}/loki/api/v1/query_range?query={}&limit=1000&since=1h",
+        loki_url,
+        urlencoding::encode(query)
+    );
     let resp = client
         .get(&url)
         .send()
@@ -169,25 +178,42 @@ async fn run_logs_command(args: &[String]) -> Result<()> {
     if !resp.status().is_success() {
         bail!("Loki query failed with status {}", resp.status());
     }
-    let body: serde_json::Value = resp.json().await?;
+    Ok(resp.json().await?)
+}
+
+fn print_loki_lines(body: &serde_json::Value, execution_id: &str) {
+    let mut printed = false;
     if let Some(results) = body["data"]["result"].as_array() {
+        if results.is_empty() {
+            println!("No logs found for execution {}", execution_id);
+            return;
+        }
         for stream in results {
+            let stream_matches = stream["stream"]
+                .get("execution_id")
+                .and_then(serde_json::Value::as_str)
+                == Some(execution_id);
             if let Some(values) = stream["values"].as_array() {
                 for entry in values {
                     if let Some(arr) = entry.as_array() {
                         if arr.len() >= 2 {
                             if let Some(line) = arr[1].as_str() {
-                                println!("{}", line);
+                                if stream_matches || line.contains(execution_id) {
+                                    println!("{}", line);
+                                    printed = true;
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        if !printed {
+            println!("No logs found for execution {}", execution_id);
+        }
     } else {
         println!("No logs found for execution {}", execution_id);
     }
-    Ok(())
 }
 
 async fn run_trace_command(args: &[String]) -> Result<()> {

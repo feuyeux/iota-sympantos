@@ -59,7 +59,7 @@ With Docker running and the default endpoint unchanged:
 
 | Signal | Docker storage/query path |
 |--------|---------------------------|
-| Logs | iota -> OTLP gRPC -> Collector -> Loki. Query in Grafana Explore with the Loki datasource, or use `iota logs <execution_id>` against `IOTA_LOKI_URL` / `http://localhost:3100`. |
+| Logs | iota -> OTLP gRPC -> Collector -> Loki. Query in Grafana Explore with the Loki datasource, or use `iota logs <execution_id>` against `IOTA_LOKI_URL` / `http://localhost:3100`. Current Loki labels include `service_name="iota"` and `execution_id` when a log event carries an execution id. |
 | Traces | iota -> OTLP gRPC -> Collector -> Jaeger. Query in Jaeger UI, Grafana Jaeger datasource, or `iota trace <trace_id>` against `IOTA_JAEGER_URL` / `http://localhost:16686`. |
 | Metrics | iota -> OTLP gRPC -> Collector -> Prometheus remote write. Query in Prometheus or Grafana. |
 
@@ -127,6 +127,6 @@ Observability responsibilities now belong to OpenTelemetry, not SQLite.
 
 ## Known Gaps
 
-- `src/telemetry/spans.rs` defines helper functions that are not fully wired through all execution paths yet.
-- `iota trace` expects a trace id, not an execution id. Logs are queried by `iota_execution_id`, but the current OTel bridge depends on emitted attributes being present in exported log records.
+- Execution, memory, tool-call, and approval span helpers are wired into the main paths. Some low-level ACP protocol phases are still represented as tracing logs/metrics rather than nested child spans.
+- `iota trace` expects a trace id, not an execution id. Logs are queried by Loki's `execution_id` label with a `service_name="iota"` text-search fallback.
 - There is no local Prometheus exposition command in the current CLI.

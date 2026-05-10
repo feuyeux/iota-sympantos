@@ -140,6 +140,7 @@ pub fn init(config: &TelemetryConfig) -> Result<OtelGuard> {
 fn logging_filter() -> EnvFilter {
     let env_val = std::env::var("IOTA_LOG")
         .or_else(|_| std::env::var("RUST_LOG"))
-        .unwrap_or_else(|_| "warn,iota_sympantos=info".to_string());
-    EnvFilter::try_new(&env_val).unwrap_or_else(|_| EnvFilter::new("warn,iota_sympantos=info"))
+        .unwrap_or_else(|_| "warn,iota=info,iota_sympantos=info".to_string());
+    EnvFilter::try_new(&env_val)
+        .unwrap_or_else(|_| EnvFilter::new("warn,iota=info,iota_sympantos=info"))
 }

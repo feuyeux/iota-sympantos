@@ -18,6 +18,7 @@ pub mod wire;
 
 use crate::mcp::router;
 use crate::runtime_event::{self, RuntimeEvent, ToolCallEvent, ToolResultEvent};
+use crate::telemetry::spans;
 use permission as acp_permission;
 use session::{AcpMcpServer, AcpSessionOptions, session_new_params_with_options};
 use wire::{AcpWireMessage, format_acp_error, is_response_id, parse_message_line, read_next_line};
@@ -348,6 +349,7 @@ where
                 ) {
                     let (tool_name, tool_arguments) = acp_tool_call_parts(message.params.as_ref());
                     let call_id = id.as_str().unwrap_or("tool-call").to_string();
+                    let mut tool_span = spans::start_tool_span(&tool_name, &call_id);
                     tracing::info!(
                         backend = %backend,
                         execution_id = execution_id.unwrap_or("-"),
@@ -366,6 +368,11 @@ where
                         .get("isError")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
+                    if ok {
+                        spans::end_span_ok(&mut tool_span);
+                    } else {
+                        spans::end_span_error(&mut tool_span, "tool call returned error");
+                    }
                     tracing::info!(
                         backend = %backend,
                         execution_id = execution_id.unwrap_or("-"),

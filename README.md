@@ -94,6 +94,14 @@ cd docker/observability
 docker compose up -d
 ```
 
+如果默认端口已被其他 stack 占用，可以覆盖 host port，例如：
+
+```bash
+OTEL_GRPC_PORT=14317 OTEL_HTTP_PORT=14318 JAEGER_PORT=16687 \
+PROMETHEUS_PORT=19090 LOKI_PORT=13100 GRAFANA_PORT=13000 \
+docker compose up -d
+```
+
 数据去向：
 
 | 信号 | 无 Docker | 有 Docker |

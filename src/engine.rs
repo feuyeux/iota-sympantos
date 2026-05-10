@@ -185,12 +185,16 @@ impl IotaEngine {
             }));
         }
 
+        let before = self.clients.len();
         for handle in handles {
             if let Ok(Some((key, client))) = handle.await {
                 self.clients.insert(key, client);
             }
         }
-        self.record_active_sessions();
+        let added = self.clients.len().saturating_sub(before) as i64;
+        if added > 0 {
+            self.record_session_delta(added);
+        }
         Ok(self.clients.len())
     }
 
@@ -593,6 +597,7 @@ impl IotaEngine {
                 if let Some(session_id) = output.backend_session_id.as_deref() {
                     self.record_backend_session_id(backend, &cwd, session_id);
                 }
+                self.active_backend = Some(backend);
                 self.finish_execution_with_timing(
                     &execution_id,
                     ExecutionStatus::Completed,
@@ -618,7 +623,6 @@ impl IotaEngine {
                     &output.text,
                     ExecutionStatus::Completed.as_str(),
                 );
-                self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &output.text);
                 if !is_explicit_memory_tool_prompt(prompt) {
                     self.write_episodic_memory(

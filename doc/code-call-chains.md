@@ -757,8 +757,9 @@ Telemetry query commands：
 iota logs <execution_id>
   -> cli::run_logs_command()
   -> IOTA_LOKI_URL or http://localhost:3100
-  -> Loki query_range API with {iota_execution_id="..."}
-  -> print returned log lines
+  -> Loki query_range API with {service_name="iota"}
+  -> client-side filter by stream execution_id or line text
+  -> print matching log lines
 
 iota trace <trace_id>
   -> cli::run_trace_command()
