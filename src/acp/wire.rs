@@ -4,6 +4,9 @@ use serde_json::Value;
 use tokio::io::BufReader;
 use tokio::time::{Duration, timeout};
 
+/// Maximum length of a single line from an ACP backend's stdout (10 MiB).
+pub const MAX_ACP_LINE_BYTES: usize = 10 * 1024 * 1024;
+
 #[derive(Debug, Deserialize)]
 pub struct AcpWireMessage {
     #[serde(default)]
@@ -47,10 +50,20 @@ async fn read_next_line_with_duration<R>(
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    timeout(duration, lines.next_line())
-        .await
-        .map_err(|_| anyhow!(message.to_string()))?
-        .context("Failed to read ACP stdout")
+    match timeout(duration, lines.next_line()).await {
+        Ok(Ok(Some(line))) => {
+            if line.len() > MAX_ACP_LINE_BYTES {
+                anyhow::bail!(
+                    "ACP backend emitted a line exceeding {MAX_ACP_LINE_BYTES} bytes ({} bytes)",
+                    line.len()
+                );
+            }
+            Ok(Some(line))
+        }
+        Ok(Ok(None)) => Ok(None),
+        Ok(Err(e)) => Err(anyhow!("{}: {}", message, e)),
+        Err(_) => Err(anyhow!(message.to_string())),
+    }
 }
 
 pub fn parse_message_line(line: &str, show_native: bool) -> Result<AcpWireMessage> {

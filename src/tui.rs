@@ -97,6 +97,11 @@ struct TuiApp {
     stream_tx: mpsc::Sender<String>,
     /// Accumulated streamed text for the current in-progress turn.
     streaming_text: String,
+    /// Monotonically incremented each time `streaming_text` is mutated.
+    streaming_version: std::cell::Cell<u64>,
+    /// Cached rendered markdown lines, rebuilt when version differs.
+    rendered_md_lines: std::cell::RefCell<Vec<ratatui::text::Line<'static>>>,
+    rendered_version: std::cell::Cell<u64>,
     /// Backend for the current in-progress streaming turn (for display label).
     streaming_backend: Option<AcpBackend>,
     /// Active overlay (help / pager / quit-confirm).
@@ -153,6 +158,9 @@ impl TuiApp {
             stream_rx,
             stream_tx,
             streaming_text: String::new(),
+            streaming_version: std::cell::Cell::new(0),
+            rendered_md_lines: std::cell::RefCell::new(Vec::new()),
+            rendered_version: std::cell::Cell::new(0),
             streaming_backend: None,
             overlay: Overlay::None,
             turn_task: None,
@@ -272,11 +280,30 @@ impl TuiApp {
         self.running_turn = true;
         self.turn_started_at = Some(std::time::Instant::now());
         let tx = self.turn_tx.clone();
-        let _ = tx.try_send(TurnMessage::Prompt {
+        match tx.try_send(TurnMessage::Prompt {
             backend: self.active_backend,
             cwd: self.cwd.clone(),
             text,
-        });
+        }) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(msg)) => {
+                tracing::warn!(
+                    backend = %self.active_backend,
+                    "turn channel full; retrying via async send"
+                );
+                let tx2 = tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx2.send(msg).await;
+                });
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                tracing::error!("turn channel closed; engine has shut down");
+                self.history.push(ConversationEntry::SystemNotice {
+                    text: "Error: engine channel closed".into(),
+                });
+                self.running_turn = false;
+            }
+        }
     }
 
     fn record_queued_prompt_delta(&self, delta: i64) {
@@ -375,10 +402,15 @@ impl TuiApp {
                 label,
                 theme::assistant_label_style(),
             )));
-            for md_line in markdown::render(&self.streaming_text) {
+            let ver = self.streaming_version.get();
+            if self.rendered_version.get() != ver {
+                *self.rendered_md_lines.borrow_mut() = markdown::render(&self.streaming_text);
+                self.rendered_version.set(ver);
+            }
+            for md_line in self.rendered_md_lines.borrow().iter() {
                 let indented = Line::from(
                     std::iter::once(Span::raw("     "))
-                        .chain(md_line.spans)
+                        .chain(md_line.spans.iter().cloned())
                         .collect::<Vec<_>>(),
                 );
                 lines.push(indented);
@@ -883,6 +915,7 @@ async fn run_loop(
         // event loop (draw + input) remains responsive during engine execution.
         if let Some((backend, cwd, prompt)) = pending_prompt.take() {
             app.streaming_text.clear();
+            app.streaming_version.set(app.streaming_version.get().wrapping_add(1));
             app.streaming_backend = Some(backend);
             let engine_arc = app.engine.clone();
             let stream_tx = app.stream_tx.clone();
@@ -911,6 +944,7 @@ async fn run_loop(
                 while let Ok(c) = app.stream_rx.try_recv() {
                     app.streaming_text.push_str(&c);
                 }
+                app.streaming_version.set(app.streaming_version.get().wrapping_add(1));
                 // Force a redraw this iteration by resetting last_draw.
                 last_draw = std::time::Instant::now()
                     .checked_sub(std::time::Duration::from_millis(MIN_FRAME_MS))
@@ -947,6 +981,7 @@ async fn run_loop(
                 }
                 app.running_turn = false;
                 app.streaming_text.clear();
+                app.streaming_version.set(app.streaming_version.get().wrapping_add(1));
                 app.streaming_backend = None;
                 app.turn_started_at = None;
                 app.history.scroll_to_bottom();
@@ -1123,6 +1158,7 @@ async fn run_loop(
                                     app.engine.lock().await.shutdown_all_clients().await;
                                     app.running_turn = false;
                                     app.streaming_text.clear();
+                                    app.streaming_version.set(app.streaming_version.get().wrapping_add(1));
                                     app.streaming_backend = None;
                                     app.turn_started_at = None;
                                     app.history.push(ConversationEntry::SystemNotice {

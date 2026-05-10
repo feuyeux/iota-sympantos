@@ -317,7 +317,9 @@ where
                     streamed = true;
                     output.push_str(&text);
                     if let Some(tx) = stream_tx {
-                        let _ = tx.try_send(text);
+                        if tx.try_send(text).is_err() {
+                            tracing::warn!("stream channel full or closed; dropping chunk");
+                        }
                     }
                 }
             }
@@ -927,7 +929,19 @@ pub fn extract_text(value: &Value) -> Option<String> {
 }
 
 fn is_terminal_result(result: &Value) -> bool {
-    result.get("stopReason").and_then(Value::as_str).is_some() || extract_text(result).is_some()
+    if result.get("stopReason").and_then(Value::as_str).is_some() {
+        return true;
+    }
+    // Fallback for backends that omit stopReason on the final event:
+    // a "text" string field or a non-empty "content" array signals completion.
+    if result.get("text").and_then(Value::as_str).is_some() {
+        return true;
+    }
+    result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false)
 }
 
 fn permission_request_id(message: &AcpWireMessage) -> Result<Value> {

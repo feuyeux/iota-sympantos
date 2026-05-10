@@ -64,7 +64,7 @@ fn search_skips_records_with_unknown_taxonomy_values() {
         .unwrap();
 
     {
-        let conn = crate::utils::lock_or_recover(&store.conn);
+        let conn = crate::utils::lock_sqlite_conn(&store.conn);
         conn.execute("PRAGMA ignore_check_constraints = ON", [])
             .unwrap();
         let now = now_ts();

@@ -62,7 +62,7 @@ impl ApprovalStore {
     ) -> Result<String> {
         let request_id = Uuid::new_v4().to_string();
         let payload_json = serde_json::to_string(payload)?;
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         conn.execute(
             "INSERT INTO approval_requests (request_id, execution_id, backend, tool_name, payload_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![request_id, execution_id, backend, tool_name, payload_json, now_ts()],
@@ -71,7 +71,7 @@ impl ApprovalStore {
     }
 
     pub fn record_decision(&self, request_id: &str, approved: bool, reason: &str) -> Result<()> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         conn.execute(
             "INSERT INTO approval_decisions (request_id, approved, reason, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![request_id, approved, reason, now_ts()],
@@ -80,8 +80,8 @@ impl ApprovalStore {
     }
 
     fn init(&self) -> Result<()> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS approval_requests (
   request_id TEXT PRIMARY KEY,

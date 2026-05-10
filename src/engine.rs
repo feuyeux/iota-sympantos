@@ -1321,7 +1321,7 @@ impl ClassifiedMemory {
 }
 
 fn classify_memory_prompt(prompt: &str) -> Vec<ClassifiedMemory> {
-    let lower = prompt.to_lowercase();
+    let lower = prompt.to_ascii_lowercase();
     let mut memories = Vec::new();
     let is_procedure =
         prompt.contains("实验步骤") || lower.contains("steps:") || lower.contains("procedure");
@@ -1402,7 +1402,7 @@ fn deterministic_memory_answer(prompt: &str, buckets: &RecallBuckets) -> Option<
     if !is_memory_query(prompt) {
         return None;
     }
-    let lower = prompt.to_lowercase();
+    let lower = prompt.to_ascii_lowercase();
     let mut lines = Vec::new();
     let all_info = prompt.contains("所有信息");
     if all_info {

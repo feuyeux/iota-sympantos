@@ -17,7 +17,7 @@ fn records_request_with_execution_id_before_decision() {
         .record_decision(&request_id, true, "test decision")
         .unwrap();
 
-    let conn = crate::utils::lock_or_recover(&store.conn);
+    let conn = crate::utils::lock_sqlite_conn(&store.conn);
     let execution_id = conn
         .query_row(
             "SELECT execution_id FROM approval_requests WHERE request_id = ?1",

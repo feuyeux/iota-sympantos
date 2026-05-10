@@ -42,12 +42,12 @@ impl HistorySearch {
         if self.query.is_empty() {
             return None;
         }
-        let q = self.query.to_lowercase();
+        let q = self.query.to_ascii_lowercase();
         let max = start_before.unwrap_or(history.len());
         // Search backwards from max-1
         (0..max)
             .rev()
-            .find(|&i| history[i].to_lowercase().contains(&q))
+            .find(|&i| history[i].to_ascii_lowercase().contains(&q))
     }
 }
 

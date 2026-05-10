@@ -129,7 +129,7 @@ impl CacheStore {
             .map(str::to_string)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = now_ts();
-        let mut conn = crate::utils::lock_or_recover(&self.conn);
+        let mut conn = crate::utils::lock_sqlite_conn(&self.conn);
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let stale_before = now - RUNNING_EXECUTION_TTL_SECS;
         tx.execute(
@@ -175,7 +175,7 @@ impl CacheStore {
         }
         let event_json =
             serde_json::to_string(event).context("Failed to serialize runtime event")?;
-        let mut conn = crate::utils::lock_or_recover(&self.conn);
+        let mut conn = crate::utils::lock_sqlite_conn(&self.conn);
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let next_seq: i64 = tx
             .query_row(
@@ -194,7 +194,7 @@ impl CacheStore {
     }
 
     pub fn finish_execution(&self, execution_id: &str, status: ExecutionStatus) -> Result<()> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         conn.execute(
             "UPDATE cache_executions SET status = ?2, finished_at = ?3 WHERE execution_id = ?1",
             params![execution_id, status.as_str(), now_ts()],
@@ -207,7 +207,7 @@ impl CacheStore {
         backend: &str,
         request_hash: &str,
     ) -> Result<Option<CachedExecution>> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         conn.query_row(
             "SELECT execution_id, session_id, backend, request_hash, status, \
                     started_at, finished_at, fencing_token \
@@ -228,7 +228,7 @@ impl CacheStore {
     ) -> Result<Option<CachedExecution>> {
         let now = now_ts();
         let stale_before = now - RUNNING_EXECUTION_TTL_SECS;
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         conn.execute(
             "UPDATE cache_executions SET status = 'failed', finished_at = ?3
              WHERE backend = ?1 AND request_hash = ?2 AND status = 'running' AND started_at < ?4",
@@ -248,7 +248,7 @@ impl CacheStore {
     }
 
     pub fn get_execution(&self, execution_id: &str) -> Result<Option<CachedExecution>> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         conn.query_row(
             "SELECT execution_id, session_id, backend, request_hash, status, \
                     started_at, finished_at, fencing_token \
@@ -262,7 +262,7 @@ impl CacheStore {
 
     /// Replay all stored Output events for the given execution, concatenated.
     pub fn output_text(&self, execution_id: &str) -> Result<Option<String>> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT event_json FROM cache_outputs \
              WHERE execution_id = ?1 ORDER BY seq ASC",
@@ -285,7 +285,7 @@ impl CacheStore {
     }
 
     pub fn metrics_snapshot(&self) -> Result<CacheMetricsSnapshot> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let mut stmt =
             conn.prepare("SELECT status, COUNT(*) FROM cache_executions GROUP BY status")?;
         let rows = stmt.query_map([], |row| {
@@ -310,8 +310,8 @@ impl CacheStore {
     // -----------------------------------------------------------------------
 
     fn init(&self) -> Result<()> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cache_executions (
     execution_id  TEXT PRIMARY KEY,

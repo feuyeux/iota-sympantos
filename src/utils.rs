@@ -3,6 +3,8 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rusqlite::Connection;
+
 /// Returns the current Unix timestamp in seconds.
 pub fn now_ts() -> i64 {
     SystemTime::now()
@@ -34,6 +36,10 @@ pub fn summarize(value: &str, limit: usize) -> String {
 /// we recover the inner value — the underlying data is still accessible and
 /// often consistent enough to continue.  A warning is printed to stderr so
 /// operators are aware of the prior panic.
+///
+/// Prefer [`lock_sqlite_conn`] for SQLite connections — it additionally runs
+/// ROLLBACK to clear any dangling transaction.
+#[allow(dead_code)]
 pub fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -42,6 +48,24 @@ pub fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
                 "[iota] warning: mutex was poisoned by a previous panic; recovering inner value"
             );
             err.into_inner()
+        })
+}
+
+/// Lock a SQLite connection mutex and recover from poison with ROLLBACK.
+///
+/// If the previous lock-holder panicked mid-transaction, we execute ROLLBACK
+/// to clear any dangling transaction before returning the connection.
+pub fn lock_sqlite_conn(conn: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+    conn.lock()
+        .unwrap_or_else(|err: PoisonError<MutexGuard<'_, Connection>>| {
+            eprintln!(
+                "[iota] warning: SQLite connection mutex was poisoned by a previous panic; rolling back"
+            );
+            let conn = err.into_inner();
+            if let Err(e) = conn.execute_batch("ROLLBACK") {
+                eprintln!("[iota] warning: ROLLBACK after poison recovery failed: {e}");
+            }
+            conn
         })
 }
 

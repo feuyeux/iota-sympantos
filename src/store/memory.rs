@@ -225,7 +225,8 @@ impl MemoryStore {
         let ttl_days = input.ttl_days.max(1);
         let expires_at = now + ttl_days * 86_400;
         let content_hash = content_hash(&input.content);
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let embed_vector = self.embedding.embed(&input.content);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         if let Some(existing_id) = conn
             .query_row(
                 "SELECT id FROM memory WHERE scope = ?1 AND scope_id = ?2 AND type = ?3 AND facet IS ?4 AND content_hash = ?5 LIMIT 1",
@@ -246,7 +247,7 @@ impl MemoryStore {
                 "UPDATE memory SET updated_at = ?2, expires_at = ?3, confidence = MAX(confidence, ?4) WHERE id = ?1",
                 params![existing_id, now, expires_at, input.confidence],
             )?;
-            self.upsert_embedding(&conn, &existing_id, &input.content, now)?;
+            Self::upsert_embedding(&conn, &existing_id, &embed_vector, now)?;
             return Ok(Some(existing_id));
         }
 
@@ -288,7 +289,7 @@ impl MemoryStore {
                     input.metadata_json,
                 ],
             )?;
-            self.upsert_embedding(&conn, &target_id, &input.content, now)?;
+            Self::upsert_embedding(&conn, &target_id, &embed_vector, now)?;
             return Ok(Some(target_id));
         }
 
@@ -317,7 +318,7 @@ impl MemoryStore {
                 supersedes,
             ],
         )?;
-        self.upsert_embedding(&conn, &id, &input.content, now)?;
+        Self::upsert_embedding(&conn, &id, &embed_vector, now)?;
         Ok(Some(id))
     }
 
@@ -414,7 +415,7 @@ impl MemoryStore {
         keep_latest: usize,
     ) -> Result<usize> {
         let keep_latest = keep_latest.max(1) as i64;
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let deleted = conn.execute(
             "DELETE FROM memory WHERE id IN (
                 SELECT id FROM memory
@@ -467,16 +468,16 @@ impl MemoryStore {
             return Ok(Vec::new());
         }
         let query_canonical = embedding::canonicalize(query);
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT m.id, m.type, m.facet, m.scope, m.scope_id, m.content, m.confidence, m.created_at, m.updated_at, m.expires_at, e.vector_blob
              FROM memory m
              JOIN memory_embedding e ON e.memory_id = m.id
-             WHERE m.expires_at > ?1
+             WHERE m.expires_at > ?1 AND m.type IN ('semantic','procedural')
              ORDER BY m.updated_at DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![now_ts(), 800i64], |row| {
+        let rows = stmt.query_map(params![now_ts(), 400i64], |row| {
             Ok((row_to_memory_record(row)?, row.get::<_, Vec<u8>>(10)?))
         })?;
 
@@ -549,11 +550,9 @@ impl MemoryStore {
     }
 
     fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
-        // Wrap the query in double-quotes to make FTS5 treat it as a phrase
-        // rather than a boolean expression.  Internal double-quotes are escaped
-        // by doubling them (FTS5 phrase-quoting rules).
-        let safe_query = format!("\"{}\"", query.replace('"', "\"\""));
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let sanitized = sanitize_fts5_query(query);
+        let safe_query = format!("\"{}\"", sanitized.replace('"', "\"\""));
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT m.id, m.type, m.facet, m.scope, m.scope_id, m.content, m.confidence, m.created_at, m.updated_at, m.expires_at
              FROM memory m JOIN memory_fts f ON m.rowid = f.rowid
@@ -568,7 +567,7 @@ impl MemoryStore {
 
     fn search_like(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
         let needle = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory
              WHERE expires_at > ?1 AND content LIKE ?2 ESCAPE ?4
@@ -591,7 +590,7 @@ impl MemoryStore {
     ) -> Result<Vec<MemoryRecord>> {
         let facet_value = facet.as_ref().map(MemoryFacet::as_str);
         let type_value = memory_type.as_ref().map(MemoryType::as_str);
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = crate::utils::lock_sqlite_conn(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory\n             WHERE scope = ?1 AND scope_id = ?2 AND (?3 IS NULL OR facet = ?3) AND (?4 IS NULL OR type = ?4) AND confidence >= ?5 AND expires_at > ?6\n             ORDER BY confidence DESC, updated_at DESC, created_at DESC LIMIT ?7",
         )?;
@@ -643,17 +642,15 @@ impl MemoryStore {
     }
 
     fn upsert_embedding(
-        &self,
         conn: &Connection,
         memory_id: &str,
-        content: &str,
+        vector: &[f32],
         updated_at: i64,
     ) -> Result<()> {
-        let vector = self.embedding.embed(content);
         if vector.is_empty() {
             return Ok(());
         }
-        let blob = embedding::to_blob(&vector);
+        let blob = embedding::to_blob(vector);
         conn.execute(
             "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
              VALUES (?1, ?2, ?3)
@@ -667,7 +664,7 @@ impl MemoryStore {
 }
 
 fn init_schema(conn: &Connection) -> Result<bool> {
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY,
@@ -888,6 +885,17 @@ fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
     hex::encode(hasher.finalize())
+}
+
+/// Strip FTS5 special syntax so a user query is treated as literal text.
+fn sanitize_fts5_query(query: &str) -> String {
+    query
+        .chars()
+        .filter(|c| !matches!(c, '*' | '^' | '(' | ')' | ':'))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]

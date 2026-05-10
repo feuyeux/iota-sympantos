@@ -9,72 +9,64 @@ use crate::config::EmbeddingConfig;
 pub const LOCAL_DIM: usize = 128;
 
 /// Embedding engine that supports API-based or local trigram embeddings.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct EmbeddingEngine {
     config: Option<EmbeddingConfig>,
-    client: Option<reqwest::blocking::Client>,
-}
-
-impl Default for EmbeddingEngine {
-    fn default() -> Self {
-        Self {
-            config: None,
-            client: None,
-        }
-    }
 }
 
 impl EmbeddingEngine {
-    /// Create from optional config. If config is None or has no base_url, falls back to local.
+    /// Create from optional config.
     pub fn from_config(config: Option<EmbeddingConfig>) -> Self {
-        let has_api = config
-            .as_ref()
-            .map(|c| c.base_url.is_some())
-            .unwrap_or(false);
-        let client = if has_api {
-            reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .ok()
-        } else {
-            None
-        };
-        Self { config, client }
+        Self { config }
     }
 
-    /// Whether this engine uses an API (Ollama / OpenAI-compatible).
+    /// Whether this engine has API configuration.
+    #[allow(dead_code)]
     pub fn is_api(&self) -> bool {
-        self.client.is_some()
-            && self
-                .config
-                .as_ref()
-                .map(|c| c.base_url.is_some())
-                .unwrap_or(false)
+        self.config
+            .as_ref()
+            .map(|c| c.base_url.is_some())
+            .unwrap_or(false)
     }
 
     /// Compute embedding for content. Uses API if configured, else local trigram.
+    ///
+    /// This may make a synchronous HTTP request when an embedding API is configured.
+    /// Callers should wrap this in `tokio::task::spawn_blocking` to avoid blocking
+    /// the async runtime.
     pub fn embed(&self, content: &str) -> Vec<f32> {
         let canonical = canonicalize(content);
         if canonical.is_empty() {
             return Vec::new();
         }
-        if self.is_api() {
-            match self.embed_api(&canonical) {
-                Ok(vec) => return vec,
-                Err(e) => {
-                    tracing::warn!("embedding API failed, using local fallback: {e}");
+        if let Some(config) = self.config.as_ref() {
+            if let Some(base_url) = config.base_url.as_deref() {
+                match Self::embed_api(
+                    base_url,
+                    config.model.as_deref(),
+                    config.api_key.as_deref(),
+                    &canonical,
+                ) {
+                    Ok(vec) => return vec,
+                    Err(e) => {
+                        tracing::warn!("embedding API failed, using local fallback: {e}");
+                    }
                 }
             }
         }
         local_trigram(&canonical)
     }
 
-    fn embed_api(&self, text: &str) -> anyhow::Result<Vec<f32>> {
-        let config = self.config.as_ref().unwrap();
-        let client = self.client.as_ref().unwrap();
-        let base_url = config.base_url.as_deref().unwrap();
-        let model = config.model.as_deref().unwrap_or("nomic-embed-text");
-
+    fn embed_api(
+        base_url: &str,
+        model: Option<&str>,
+        api_key: Option<&str>,
+        text: &str,
+    ) -> anyhow::Result<Vec<f32>> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()?;
+        let model = model.unwrap_or("nomic-embed-text");
         let url = format!("{}/api/embeddings", base_url.trim_end_matches('/'));
 
         let mut request = client.post(&url).json(&OllamaEmbeddingRequest {
@@ -82,8 +74,8 @@ impl EmbeddingEngine {
             prompt: text.to_string(),
         });
 
-        if let Some(api_key) = config.api_key.as_deref().filter(|k| !k.is_empty()) {
-            request = request.bearer_auth(api_key);
+        if let Some(key) = api_key.filter(|k| !k.is_empty()) {
+            request = request.bearer_auth(key);
         }
 
         let response = request.send()?;
