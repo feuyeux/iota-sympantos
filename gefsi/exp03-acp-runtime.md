@@ -1,117 +1,117 @@
-# iota-sympantos 实验 3：三条 ACP 调用链路耗时对比
+# iota-sympantos experiment 3: three ACP call path latency comparison
 
 Status note: this is a historical benchmark report. Older snippets may use `--trace-timing`; the current CLI flag is `--timing`. For current observability behavior, see `doc/observability.md`.
 
-| 字段 | 值 |
-|------|-----|
-| 实验代号 | exp03-acp-runtime |
-| 执行日期 | 2026-05-07 |
-| 实验对象 | CLI with daemon、CLI without daemon、backend direct 三条调用链路 |
-| 实现位置 | `src/cli/mod.rs`, `src/daemon/`, `src/engine.rs`, `src/acp/`, `src/config.rs` |
+| Field | Value |
+|-------|-------|
+| Experiment ID | exp03-acp-runtime |
+| Date | 2026-05-07 |
+| Subject | three call paths: CLI with daemon, CLI without daemon, backend direct |
+| Implementation | `src/cli/mod.rs`, `src/daemon/`, `src/engine.rs`, `src/acp/`, `src/config.rs` |
 
 ---
 
-## 一、实验目标
+## 1. Experiment goal
 
-本实验不再验证“后端是否可用”本身，而是比较同一个 prompt 通过三条链路到达模型时的端到端耗时差异：
+This experiment does not re-verify backend availability itself; instead it compares the end-to-end latency difference when the same prompt reaches the model via three different paths:
 
-| 链路 | 入口 | 目标问题 |
-|------|------|----------|
-| CLI without daemon | `iota run <backend> <prompt>` | 每次启动一个新的 iota CLI 进程时，ACP adapter 初始化、session 创建和 prompt 执行合计要多久 |
-| CLI with daemon | `iota run --daemon <backend> <prompt>` | CLI 只作为 thin client，经 TCP 转发到常驻 daemon 后，链路耗时能减少多少 |
-| Backend direct | 各 backend 自身 one-shot/headless CLI | 不经过 iota、不经过 daemon、不经过 ACP adapter 时，backend 原生命令的基线耗时是多少 |
+| Path | Entry point | Question being answered |
+|------|-------------|------------------------|
+| CLI without daemon | `iota run <backend> <prompt>` | When a new iota CLI process starts each time, how long do ACP adapter initialization, session creation, and prompt execution take in total? |
+| CLI with daemon | `iota run --daemon <backend> <prompt>` | With the CLI acting only as a thin client forwarding over TCP to a resident daemon, how much latency is saved? |
+| Backend direct | each backend's own one-shot/headless CLI | With no iota, no daemon, and no ACP adapter, what is the baseline latency of the backend's native command? |
 
-核心判断：daemon 的价值不是重新证明 backend 启动能力，而是把高频 CLI 调用中的重复启动成本搬到常驻进程里；backend direct 则作为外部基线，用来判断 iota/ACP 层额外引入了多少链路成本。
+Core conclusion: the value of the daemon is not to re-prove backend startup capability, but to move repeated startup costs from high-frequency CLI calls into a resident process. Backend direct serves as an external baseline to quantify how much latency the iota/ACP layer adds.
 
 ---
 
-## 二、链路定义
+## 2. Path definitions
 
 ### 2.1 CLI without daemon
 
-命令形态：
+Command form:
 
 ```powershell
-.\target\release\iota.exe run --trace-timing <backend> "say hello. reply with exactly: hello"
+.\target\release\iota.exe run --trace-timing <backend> “say hello. reply with exactly: hello”
 ```
 
-该路径包含：
+This path includes:
 
-| 阶段 | 说明 |
-|------|------|
-| CLI process | Windows 上启动 `iota.exe`，解析参数，读取 `~/.i6/nimia.yaml` |
-| Engine | 在当前 CLI 进程内创建 `IotaEngine` |
-| ACP adapter | 按 backend 配置启动 adapter 进程，执行 `initialize` |
-| ACP session | 执行 `session/new` |
-| Prompt | 执行 `session/prompt` 并等待 `session/complete` |
+| Phase | Description |
+|-------|-------------|
+| CLI process | launch `iota.exe` on Windows, parse arguments, read `~/.i6/nimia.yaml` |
+| Engine | create `IotaEngine` inside the current CLI process |
+| ACP adapter | start the adapter process per backend config, execute `initialize` |
+| ACP session | execute `session/new` |
+| Prompt | execute `session/prompt` and wait for `session/complete` |
 
-这条链路适合衡量“单次命令调用”的真实用户感知耗时。它会重复支付 CLI 进程启动、engine 构造、adapter 启动和 session 创建成本。
+This path is suited for measuring the real user-perceived latency of a single command invocation. It repeatedly pays the cost of CLI process startup, engine construction, adapter startup, and session creation.
 
 ### 2.2 CLI with daemon
 
-命令形态：
+Command form:
 
 ```powershell
-.\target\release\iota.exe run --daemon --trace-timing <backend> "say hello. reply with exactly: hello"
+.\target\release\iota.exe run --daemon --trace-timing <backend> “say hello. reply with exactly: hello”
 ```
 
-该路径包含：
+This path includes:
 
-| 阶段 | 说明 |
-|------|------|
-| CLI process | 启动短生命周期 `iota.exe` |
-| TCP hop | 连接 `127.0.0.1:47661`，发送 `DaemonPromptRequest` |
-| Daemon engine | daemon 内按 cwd 复用 `IotaEngine` |
-| ACP client/session | 已预热时复用 backend client 与 session |
-| Prompt | 执行 `session/prompt` 并返回 `DaemonPromptResponse` |
+| Phase | Description |
+|-------|-------------|
+| CLI process | launch a short-lived `iota.exe` |
+| TCP hop | connect to `127.0.0.1:47661`, send `DaemonPromptRequest` |
+| Daemon engine | daemon reuses `IotaEngine` per cwd |
+| ACP client/session | reuses backend client and session when already warmed up |
+| Prompt | execute `session/prompt` and return `DaemonPromptResponse` |
 
-这条链路适合衡量“反复从 shell 调用 iota”时 daemon 是否能摊薄 adapter 与 session 成本。冷启动第一次 daemon 调用仍可能包含 backend 初始化，热路径才是 daemon 设计要优化的主要场景。
+This path is suited for measuring whether the daemon can amortize adapter and session costs across repeated shell invocations of iota. The first daemon call (cold start) may still include backend initialization; the warm path is the primary scenario the daemon design optimizes for.
 
 ### 2.3 Backend direct
 
-命令形态按 backend 不同而不同：
+Command form varies by backend:
 
-| Backend | Direct 命令 |
-|---------|-------------|
-| claude-code | `claude -p "say hello. reply with exactly: hello"` |
-| codex | `codex exec "say hello. reply with exactly: hello"` |
-| gemini | `gemini -p "say hello. reply with exactly: hello"` |
-| hermes | `hermes -z "say hello. reply with exactly: hello"` |
-| opencode | `npx -y opencode-ai@1.14.40 run "say hello. reply with exactly: hello"` |
+| Backend | Direct command |
+|---------|---------------|
+| claude-code | `claude -p “say hello. reply with exactly: hello”` |
+| codex | `codex exec “say hello. reply with exactly: hello”` |
+| gemini | `gemini -p “say hello. reply with exactly: hello”` |
+| hermes | `hermes -z “say hello. reply with exactly: hello”` |
+| opencode | `npx -y opencode-ai@1.14.40 run “say hello. reply with exactly: hello”` |
 
-该路径不经过 iota，不启动 ACP adapter，也不经过 daemon。它只用于提供 backend 原生 one-shot 模式的外部基线，不能替代 ACP 兼容性验证。
+This path does not go through iota, does not start an ACP adapter, and does not go through the daemon. It is used solely to provide an external baseline for each backend's native one-shot mode; it cannot replace ACP compatibility verification.
 
 ---
 
-## 三、实验环境
+## 3. Experiment environment
 
-| 项目 | 值 |
-|------|-----|
+| Item | Value |
+|------|-------|
 | OS | Windows |
 | Shell | PowerShell 7.6.1 |
 | Workspace | `D:\coding\creative\iota-sympantos` |
 | Binary | `target/release/iota.exe` |
 | Daemon address | `127.0.0.1:47661` |
-| 配置来源 | `~/.i6/nimia.yaml` |
+| Config source | `~/.i6/nimia.yaml` |
 | Prompt | `say hello. reply with exactly: hello` |
 
-### 3.1 Backend 版本
+### 3.1 Backend versions
 
-`version_mapping` 只记录具体版本号，不记录包名、命令串或 update 信息。
+`version_mapping` records only the specific version numbers, not package names, command strings, or update information.
 
-| Backend | ACP version | bin version | 说明 |
-|---------|------------:|------------:|------|
+| Backend | ACP version | bin version | Notes |
+|---------|------------:|------------:|-------|
 | claude-code | 0.32.0 | 2.1.123 | `@agentclientprotocol/claude-agent-acp` + `claude` |
-| codex | 0.12.0 | 0.128.0 | `@zed-industries/codex-acp` 与 `codex-cli` 版本不同 |
+| codex | 0.12.0 | 0.128.0 | `@zed-industries/codex-acp` and `codex-cli` versions differ |
 | gemini | 0.41.2 | 0.41.2 | `@google/gemini-cli --acp` |
 | hermes | 0.12.0 | 0.12.0 | `hermes acp` |
-| opencode | 1.14.40 | 1.14.40 | 配置使用 `npx opencode-ai@1.14.40` |
+| opencode | 1.14.40 | 1.14.40 | configured with `npx opencode-ai@1.14.40` |
 
 ---
 
-## 四、测量方法
+## 4. Measurement methodology
 
-### 4.1 构建与基础测试
+### 4.1 Build and baseline test
 
 ```powershell
 cargo fmt
@@ -120,18 +120,18 @@ cargo build --release
 .\target\release\iota.exe check
 ```
 
-已验证结果：
+Verified results:
 
-| 命令 | 结果 |
-|------|------|
-| `cargo fmt` | 通过 |
+| Command | Result |
+|---------|--------|
+| `cargo fmt` | pass |
 | `cargo test --release -- --format terse` | 93 passed |
-| `cargo build --release` | 通过 |
-| `iota check` | 5 个 backend configured，包含 `version_mapping.acp/bin` |
+| `cargo build --release` | pass |
+| `iota check` | 5 backends configured, includes `version_mapping.acp/bin` |
 
 ### 4.2 CLI without daemon
 
-逐 backend 执行：
+Execute per backend:
 
 ```powershell
 foreach ($backend in @('claude-code','codex','gemini','hermes','opencode')) {
@@ -139,21 +139,21 @@ foreach ($backend in @('claude-code','codex','gemini','hermes','opencode')) {
 }
 ```
 
-采集字段：
+Fields collected:
 
-| 字段 | 含义 |
-|------|------|
-| `init_ms` | ACP adapter `initialize` 耗时 |
-| `session_new_ms` | `session/new` 耗时 |
-| `prompt_ms` | `session/prompt` 到完成耗时 |
-| `total_ms` | iota 记录的本次 run 总耗时 |
-| `client_started` | 本次是否启动 backend client |
-| `process_spawned` | 本次是否启动 adapter 进程 |
-| `session_reused` | 是否复用已有 session |
+| Field | Meaning |
+|-------|---------|
+| `init_ms` | ACP adapter `initialize` latency |
+| `session_new_ms` | `session/new` latency |
+| `prompt_ms` | `session/prompt` to completion latency |
+| `total_ms` | total run latency recorded by iota |
+| `client_started` | whether backend client was started this run |
+| `process_spawned` | whether adapter process was spawned this run |
+| `session_reused` | whether an existing session was reused |
 
 ### 4.3 CLI with daemon
 
-先用一轮调用预热 daemon，再采集热路径：
+Warm up the daemon with one round of calls, then measure the warm path:
 
 ```powershell
 foreach ($backend in @('claude-code','codex','gemini','hermes','opencode')) {
@@ -165,20 +165,20 @@ foreach ($backend in @('claude-code','codex','gemini','hermes','opencode')) {
 }
 ```
 
-热路径期望字段：
+Expected fields on the warm path:
 
-| 字段 | 期望 |
-|------|------|
+| Field | Expected |
+|-------|----------|
 | `route` | `daemon` |
 | `daemon_hit` | `true` |
 | `client_started` | `false` |
 | `process_spawned` | `false` |
 | `session_reused` | `true` |
-| `session_new_ms` | 省略、`null` 或显著低于 cold path |
+| `session_new_ms` | omitted, `null`, or significantly lower than cold path |
 
 ### 4.4 Backend direct
 
-PowerShell 统一测量方式：
+PowerShell unified measurement:
 
 ```powershell
 $prompt = "say hello. reply with exactly: hello"
@@ -196,93 +196,93 @@ foreach ($item in $commands) {
 }
 ```
 
-Backend direct 的数据只用于横向参照。由于各后端 direct CLI 默认加载的配置、权限策略、MCP、记忆系统和输出格式并不完全一致，它不能与 ACP 路径做逐阶段字段对齐，只能比较端到端 one-shot 耗时。
+Backend direct data is used only as a cross-reference. Because each backend's direct CLI loads different configurations, permission policies, MCP, memory systems, and output formats by default, it cannot be field-aligned stage-by-stage with the ACP path; only end-to-end one-shot latency can be compared.
 
 ---
 
-## 五、当前样本数据
+## 5. Sample data
 
-### 5.1 CLI without daemon：已采集样本
+### 5.1 CLI without daemon — collected samples
 
-以下数据来自 `iota run --trace-timing <backend> "say hello. reply with exactly: hello"`。
+Data from `iota run --trace-timing <backend> "say hello. reply with exactly: hello"`.
 
-| Backend | init_ms | session_new_ms | prompt_ms | total_ms | 输出 |
-|---------|--------:|---------------:|----------:|---------:|------|
+| Backend | init_ms | session_new_ms | prompt_ms | total_ms | Output |
+|---------|--------:|---------------:|----------:|---------:|--------|
 | claude-code | 1120-1212 | 758-844 | 3780-3907 | 4539-4752 | `hello` |
 | codex | 1031 | 3287 | 18015 | 21303 | `hello` |
 | gemini | 6254 | 1622 | 2069 | 3691 | `hello` |
 | hermes | 2694 | 7007 | 3932 | 10939 | `hello` |
 | opencode | 41017 | 1580 | 3634 | 5214 | `hello` |
 
-观察：
+Observations:
 
-| Backend | 主要耗时来源 |
-|---------|--------------|
-| claude-code | prompt 阶段占主导，adapter/session 较稳定 |
-| codex | prompt 阶段显著偏高 |
-| gemini | initialize 偏高，但 prompt 较快 |
-| hermes | session/new 偏高 |
-| opencode | 首次 npx initialize 极高，因此必须用 60s timeout 覆盖 cold path |
+| Backend | Primary latency source |
+|---------|----------------------|
+| claude-code | prompt phase dominates; adapter/session relatively stable |
+| codex | prompt phase significantly elevated |
+| gemini | initialize elevated, but prompt is faster |
+| hermes | session/new elevated |
+| opencode | first npx initialize extremely high; cold path must use 60s timeout |
 
-注：不同 adapter 对 `total_ms` 与分阶段字段的定义不完全一致，报告保留运行时原始字段，不把阶段值强行相加。
+Note: different adapters define `total_ms` and per-phase fields differently. The report preserves raw runtime fields and does not force-sum phase values.
 
-### 5.2 iota 两条链路历史样本
+### 5.2 iota two-path historical samples
 
-以下样本来自同一轮 3 次 benchmark 的中位数，prompt 为 `say hello. reply with exactly: hello`。这里的 `CLI without daemon cold` 指每轮独立冷启动 adapter/session；`CLI with daemon hot` 指 daemon 已预热后的 prompt 路径。
+Samples below are medians from a 3-run benchmark, prompt `say hello. reply with exactly: hello`. "CLI without daemon cold" means each run starts adapter/session fresh; "CLI with daemon hot" means the prompt path after the daemon is already warmed up.
 
-| Backend | CLI with daemon hot ms | CLI without daemon cold ms | daemon speedup | 说明 |
-|---------|-----------------------:|----------------------------:|---------------:|------|
-| claude-code | 1569 | 3756 | 2.4x | daemon 省去 adapter/session 重复启动 |
-| codex | 1415 | 5880 | 4.1x | cold path prompt + adapter 成本较高 |
-| gemini | 1185 | 7300 | 6.2x | cold path 需把 `init_ms` 计入用户感知耗时 |
-| hermes | 1468 | 4378 | 3.0x | session/new 复用收益明显 |
-| opencode | 3532 | 4838 | 1.4x | daemon 收益最小，且热路径波动较大 |
+| Backend | CLI with daemon hot ms | CLI without daemon cold ms | daemon speedup | Notes |
+|---------|-----------------------:|---------------------------:|---------------:|-------|
+| claude-code | 1569 | 3756 | 2.4x | daemon eliminates repeated adapter/session startup |
+| codex | 1415 | 5880 | 4.1x | cold path prompt + adapter cost is high |
+| gemini | 1185 | 7300 | 6.2x | cold path must include `init_ms` in user-perceived latency |
+| hermes | 1468 | 4378 | 3.0x | session/new reuse benefit is clear |
+| opencode | 3532 | 4838 | 1.4x | smallest daemon benefit; warm path also has more variance |
 
-这组数据已经能回答 iota 内部两条链路的主要问题：热 daemon 稳定低于 CLI cold；收益大小取决于各 backend 的 initialize 和 session/new 成本。
+This data already answers the main question about iota's two internal paths: warm daemon is consistently lower than CLI cold; the benefit magnitude depends on each backend's initialize and session/new cost.
 
-### 5.3 三链路对比表
+### 5.3 Three-path comparison table
 
-使用同一 prompt `say hello. reply with exactly: hello`，同一网络状态、同一 backend 配置，按下表落盘。
+Same prompt `say hello. reply with exactly: hello`, same network state, same backend configuration.
 
-| Backend | Backend direct ms | CLI with daemon hot ms | CLI without daemon cold ms | daemon 相对 cold 改善 | iota cold 相对 direct 差值 |
-|---------|------------------:|-----------------------:|----------------------------:|----------------------:|---------------------------:|
+| Backend | Backend direct ms | CLI with daemon hot ms | CLI without daemon cold ms | daemon vs cold improvement | iota cold vs direct delta |
+|---------|------------------:|-----------------------:|---------------------------:|---------------------------:|--------------------------:|
 | claude-code | 1326 | 1569 | 3756 | 58.2% | +2430 ms |
 | codex | 14261 | 1415 | 5880 | 75.9% | −8381 ms |
 | gemini | 18834 | 1185 | 7300 | 83.8% | −11534 ms |
 | hermes | 8895 | 1468 | 4378 | 66.5% | −4517 ms |
 | opencode | 8262 | 3532 | 4838 | 27.0% | −3424 ms |
 
-> **Backend direct 测量命令：** `claude -p`、`codex exec`、`gemini -p --skip-trust`、`hermes -z`、`npx -y opencode-ai@1.14.40 run`
+> **Backend direct commands:** `claude -p`, `codex exec`, `gemini -p --skip-trust`, `hermes -z`, `npx -y opencode-ai@1.14.40 run`
 
-计算方式：
+Calculation method:
 
 ```text
-daemon 相对 cold 改善 = (CLI without daemon cold ms - CLI with daemon hot ms) / CLI without daemon cold ms
-iota cold 相对 direct 差值 = CLI without daemon cold ms - Backend direct ms
-    正值 → iota 比 direct 慢（额外开销）
-    负值 → iota 比 direct 快（backend direct 自身负担重）
+daemon vs cold improvement = (CLI without daemon cold ms - CLI with daemon hot ms) / CLI without daemon cold ms
+iota cold vs direct delta  = CLI without daemon cold ms - Backend direct ms
+    positive → iota is slower than direct (extra overhead)
+    negative → iota is faster than direct (backend direct carries its own heavy burden)
 ```
 
-#### 关键发现
+#### Key findings
 
-1. **4/5 backend 中 iota CLI cold 比 backend direct 更快。** 原因：backend direct（`codex exec`、`gemini -p`、`hermes -z`、`opencode run`）会加载完整 CLI 环境、插件、权限策略、记忆系统等；而 ACP adapter 只启动最小推理入口。
-2. **唯一例外是 Claude Code。** `claude -p` 的 `--bare` 等选项本身极轻量；iota 冷路径额外花费约 2.4s 在 adapter 启动和 session 创建上。
-3. **iota daemon hot 路径是所有 5 个 backend 中绝对最快的链路。** 通过摊薄 adapter/session 成本，daemon 跑出 1185-3532ms，均远低于 backend direct 对应的 8262-18834ms。
-
----
-
-## 六、结论
-
-1. 本实验的比较对象是三条链路的端到端耗时，不是后端可用性矩阵。
-2. **daemon hot 是所有 5 个 backend 中绝对最快的链路。** 热 daemon 耗时 1185-3532ms，分别低于 backend direct（1326-18834ms）和 CLI cold（3756-7300ms）。
-3. **4/5 backend 中 iota CLI cold 比 backend direct 更快。** ACP adapter 模式不加载 backend 自身的完整 CLI 环境，因此冷启动也比 `codex exec` / `gemini -p` / `hermes -z` / `opencode run` 更轻。
-4. **Claude Code 是唯一例外**：`claude -p` 本身极轻量（1326ms），而 iota 冷路径需要额外 2.4s 完成 adapter initialize 和 session/new。daemon hot（1569ms）与 Claude direct（1326ms）基本持平。
-5. daemon 相对 CLI cold 的改善范围 27.0%-83.8%。Gemini（83.8%）和 Codex（75.9%）获益最大，因为它们的 ACP adapter 冷启动成本最高。
-6. `CLI without daemon` 暴露每个 backend 的主要冷启动成本：Codex 偏 prompt 阶段，Hermes 偏 session/new，OpenCode/Gemini 偏首次 npx initialize。
+1. **4 out of 5 backends: iota CLI cold is faster than backend direct.** Reason: backend direct (`codex exec`, `gemini -p`, `hermes -z`, `opencode run`) loads a full CLI environment, plugins, permission policies, memory systems, etc.; the ACP adapter starts only the minimal inference entry point.
+2. **The only exception is Claude Code.** `claude -p` is itself extremely lightweight; the iota cold path spends an extra ~2.4s on adapter startup and session creation.
+3. **iota daemon hot path is the absolute fastest path across all 5 backends.** By amortizing adapter/session costs, the daemon achieves 1185–3532ms, all well below backend direct's 8262–18834ms.
 
 ---
 
-## 七、复验命令
+## 6. Conclusions
+
+1. This experiment compares end-to-end latency across three paths; it is not a backend availability matrix.
+2. **Daemon hot is the absolute fastest path across all 5 backends.** Warm daemon latency is 1185–3532ms, below both backend direct (1326–18834ms) and CLI cold (3756–7300ms).
+3. **4 out of 5 backends: iota CLI cold is faster than backend direct.** ACP adapter mode does not load the backend's full CLI environment, so even the cold start is lighter than `codex exec` / `gemini -p` / `hermes -z` / `opencode run`.
+4. **Claude Code is the only exception:** `claude -p` itself is extremely lightweight (1326ms), while the iota cold path needs an extra 2.4s for adapter initialize and session/new. Daemon hot (1569ms) is roughly on par with Claude direct (1326ms).
+5. Daemon improvement over CLI cold ranges from 27.0% to 83.8%. Gemini (83.8%) and Codex (75.9%) benefit most because their ACP adapter cold-start costs are highest.
+6. `CLI without daemon` reveals each backend's primary cold-start cost: Codex is prompt-phase dominated, Hermes is session/new dominated, OpenCode/Gemini are first-npx-initialize dominated.
+
+---
+
+## 7. Reproduction commands
 
 ```powershell
 cargo test --release -- --format terse
@@ -312,4 +312,4 @@ Measure-Command { hermes -z $prompt | Out-Null }
 Measure-Command { npx -y opencode-ai@1.14.40 run $prompt | Out-Null }
 ```
 
-期望：三组命令均能得到端到端耗时；最终报告只使用同一轮环境下的三列数据做比较，避免把 cold path、hot path、不同 backend direct 配置混在一起。
+Expected: all three command groups produce end-to-end latency figures. The final report uses only the three columns from a single environment run to avoid mixing cold path, hot path, and different backend direct configurations.

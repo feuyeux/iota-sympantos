@@ -1,134 +1,143 @@
-# iota-sympantos 断点调试指南
+# iota-sympantos debugging guide
 
-## 前置要求
+## Prerequisites
 
-1. **VS Code 扩展**：安装 [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb)（扩展 ID：`vadimcn.vscode-lldb`）
-2. **Rust 工具链**：确保 `rustc`、`cargo` 已安装且版本 ≥ 1.95.0
-3. **配置文件**：确保 `~/.i6/nimia.yaml` 已正确配置（含后端凭据）
+1. **VS Code extension**: install [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb) (extension ID: `vadimcn.vscode-lldb`)
+2. **Rust toolchain**: ensure `rustc` and `cargo` are installed at version ≥ 1.95.0
+3. **Config file**: ensure `~/.i6/nimia.yaml` is correctly configured (including backend credentials)
 
-## 调试配置一览
+## Debug configurations
 
-| 配置名称 | 说明 | 启动参数 |
-|----------|------|----------|
-| Debug TUI (默认模式) | 交互式 TUI 模式 | 无参数 |
-| Debug Run (单次执行) | 单次 prompt 执行 | `run <backend> <prompt>` |
-| Debug Run with Daemon | 经 daemon 路由执行 | `run --daemon <backend> <prompt>` |
-| Debug Check | 输出后端 JSON 信息 | `check` |
-| Debug Context MCP Sidecar | 启动 iota-context MCP | `context-mcp` |
-| Debug Fun MCP Server | 启动 iota-fun MCP | `fun-mcp` |
-| Debug Bench Cold | 冷启动基准测试 | `bench-cold 3` |
-| Debug Daemon (内部) | 启动内部 daemon 进程 | `__daemon` |
+| Configuration name | Description | Launch args |
+|--------------------|-------------|-------------|
+| Debug TUI (default mode) | Interactive TUI mode | No args |
+| Debug Run (single execution) | Single prompt execution | `run <backend> <prompt>` |
+| Debug Run with Daemon | Route via daemon | `run --daemon <backend> <prompt>` |
+| Debug Check | Print backend JSON info | `check` |
+| Debug Context MCP Sidecar | Start iota-context MCP | `context-mcp` |
+| Debug Fun MCP Server | Start iota-fun MCP | `fun-mcp` |
+| Debug Bench Cold | Cold-start benchmark | `bench-cold 3` |
+| Debug Daemon (internal) | Start internal daemon process | `__daemon` |
 
-## 使用方法
+## Usage
 
-### 1. 设置断点
+### 1. Set breakpoints
 
-在 VS Code 编辑器中点击行号左侧设置断点（红色圆点），常见调试入口：
+Click to the left of a line number in VS Code to set a breakpoint (red dot). Common debug entry points:
 
-- `src/main.rs:16` — 程序入口
-- `src/cli/mod.rs` — 命令分发
-- `src/engine.rs` — ACP 运行时编排
-- `src/acp/mod.rs` — ACP 协议交互
-- `src/tui.rs` — TUI 主循环
+- `src/main.rs:16` — program entry
+- `src/cli/mod.rs` — command dispatch
+- `src/engine.rs` — ACP runtime orchestration
+- `src/acp/mod.rs` — ACP protocol interaction
+- `src/tui.rs` — TUI main loop
 
-### 2. 启动调试
+### 2. Start debugging
 
-- 按 `F5` 或点击 Run and Debug 面板中的绿色三角
-- 从下拉列表选择对应配置
-- "Debug Run" 配置会弹出输入框让你选择后端和输入 prompt
+- Press `F5` or click the green triangle in the Run and Debug panel
+- Select the relevant configuration from the dropdown
+- The "Debug Run" configuration shows an input box to select the backend and enter a prompt
 
-### 3. 调试控制
+### 3. Debug controls
 
-| 快捷键 | 操作 |
-|--------|------|
-| `F5` | 继续 / 启动调试 |
-| `F10` | 单步跳过 (Step Over) |
-| `F11` | 单步进入 (Step Into) |
-| `Shift+F11` | 单步跳出 (Step Out) |
-| `Shift+F5` | 停止调试 |
-| `Cmd+Shift+F5` | 重启调试 |
+| Shortcut | Action |
+|----------|--------|
+| `F5` | Continue / start debugging |
+| `F10` | Step over |
+| `F11` | Step into |
+| `Shift+F11` | Step out |
+| `Shift+F5` | Stop debugging |
+| `Cmd+Shift+F5` | Restart debugging |
 
-### 4. 查看变量
+### 4. Inspect variables
 
-调试暂停时可在以下面板查看状态：
-- **Variables** — 当前作用域的局部变量
-- **Watch** — 自定义监视表达式
-- **Call Stack** — 调用栈
-- **Debug Console** — 执行 LLDB 表达式（如 `p variable_name`）
+When paused, use these panels to inspect state:
+- **Variables** — local variables in the current scope
+- **Watch** — custom watch expressions
+- **Call Stack** — the call stack
+- **Debug Console** — execute LLDB expressions (e.g. `p variable_name`)
 
-## 环境变量
+## Environment variables
 
-调试配置默认设置：
+The debug configurations set these defaults:
 
 ```
-RUST_LOG=debug        # 启用 logging debug 级别日志，并同时输出到 stderr
-RUST_BACKTRACE=1      # 启用完整调用栈
+RUST_LOG=debug        # enable debug-level logging, output to stderr
+RUST_BACKTRACE=1      # enable full stack traces
 ```
 
-当前实现不写 `~/.i6/logs/` 文件日志，也不通过 SQLite 保存工程日志。日志默认输出到 stderr，并在 `OTEL_ENABLED` 未关闭时通过 OTLP 发往 `OTEL_EXPORTER_OTLP_ENDPOINT`，默认 `http://localhost:4317`。
+Logs are written to stderr by default and to daily rolling files under `~/.i6/logs/`. When `OTEL_ENABLED` is not disabled, logs are also sent via OTLP to `OTEL_EXPORTER_OTLP_ENDPOINT`, defaulting to `http://localhost:4317`. Application logs are not written to SQLite.
 
-可用 `IOTA_LOG` 覆盖 tracing 过滤规则；未设置 `IOTA_LOG` 时会读取 `RUST_LOG`。默认过滤规则是 `warn,iota_sympantos=info`。
+Use `IOTA_LOG` to override the tracing filter; if `IOTA_LOG` is not set, `RUST_LOG` is used. The default filter is `warn,iota_sympantos=info`.
 
-如需过滤特定模块日志，修改 `RUST_LOG`：
+Use `IOTA_LOG_FILE=off` to disable local file logging; `IOTA_LOG_DIR=/path/to/logs` to change the log directory; `IOTA_LOG_RETENTION_DAYS=14` to change daily file retention, or `IOTA_LOG_RETENTION_DAYS=off` to disable auto-cleanup.
+
+Local CacheStore metrics can be viewed in Prometheus text format:
+
+```bash
+iota metrics --once
+iota metrics --listen 127.0.0.1:47662
+```
+
+To filter logs by module, set `RUST_LOG`:
 
 ```
 RUST_LOG=iota_sympantos::acp=debug,iota_sympantos::engine=debug
 ```
 
-只调整 iota 模块日志时，可使用：
+To adjust only iota module logs, use:
 
 ```
 IOTA_LOG=iota_sympantos::acp=debug,iota_sympantos::engine=debug
 ```
 
-## TUI 调试注意事项
+## TUI debugging notes
 
-TUI 模式使用 `crossterm` 占据终端，断点暂停时终端可能处于 raw mode。建议：
+TUI mode uses `crossterm` to take over the terminal; the terminal may be in raw mode when a breakpoint pauses execution. Recommendations:
 
-1. 优先在 TUI 初始化前（`cli/mod.rs` 命令分发阶段）设置断点
-2. 调试 TUI 内部逻辑时，在事件处理函数中设置条件断点
-3. 如果终端状态异常，调试停止后在终端执行 `reset` 恢复
+1. Prefer setting breakpoints before TUI initialization (at the `cli/mod.rs` command dispatch stage)
+2. When debugging TUI internals, use conditional breakpoints inside event handler functions
+3. If the terminal state is corrupted after stopping the debugger, run `reset` in the terminal to recover
 
-## 条件断点
+## Conditional breakpoints
 
-右键断点 → Edit Breakpoint，添加条件表达式：
+Right-click a breakpoint → Edit Breakpoint, and add a condition expression:
 
 ```rust
-// 仅在特定后端时断住
+// break only for a specific backend
 backend == AcpBackend::Claude
 
-// 仅在包含特定文本时断住
+// break only when the prompt contains specific text
 prompt.contains("test")
 ```
 
-## 日志断点 (Logpoint)
+## Logpoints
 
-右键行号 → Add Logpoint，输入日志模板（不暂停执行）：
+Right-click a line number → Add Logpoint, and enter a log template (execution does not pause):
 
 ```
 Received event: {event:?}
 ```
 
-## 常见问题
+## Common issues
 
-### CodeLLDB 无法启动
+### CodeLLDB fails to start
 
-确认已安装 CodeLLDB 扩展，且 macOS 上已授予调试权限（System Preferences → Privacy & Security → Developer Tools）。
+Confirm that the CodeLLDB extension is installed and that debugging permissions have been granted on macOS (System Preferences → Privacy & Security → Developer Tools).
 
-### 断点不命中
+### Breakpoints not hit
 
-1. 确认编译使用 debug profile（launch.json 中的 `cargo build` 无 `--release`）
-2. 检查代码是否被优化内联（debug 模式默认 `opt-level = 0`）
-3. async 函数内部断点可能需要在 `.await` 后的行设置
+1. Confirm the build uses the debug profile (no `--release` in the `cargo build` inside `launch.json`)
+2. Check whether the code has been optimized or inlined (debug mode defaults to `opt-level = 0`)
+3. Breakpoints inside async functions may need to be placed on the line after the `.await`
 
-### 终端被 TUI 占用
+### Terminal taken over by TUI
 
-调试 TUI 时使用 "integrated" terminal。如果需要同时查看 stdout 输出，考虑使用 "Debug Check" 或 "Debug Run" 配置。
+Use the "integrated" terminal when debugging TUI. If you need to view stdout output at the same time, consider using the "Debug Check" or "Debug Run" configuration instead.
 
-### ACP 子进程调试
+### Debugging ACP subprocesses
 
-ACP 后端是外部进程（npx 启动），无法直接断点。调试 ACP 交互请在以下位置设置断点：
+ACP backends are external processes (launched via `npx`) and cannot be breakpointed directly. To debug ACP interactions, set breakpoints at:
 
-- `src/acp/wire.rs` — 读取/解析 JSON-RPC 消息
-- `src/acp/mod.rs` — 发送请求和处理响应
-- `src/acp/session.rs` — session 参数构建
+- `src/acp/wire.rs` — reading and parsing JSON-RPC messages
+- `src/acp/mod.rs` — sending requests and handling responses
+- `src/acp/session.rs` — session parameter construction

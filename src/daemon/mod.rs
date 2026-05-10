@@ -204,6 +204,7 @@ async fn handle_prompt(
                 text: None,
                 error: Some(err.to_string()),
                 timing: None,
+                execution_id: None,
                 warmed: None,
                 events: Vec::new(),
             };
@@ -219,6 +220,7 @@ async fn handle_prompt(
                 text: None,
                 error: Some("timeout_ms must be greater than 0".to_string()),
                 timing: None,
+                execution_id: None,
                 warmed: None,
                 events: Vec::new(),
             };
@@ -234,19 +236,24 @@ async fn handle_prompt(
         )
         .await
     {
-        Ok(output) => DaemonPromptResponse {
-            ok: true,
-            text: Some(output.text),
-            error: None,
-            timing: Some(output.timing),
-            warmed: None,
-            events: output.events,
-        },
+        Ok(output) => {
+            let execution_id = output.execution_id.clone();
+            DaemonPromptResponse {
+                ok: true,
+                text: Some(output.text),
+                error: None,
+                timing: Some(output.timing),
+                execution_id,
+                warmed: None,
+                events: output.events,
+            }
+        }
         Err(err) => DaemonPromptResponse {
             ok: false,
             text: None,
             error: Some(err.to_string()),
             timing: None,
+            execution_id: None,
             warmed: None,
             events: Vec::new(),
         },
@@ -270,6 +277,7 @@ async fn handle_warm(
             text: None,
             error: None,
             timing: None,
+            execution_id: None,
             warmed: Some(warmed),
             events: Vec::new(),
         },
@@ -278,6 +286,7 @@ async fn handle_warm(
             text: None,
             error: Some(err.to_string()),
             timing: None,
+            execution_id: None,
             warmed: None,
             events: Vec::new(),
         },

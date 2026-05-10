@@ -33,6 +33,8 @@ pub struct DaemonPromptResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timing: Option<AcpPromptTiming>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warmed: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<RuntimeEvent>,

@@ -6,6 +6,7 @@
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -86,6 +87,12 @@ pub struct CachedExecution {
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub fencing_token: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheMetricsSnapshot {
+    pub execution_status_counts: BTreeMap<String, u64>,
+    pub outputs_total: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +284,27 @@ impl CacheStore {
         }
     }
 
+    pub fn metrics_snapshot(&self) -> Result<CacheMetricsSnapshot> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt =
+            conn.prepare("SELECT status, COUNT(*) FROM cache_executions GROUP BY status")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+        })?;
+        let mut execution_status_counts = BTreeMap::new();
+        for row in rows {
+            let (status, count) = row?;
+            execution_status_counts.insert(status, count);
+        }
+        let outputs_total = conn.query_row("SELECT COUNT(*) FROM cache_outputs", [], |row| {
+            row.get::<_, u64>(0)
+        })?;
+        Ok(CacheMetricsSnapshot {
+            execution_status_counts,
+            outputs_total,
+        })
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
@@ -363,4 +391,42 @@ fn purge_old_records(conn: &Connection) {
          AND finished_at < ?1",
         params![cutoff],
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime_event::OutputEvent;
+
+    #[test]
+    fn metrics_snapshot_counts_statuses_and_outputs() {
+        let store = CacheStore::open(Path::new(":memory:")).unwrap();
+        let exec_completed = store
+            .begin_execution_with_id("codex", "session", "hash-1", Some("exec-completed"))
+            .unwrap();
+        let exec_failed = store
+            .begin_execution_with_id("codex", "session", "hash-2", Some("exec-failed"))
+            .unwrap();
+        store
+            .append_output(
+                &exec_completed,
+                &RuntimeEvent::Output(OutputEvent {
+                    text: "ok".to_string(),
+                    role: None,
+                }),
+            )
+            .unwrap();
+        store
+            .finish_execution(&exec_completed, ExecutionStatus::Completed)
+            .unwrap();
+        store
+            .finish_execution(&exec_failed, ExecutionStatus::Failed)
+            .unwrap();
+
+        let snapshot = store.metrics_snapshot().unwrap();
+
+        assert_eq!(snapshot.execution_status_counts["completed"], 1);
+        assert_eq!(snapshot.execution_status_counts["failed"], 1);
+        assert_eq!(snapshot.outputs_total, 1);
+    }
 }

@@ -1,17 +1,17 @@
-# iota-sympantos 代码调用链
+# iota-sympantos code call chains
 
-本文按入口和运行时边界梳理当前代码调用链，重点标注 IPC、子进程、网络和持久化边界。架构分层见 [architecture.md](architecture.md)。
+This document traces the current code call chains by entry point and runtime boundary, with emphasis on IPC, subprocess, network, and persistence boundaries. For the layered architecture see [architecture.md](architecture.md).
 
-## 入口总览
+## Entry overview
 
 ```text
 src/main.rs
   -> cli::run()
 ```
 
-`main.rs` 只注册模块并启动 Tokio runtime。所有用户可见入口由 `src/cli/mod.rs` 分发。
+`main.rs` only registers modules and starts the Tokio runtime. All user-visible entry points are dispatched by `src/cli/mod.rs`.
 
-## CLI 命令分发
+## CLI command dispatch
 
 ```text
 cli::run()
@@ -33,13 +33,13 @@ cli::run()
        no args              -> tui::run()
 ```
 
-全局约束：
+Global constraints:
 
-- 配置只由 `config::read_config()` 读取 `~/.i6/nimia.yaml`。
-- `iota run --daemon` 不能与 `--show-native` 同用。
-- `--log-events` 输出 normalized runtime events；`--timing` 输出 route/ACP timing JSON。
+- Config is read only from `~/.i6/nimia.yaml` via `config::read_config()`.
+- `iota run --daemon` cannot be combined with `--show-native`.
+- `--log-events` outputs normalized runtime events; `--timing` outputs route/ACP timing JSON.
 
-## 链路 1：CLI 直接运行 ACP 后端
+## Path 1: CLI direct ACP backend execution
 
 ```text
 iota run [backend] [options] <prompt>
@@ -67,7 +67,7 @@ iota run [backend] [options] <prompt>
        -> AcpClient::shutdown()
 ```
 
-Engine 内部调用链：
+Engine internal call chain:
 
 ```text
 IotaEngine::prompt_in_cwd_timed_with_execution_id()
@@ -122,15 +122,15 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
   -> MemoryStore::insert(episodic prompt/output memory)
 ```
 
-IPC / 外部边界：
+IPC / external boundaries:
 
-- `git status --short` 是同步子进程，engine 用 `spawn_blocking` 包裹 context 组装。
-- ACP backend 是 child process，stdin/stdout 上跑换行分隔 JSON-RPC 2.0。
-- `CacheStore`、`MemoryStore`、`SessionLedger` 是 SQLite 文件边界。
+- `git status --short` is a synchronous subprocess; the engine wraps context assembly in `spawn_blocking`.
+- The ACP backend is a child process running newline-delimited JSON-RPC 2.0 over stdin/stdout.
+- `CacheStore`, `MemoryStore`, and `SessionLedger` are SQLite file boundaries.
 
-## 链路 2：ACP client 协议驱动
+## Path 2: ACP client protocol driver
 
-启动链：
+Startup chain:
 
 ```text
 IotaEngine::ensure_client()
@@ -155,7 +155,7 @@ IotaEngine::ensure_client()
        -> wait_for_response()
 ```
 
-Prompt 链：
+Prompt chain:
 
 ```text
 AcpClient::prompt_with_cwd_timed_for_execution()
@@ -191,19 +191,19 @@ initialize
   -> session/complete
 ```
 
-辅助模块：
+Helper modules:
 
-| 模块 | 调用点 | 职责 |
+| Module | Call site | Responsibility |
 |---|---|---|
-| `acp/wire.rs` | `read_prompt_events_for_id()`, `wait_for_response()` | 带 timeout 的 line read、JSON parse、response id 判断、error 格式化 |
-| `runtime_event.rs` | ACP event loop | update/complete/permission/usage/tool/error 到 `RuntimeEvent` |
-| `acp/permission.rs` | permission request | 自动批准 iota tool/whitelist，或走 TUI/stdin |
-| `mcp/router.rs` | ACP tool-call event | 路由 iota tools，拒绝外部 tools |
-| `acp/session.rs` | `ensure_session_timed()` | 渲染 `cwd` 和 `mcpServers` |
+| `acp/wire.rs` | `read_prompt_events_for_id()`, `wait_for_response()` | Line read with timeout, JSON parse, response id matching, error formatting |
+| `runtime_event.rs` | ACP event loop | Normalize update/complete/permission/usage/tool/error to `RuntimeEvent` |
+| `acp/permission.rs` | permission request | Auto-approve iota tool/whitelist; otherwise route to TUI/stdin |
+| `mcp/router.rs` | ACP tool-call event | Route iota tools; reject external tools |
+| `acp/session.rs` | `ensure_session_timed()` | Render `cwd` and `mcpServers` |
 
-## 链路 3：CLI 经 daemon 运行
+## Path 3: CLI via daemon
 
-客户端链：
+Client chain:
 
 ```text
 iota run --daemon [backend] <prompt>
@@ -224,7 +224,7 @@ iota run --daemon [backend] <prompt>
   -> optional log events / timing
 ```
 
-Daemon 进程链：
+Daemon process chain:
 
 ```text
 iota __daemon
@@ -240,7 +240,7 @@ iota __daemon
             -> tokio::spawn(handle_connection)
 ```
 
-Connection 处理：
+Connection handling:
 
 ```text
 daemon::handle_connection()
@@ -255,7 +255,7 @@ daemon::handle_connection()
   -> write one JSON line DaemonPromptResponse
 ```
 
-Prompt 请求：
+Prompt request:
 
 ```text
 daemon::handle_prompt()
@@ -268,7 +268,7 @@ daemon::handle_prompt()
   -> DaemonPromptResponse { ok, text/error, timing, events }
 ```
 
-Warm 请求：
+Warm request:
 
 ```text
 iota check --daemon / bench-* --daemon / internal warm path
@@ -283,7 +283,7 @@ iota check --daemon / bench-* --daemon / internal warm path
   -> DaemonPromptResponse { warmed }
 ```
 
-Daemon shutdown：
+Daemon shutdown:
 
 ```text
 Ctrl+C in daemon process
@@ -293,22 +293,22 @@ Ctrl+C in daemon process
   -> each AcpClient::shutdown()
 ```
 
-IPC 边界：
+IPC boundaries:
 
-- CLI 和 daemon 使用本机 TCP JSON line，默认 `127.0.0.1:47661`，可由 `IOTA_DAEMON_ADDR` 覆盖。
-- daemon 自身由 CLI 以 `current_exe __daemon` 静默启动。
-- daemon 内部的 engine pool 按 cwd 复用 engine，不按 backend 分桶；backend 级复用在 `IotaEngine` 的 `(backend, cwd)` client pool 内完成。
+- CLI and daemon communicate over local TCP JSON lines, defaulting to `127.0.0.1:47661`, overridable via `IOTA_DAEMON_ADDR`.
+- The daemon is started silently by the CLI as `current_exe __daemon`.
+- The daemon's internal engine pool reuses engines by cwd, not by backend; backend-level reuse is handled inside `IotaEngine`'s `(backend, cwd)` client pool.
 
-## 链路 4：TUI 交互运行
+## Path 4: TUI interactive execution
 
-初始化链：
+Initialization chain:
 
 ```text
 iota / iota tui
   -> cli::run()
   -> config::read_config()
   -> tui::run(config)
-       -> stdout is_terminal 检查
+       -> stdout is_terminal check
        -> TuiApp::new()
             -> IotaEngine::new_for_session_cwd(config, false, DEFAULT_TIMEOUT_MS, current_dir)
        -> acp::permission::install_tui_approval_channel()
@@ -320,7 +320,7 @@ iota / iota tui
        -> run_loop()
 ```
 
-事件循环：
+Event loop:
 
 ```text
 tui::run_loop()
@@ -346,7 +346,7 @@ tui::run_loop()
        -> overlays: help / pager / quit confirm / approval
 ```
 
-Approval 浮层：
+Approval overlay:
 
 ```text
 ACP backend sends session/request_permission
@@ -359,13 +359,13 @@ ACP backend sends session/request_permission
   -> ApprovalStore records request/decision
 ```
 
-TUI 边界：
+TUI boundaries:
 
-- TUI 不走 daemon；它持有进程内 `IotaEngine`。
-- ACP stream 到 TUI 是进程内 Tokio mpsc，不是 IPC。
-- 真正外部边界仍是 ACP backend、MCP sidecar、git、SQLite 和 function tools。
+- The TUI does not use the daemon; it holds an in-process `IotaEngine`.
+- ACP stream to TUI is an in-process Tokio mpsc channel, not IPC.
+- True external boundaries remain the ACP backend, MCP sidecar, git, SQLite, and function tools.
 
-## 链路 5：Context Fabric 注入
+## Path 5: Context Fabric injection
 
 ```text
 IotaEngine::prompt_in_cwd_timed_with_execution_id()
@@ -393,7 +393,7 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
        -> original prompt
 ```
 
-Workspace summary：
+Workspace summary:
 
 ```text
 ContextEngine::compose_effective_prompt()
@@ -402,7 +402,7 @@ ContextEngine::compose_effective_prompt()
        -> take first 20 changed lines
 ```
 
-Context disabled path：
+Context disabled path:
 
 ```text
 context_engine.enabled = false
@@ -411,9 +411,9 @@ or context_engine.injection = off
   -> compose_effective_prompt() returns original prompt
 ```
 
-## 链路 6：Memory 写入、搜索和 embedding
+## Path 6: Memory write, search, and embedding
 
-Engine 自动写入：
+Engine automatic write:
 
 ```text
 completed ACP/skill output
@@ -426,7 +426,7 @@ completed ACP/skill output
        -> SQLite memory + memory_embedding
 ```
 
-LLM 主动写入：
+LLM-initiated write:
 
 ```text
 ContextEngine injects <memory-tools>
@@ -442,7 +442,7 @@ ContextEngine injects <memory-tools>
   -> MemoryStore::insert_with_merge()
 ```
 
-Memory search：
+Memory search:
 
 ```text
 iota_memory_search { query, limit, mode }
@@ -461,9 +461,9 @@ iota_memory_search { query, limit, mode }
          -> merge keyword and vector rankings
 ```
 
-`IotaEngine` 打开的 memory store 使用 `context_engine.embedding`。`context-mcp` 和 `mcp::router` 当前通过 `MemoryStore::open()` 打开默认 store，因此 MCP 查询侧使用本地 trigram fallback。
+The memory store opened by `IotaEngine` uses `context_engine.embedding`. `context-mcp` and `mcp::router` currently open the default store via `MemoryStore::open()`, so MCP query-side uses the local trigram fallback.
 
-Embedding schema：
+Embedding schema:
 
 ```text
 memory_embedding
@@ -472,9 +472,9 @@ memory_embedding
   updated_at INTEGER NOT NULL
 ```
 
-## 链路 7：Engine-run skill 与 MCP
+## Path 7: Engine-run skill and MCP
 
-触发链：
+Trigger chain:
 
 ```text
 SkillRegistry::load_cached()
@@ -484,7 +484,7 @@ SkillRegistry::load_cached()
        -> prompt lowercased contains any trigger
 ```
 
-执行链：
+Execution chain:
 
 ```text
 matched skill with execution.mode = "mcp"
@@ -512,15 +512,15 @@ matched skill with execution.mode = "mcp"
   -> finish execution without ACP backend prompt
 ```
 
-边界：
+Boundaries:
 
-- 每个 `call_stdio()` 启动一个 MCP server 子进程。
-- parallel skill 会并发启动多个 tool 调用。
-- 命中 engine-run skill 时可以完全绕过 ACP 后端。
+- Each `call_stdio()` starts a new MCP server subprocess.
+- Parallel skills launch multiple tool calls concurrently.
+- When an engine-run skill is matched, the ACP backend can be bypassed entirely.
 
-## 链路 8：MCP sidecar - iota-context
+## Path 8: MCP sidecar — iota-context
 
-启动方式：
+Launch:
 
 ```text
 iota context-mcp
@@ -528,7 +528,7 @@ iota context-mcp
   -> context::server::run_stdio()
 ```
 
-初始化：
+Initialization:
 
 ```text
 context::server::run_stdio()
@@ -541,7 +541,7 @@ context::server::run_stdio()
   -> handle_request()
 ```
 
-JSON-RPC methods：
+JSON-RPC methods:
 
 ```text
 initialize
@@ -572,14 +572,14 @@ resources/read
   -> read_resource()
 ```
 
-调用方：
+Callers:
 
-- ACP backend 根据 `session/new.mcpServers` 启动。
-- `skill::runner` 可作为 engine-run MCP skill server 启动。
+- The ACP backend starts this server based on `session/new.mcpServers`.
+- `skill::runner` can start it as an engine-run MCP skill server.
 
-## 链路 9：MCP sidecar - iota-fun
+## Path 9: MCP sidecar — iota-fun
 
-启动方式：
+Launch:
 
 ```text
 iota fun-mcp
@@ -587,7 +587,7 @@ iota fun-mcp
   -> skill::fun_server::run_stdio()
 ```
 
-JSON-RPC methods：
+JSON-RPC methods:
 
 ```text
 initialize
@@ -596,7 +596,7 @@ tools/call
   -> run_tool()
 ```
 
-工具执行链：
+Tool execution chain:
 
 ```text
 fun.python
@@ -629,15 +629,15 @@ fun.zig
   -> zig run
 ```
 
-边界：
+Boundaries:
 
-- `fun-mcp` 本身是 stdio JSON-RPC MCP server。
-- 语言运行器通过 `std::process::Command` 调用解释器、编译器或编译产物。
-- 编译缓存位于 `~/.i6/fun-cache/<language>/<hash>`。
+- `fun-mcp` is itself a stdio JSON-RPC MCP server.
+- Language runners call interpreters, compilers, or compiled binaries via `std::process::Command`.
+- Compilation cache is at `~/.i6/fun-cache/<language>/<hash>`.
 
-## 链路 10：Backend-started MCP server 渲染
+## Path 10: Backend-started MCP server rendering
 
-配置链：
+Configuration chain:
 
 ```text
 EffectiveConfig::from_config()
@@ -651,7 +651,7 @@ EffectiveConfig::from_config()
        -> mcp_env_shape
 ```
 
-session/new 参数：
+session/new parameters:
 
 ```text
 acp::session::session_new_params_with_options()
@@ -670,21 +670,21 @@ acp::session::session_new_params_with_options()
        { "cwd": cwd, "mcpServers": [...] }
 ```
 
-默认启用规则：
+Default injection rules:
 
-| Backend | 默认是否注入 `mcpServers` |
+| Backend | Injects `mcpServers` by default |
 |---|---|
-| Claude Code | 仅当 `context_engine_backend.claude-code.mcp_session_new` 为 `true/try/on` |
-| Codex | 仅当 `context_engine_backend.codex.mcp_session_new` 为 `true/try/on`；即使空 server 也发送 `mcpServers` |
-| Gemini | 默认启用 |
-| Hermes | 默认启用 |
-| OpenCode | 默认启用 |
+| Claude Code | Only when `context_engine_backend.claude-code.mcp_session_new` is `true/try/on` |
+| Codex | Only when `context_engine_backend.codex.mcp_session_new` is `true/try/on`; sends `mcpServers` even when empty |
+| Gemini | Enabled by default |
+| Hermes | Enabled by default |
+| OpenCode | Enabled by default |
 
-`mcp_session_new: try` 对 Claude Code 和 Codex 视为启用，对其他 backend 视为禁用。
+`mcp_session_new: try` is treated as enabled for Claude Code and Codex, and as disabled for other backends.
 
-## 链路 11：Permission 和 MCP router
+## Path 11: Permission and MCP router
 
-权限请求：
+Permission request:
 
 ```text
 ACP backend -> session/request_permission
@@ -715,7 +715,7 @@ ACP backend -> session/request_permission
        -> return ApprovalDecisionEvent
 ```
 
-Response shape：
+Response shape:
 
 ```text
 if params.options contains allow_always / allow / allow*:
@@ -728,7 +728,7 @@ else:
   -> { "approved": false }
 ```
 
-Router：
+Router:
 
 ```text
 mcp::router::try_intercept_tool_call(method, params)
@@ -749,16 +749,19 @@ mcp::router::try_intercept_tool_call(method, params)
        external unknown -> denied by iota policy
 ```
 
-## 链路 12：Telemetry queries、check、benchmark、native、skill pull
+## Path 12: Telemetry queries, check, benchmark, native, skill pull
 
-Telemetry query commands：
+Telemetry query commands:
 
 ```text
 iota logs <execution_id>
   -> cli::run_logs_command()
   -> IOTA_LOKI_URL or http://localhost:3100
-  -> Loki query_range API with {service_name="iota"}
-  -> client-side filter by stream execution_id or line text
+  -> Loki query_range API:
+       1. {service_name="iota", execution_id="<execution_id>"}
+       2. {service_name="iota"} |= "<execution_id>"
+       3. {service_name="iota"}
+  -> client-side filter by stream execution_id label or line text
   -> print matching log lines
 
 iota trace <trace_id>
@@ -766,11 +769,24 @@ iota trace <trace_id>
   -> IOTA_JAEGER_URL or http://localhost:16686
   -> Jaeger /api/traces/<trace_id>
   -> print span names and durations
+
+iota trace --execution <execution_id>
+  -> cli::run_trace_command()
+  -> query Loki with same fallback sequence as iota logs
+  -> extract trace_id / traceid / traceId from stream labels or JSON/text log lines
+  -> query Jaeger /api/traces/<trace_id>
+  -> print span names and durations
+
+iota metrics [--once|--listen <addr>]
+  -> cli::run_metrics_command()
+  -> CacheStore::metrics_snapshot()
+  -> format local CacheStore counters as Prometheus text
+  -> stdout with --once, or HTTP /metrics when listening
 ```
 
 The old `iota observability` / `iota obs` command group is not present in the current CLI.
 
-Check：
+Check:
 
 ```text
 iota check [--daemon]
@@ -787,7 +803,7 @@ iota check [--daemon]
   -> JSON stdout
 ```
 
-Benchmark：
+Benchmark:
 
 ```text
 iota bench-cold [rounds]
@@ -807,7 +823,7 @@ iota bench-* --daemon
   -> repeated send_prompt_autostart_daemon("ping")
 ```
 
-Native materialize：
+Native materialize:
 
 ```text
 iota native-materialize [--dry-run] <path> [content]
@@ -832,7 +848,7 @@ iota native-materialize [--dry-run] --all --backend <name> [workspace]
   -> optional apply()
 ```
 
-Skill pull：
+Skill pull:
 
 ```text
 iota skill pull <source> [name]
@@ -843,9 +859,9 @@ iota skill pull <source> [name]
   -> print JSON { path }
 ```
 
-## 存储子系统调用链
+## Store subsystem call chains
 
-MemoryStore：
+MemoryStore:
 
 ```text
 MemoryStore::open_with_embedding(path, config)
@@ -877,7 +893,7 @@ search_with_mode()
   -> keyword/vector/hybrid
 ```
 
-CacheStore：
+CacheStore:
 
 ```text
 CacheStore::open()
@@ -907,7 +923,7 @@ request_hash()
   -> SHA-256 over backend, cwd, and prompt
 ```
 
-SessionLedger：
+SessionLedger:
 
 ```text
 SessionLedger::open()
@@ -925,7 +941,7 @@ read_handoff()
 summary()
 ```
 
-ApprovalStore：
+ApprovalStore:
 
 ```text
 ApprovalStore::open_default()
@@ -935,7 +951,7 @@ classify_operation()
 default_decision()
 ```
 
-EmbeddingEngine：
+EmbeddingEngine:
 
 ```text
 EmbeddingEngine::from_config()
@@ -957,49 +973,49 @@ embed(content)
        normalize()
 ```
 
-## 模块覆盖表
+## Module coverage table
 
-| 模块 | 主要职责 | 覆盖链路 |
+| Module | Main responsibility | Paths covered |
 |---|---|---|
-| `main.rs` | Tokio 入口 | 入口总览 |
-| `cli/mod.rs` | 命令分发、daemon autostart、bench、logs/trace、native、skill | 1,3,4,12 |
-| `config.rs` | `~/.i6/nimia.yaml`、EffectiveConfig、backend command/env、MCP/session options、embedding config | 1,2,3,10 |
-| `engine.rs` | 核心编排、replay/join、memory、skill、context、ACP pool、store 写回 | 1,3,4,5,6,7 |
-| `acp/mod.rs` | ACP backend、子进程、JSON-RPC、prompt event loop | 1,2 |
-| `acp/session.rs` | session/new 和 mcpServers | 2,10 |
+| `main.rs` | Tokio entry point | Entry overview |
+| `cli/mod.rs` | Command dispatch, daemon autostart, bench, logs/trace, native, skill | 1,3,4,12 |
+| `config.rs` | `~/.i6/nimia.yaml`, EffectiveConfig, backend command/env, MCP/session options, embedding config | 1,2,3,10 |
+| `engine.rs` | Core orchestration, replay/join, memory, skill, context, ACP pool, store writeback | 1,3,4,5,6,7 |
+| `acp/mod.rs` | ACP backend, subprocess, JSON-RPC, prompt event loop | 1,2 |
+| `acp/session.rs` | session/new and mcpServers | 2,10 |
 | `acp/wire.rs` | ACP line read/parse/id/error | 2 |
-| `acp/permission.rs` | ACP permission、auto approve、TUI/stdin approval | 4,11 |
-| `runtime_event.rs` | 事件归一化 | 1,2,11,12 |
-| `daemon/mod.rs` | daemon TCP server、warm/prompt、graceful shutdown | 3 |
-| `daemon/pool.rs` | 按 cwd 复用 IotaEngine | 3 |
-| `daemon/proto.rs` | daemon wire types | 3 |
-| `tui.rs` | TUI 主循环、engine task、stream/approval channel | 4 |
-| `tui/composer.rs` | 输入编辑器 | 4 |
-| `tui/markdown.rs` | Markdown 渲染 | 4 |
-| `tui/status_bar.rs` | 状态栏 | 4 |
-| `tui/theme.rs` | TUI 样式 | 4 |
-| `tui/state.rs` | 对话和观测状态 | 4 |
-| `context/mod.rs` | context capsule、DialogueBuffer、workspace summary | 5 |
+| `acp/permission.rs` | ACP permission, auto approve, TUI/stdin approval | 4,11 |
+| `runtime_event.rs` | Event normalization | 1,2,11,12 |
+| `daemon/mod.rs` | Daemon TCP server, warm/prompt, graceful shutdown | 3 |
+| `daemon/pool.rs` | Reuse IotaEngine per cwd | 3 |
+| `daemon/proto.rs` | Daemon wire types | 3 |
+| `tui.rs` | TUI main loop, engine task, stream/approval channel | 4 |
+| `tui/composer.rs` | Input editor | 4 |
+| `tui/markdown.rs` | Markdown rendering | 4 |
+| `tui/status_bar.rs` | Status bar | 4 |
+| `tui/theme.rs` | TUI styles | 4 |
+| `tui/state.rs` | Conversation and observability state | 4 |
+| `context/mod.rs` | Context capsule, DialogueBuffer, workspace summary | 5 |
 | `context/server.rs` | iota-context MCP server | 6,8 |
-| `skill/mod.rs` | skill 加载、trigger、backend compatibility | 5,7,8,12 |
-| `skill/runner.rs` | engine-run MCP skill | 7 |
-| `skill/cache.rs` | skill pull/cache | 12 |
-| `skill/fun_server.rs` | iota-fun MCP server 和语言执行 | 7,9 |
+| `skill/mod.rs` | Skill loading, trigger, backend compatibility | 5,7,8,12 |
+| `skill/runner.rs` | Engine-run MCP skill | 7 |
+| `skill/cache.rs` | Skill pull/cache | 12 |
+| `skill/fun_server.rs` | iota-fun MCP server and language execution | 7,9 |
 | `mcp/client.rs` | stdio MCP client | 7 |
-| `mcp/router.rs` | ACP tool-call 拦截 | 6,11 |
-| `native/mod.rs` | 原生文件投影 | 12 |
-| `store/memory.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
-| `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
-| `store/cache.rs` | execution replay/dedupe cache | 1,3,4,12 |
-| `telemetry/mod.rs` | OTel provider/exporter initialization | 入口总览,12 |
+| `mcp/router.rs` | ACP tool-call intercept | 6,11 |
+| `native/mod.rs` | Native file projection | 12 |
+| `store/memory.rs` | Memory taxonomy, recall, search, merge, TTL | 5,6,8,11 |
+| `store/embedding.rs` | API/local embedding, cosine, blob encode/decode | 6 |
+| `store/cache.rs` | Execution replay/dedupe cache | 1,3,4,12 |
+| `telemetry/mod.rs` | OTel provider/exporter initialization | Entry overview, 12 |
 | `telemetry/metrics.rs` | OTel instruments | 1,3,4,12 |
-| `store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
-| `store/approval.rs` | approval 事件和风险分类 | 11 |
-| `utils.rs` | 时间、摘要、lock recovery | 多条链路 |
+| `store/ledger.rs` | Session/backend session/turn/handoff | 1,5,8,11 |
+| `store/approval.rs` | Approval events and risk classification | 11 |
+| `utils.rs` | Timestamps, summarization, lock recovery | Multiple paths |
 
-## 进程间和外部调用清单
+## Inter-process and external call inventory
 
-| 位置 | 类型 | 发起方 | 目标 | 协议/用途 |
+| Location | Type | Initiator | Target | Protocol/purpose |
 |---|---|---|---|---|
 | `cli::start_daemon_silently()` | child process | CLI | `iota __daemon` | daemon autostart |
 | `daemon::send_prompt()` / `send_warm()` | TCP | CLI | daemon | JSON line request/response |

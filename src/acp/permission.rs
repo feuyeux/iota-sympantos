@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::sync::OnceLock;
 use tokio::io::AsyncWriteExt;
 use tokio::process::ChildStdin;
@@ -169,39 +169,7 @@ async fn send_response(stdin: &mut ChildStdin, id: Value, result: Value) -> Resu
 }
 
 async fn send_approved_response(stdin: &mut ChildStdin, id: Value, params: &Value) -> Result<()> {
-    // Claude-code ACP adapter expects: {outcome: {outcome: "selected", optionId: "..."}}
-    // Prefer "allow_always" to persist the decision across the session.
-    if let Some(option_id) = params
-        .get("options")
-        .and_then(Value::as_array)
-        .and_then(|opts| {
-            opts.iter()
-                .find(|o| o.get("optionId").and_then(Value::as_str) == Some("allow_always"))
-                .or_else(|| {
-                    opts.iter()
-                        .find(|o| o.get("optionId").and_then(Value::as_str) == Some("allow"))
-                })
-                .or_else(|| {
-                    opts.iter().find(|o| {
-                        o.get("optionId")
-                            .and_then(Value::as_str)
-                            .map(|s| s.starts_with("allow"))
-                            == Some(true)
-                    })
-                })
-                .and_then(|o| o.get("optionId").and_then(Value::as_str))
-        })
-    {
-        return send_response(
-            stdin,
-            id,
-            json!({
-                "outcome": { "outcome": "selected", "optionId": option_id }
-            }),
-        )
-        .await;
-    }
-    send_response(stdin, id, json!({ "approved": true })).await
+    send_response(stdin, id, permission_outcome(true, params)).await
 }
 
 async fn send_approved_or_denied_response(
@@ -210,29 +178,47 @@ async fn send_approved_or_denied_response(
     approved: bool,
     params: &Value,
 ) -> Result<()> {
-    if approved {
-        send_approved_response(stdin, id, params).await
+    send_response(stdin, id, permission_outcome(approved, params)).await
+}
+
+fn permission_outcome(approved: bool, params: &Value) -> Value {
+    let option_id = if approved {
+        permission_option_id(params, |option_id, kind| {
+            option_id == "allow_always"
+                || option_id == "allow"
+                || option_id.starts_with("allow")
+                || kind.is_some_and(|kind| kind.starts_with("allow"))
+        })
     } else {
-        // Use outcome format for denial as well.
-        let reject_id = params
-            .get("options")
-            .and_then(Value::as_array)
-            .and_then(|opts| {
-                opts.iter()
-                    .find(|o| o.get("optionId").and_then(Value::as_str) == Some("reject"))
-                    .and_then(|o| o.get("optionId").and_then(Value::as_str))
-            });
-        if let Some(option_id) = reject_id {
-            send_response(
-                stdin,
-                id,
-                json!({ "outcome": { "outcome": "selected", "optionId": option_id } }),
-            )
-            .await
-        } else {
-            send_response(stdin, id, json!({ "approved": false })).await
-        }
+        permission_option_id(params, |option_id, kind| {
+            option_id == "reject"
+                || option_id.starts_with("reject")
+                || kind.is_some_and(|kind| kind.starts_with("reject"))
+        })
+    };
+
+    if let Some(option_id) = option_id {
+        json!({ "outcome": { "outcome": "selected", "optionId": option_id } })
+    } else if approved {
+        json!({ "approved": true })
+    } else {
+        json!({ "outcome": { "outcome": "cancelled" } })
     }
+}
+
+fn permission_option_id<F>(params: &Value, matches: F) -> Option<String>
+where
+    F: Fn(&str, Option<&str>) -> bool,
+{
+    params
+        .get("options")
+        .and_then(Value::as_array)?
+        .iter()
+        .find_map(|option| {
+            let option_id = option.get("optionId").and_then(Value::as_str)?;
+            let kind = option.get("kind").and_then(Value::as_str);
+            matches(option_id, kind).then(|| option_id.to_string())
+        })
 }
 
 fn tool_is_whitelisted(tool_name: &str, rules: &[String]) -> bool {
@@ -280,6 +266,12 @@ fn canonical_tool_name(value: &str) -> String {
 async fn prompt_yes_no(message: &str) -> Result<bool> {
     let message = message.to_string();
     tokio::task::spawn_blocking(move || -> Result<bool> {
+        if !io::stdin().is_terminal() {
+            eprintln!(
+                "Denying ACP tool request in non-interactive mode. Re-run in TUI or configure a tool whitelist to approve it."
+            );
+            return Ok(false);
+        }
         print!("{}(y/n): ", message);
         io::stdout().flush()?;
         let mut input = String::new();
@@ -409,5 +401,30 @@ mod tests {
         assert!(tool_is_whitelisted("iota_read", &rules));
         assert!(tool_is_whitelisted("safe_tool", &rules));
         assert!(!tool_is_whitelisted("dangerous", &rules));
+    }
+
+    #[test]
+    fn denied_permission_selects_reject_like_option() {
+        let params = json!({
+            "options": [
+                {"optionId": "allow-once", "kind": "allow_once"},
+                {"optionId": "reject-once", "kind": "reject_once"}
+            ]
+        });
+
+        assert_eq!(
+            permission_outcome(false, &params),
+            json!({"outcome": {"outcome": "selected", "optionId": "reject-once"}})
+        );
+    }
+
+    #[test]
+    fn denied_permission_without_reject_option_is_cancelled() {
+        let params = json!({"options": []});
+
+        assert_eq!(
+            permission_outcome(false, &params),
+            json!({"outcome": {"outcome": "cancelled"}})
+        );
     }
 }

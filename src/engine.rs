@@ -283,7 +283,7 @@ impl IotaEngine {
             tracing::info!(execution_id = %eid, backend = %backend, session_id = %self.session_id, "execution.started");
         }
         self.record_execution_active_delta(1);
-        let mut execution_span = execution_id.as_ref().map(|eid| {
+        let execution_span = execution_id.as_ref().map(|eid| {
             spans::start_execution_span(eid, &self.session_id, &backend.to_string(), &request_hash)
         });
         tracing::debug!(backend = %backend, execution_id = execution_id.as_deref(), "execution started");
@@ -298,6 +298,10 @@ impl IotaEngine {
         let extracted_memories = if is_memory_query(prompt) || prompt.contains("iota_memory_write")
         {
             Vec::new()
+        } else if let Some(span) = execution_span.as_ref() {
+            span.in_scope(|| {
+                self.extract_structured_memories(backend, &cwd, prompt, execution_id.as_deref())
+            })
         } else {
             self.extract_structured_memories(backend, &cwd, prompt, execution_id.as_deref())
         };
@@ -321,8 +325,8 @@ impl IotaEngine {
             events.push(output_event);
             self.finish_execution(&execution_id, ExecutionStatus::Completed);
             self.record_execution_active_delta(-1);
-            if let Some(span) = execution_span.as_mut() {
-                spans::end_span_ok(span);
+            if let Some(span) = execution_span.as_ref() {
+                span.end_ok();
             }
             self.record_turn(
                 backend,
@@ -356,9 +360,6 @@ impl IotaEngine {
                 events.push(output_event);
                 self.finish_execution(&execution_id, ExecutionStatus::Completed);
                 self.record_execution_active_delta(-1);
-                if let Some(span) = execution_span.as_mut() {
-                    spans::end_span_ok(span);
-                }
                 self.record_turn(
                     backend,
                     execution_id.as_deref(),
@@ -368,12 +369,26 @@ impl IotaEngine {
                 );
                 self.active_backend = Some(backend);
                 self.dialogue.push_turn(backend, prompt, &skill_output.text);
-                self.write_episodic_memory(
-                    backend,
-                    prompt,
-                    &skill_output.text,
-                    execution_id.as_deref(),
-                );
+                if let Some(span) = execution_span.as_ref() {
+                    span.in_scope(|| {
+                        self.write_episodic_memory(
+                            backend,
+                            prompt,
+                            &skill_output.text,
+                            execution_id.as_deref(),
+                        )
+                    });
+                } else {
+                    self.write_episodic_memory(
+                        backend,
+                        prompt,
+                        &skill_output.text,
+                        execution_id.as_deref(),
+                    );
+                }
+                if let Some(span) = execution_span.as_ref() {
+                    span.end_ok();
+                }
                 let mut output = AcpPromptOutput::synthetic(skill_output.text);
                 output.execution_id = execution_id;
                 output.events = events;
@@ -381,89 +396,96 @@ impl IotaEngine {
             }
         }
 
-        let memory = self.memory_store.as_ref().and_then(|store| {
-            let thresholds_cfg = self.effective_config.recall_thresholds();
-            let thresholds = RecallThresholds {
-                identity: thresholds_cfg.identity,
-                preference: thresholds_cfg.preference,
-                strategic: thresholds_cfg.strategic,
-                domain: thresholds_cfg.domain,
-                procedural: thresholds_cfg.procedural,
-                episodic: thresholds_cfg.episodic,
-            };
-            let project_id = cwd.display().to_string();
-            self.record_log_event(
-                execution_id.as_deref(),
-                backend,
-                "info",
-                "memory.recall.started",
-                serde_json::json!({
-                    "user_id": "local-user",
-                    "project_id": project_id.clone(),
-                }),
-            );
-            tracing::info!(
-                backend = %backend,
-                execution_id = execution_id.as_deref().unwrap_or("-"),
-                session_id = %self.session_id,
-                user_id = "local-user",
-                project_id = %project_id,
-                "engine memory recall started"
-            );
-            match store.recall_buckets_with_thresholds(
-                "local-user",
-                &project_id,
-                &self.session_id,
-                thresholds,
-            ) {
-                Ok(buckets) => {
-                    self.record_log_event(
-                        execution_id.as_deref(),
-                        backend,
-                        "info",
-                        "memory.recall.completed",
-                        serde_json::json!({
-                            "identity_count": buckets.identity.len(),
-                            "preference_count": buckets.preference.len(),
-                            "strategic_count": buckets.strategic.len(),
-                            "domain_count": buckets.domain.len(),
-                            "procedural_count": buckets.procedural.len(),
-                            "episodic_count": buckets.episodic.len(),
-                        }),
-                    );
-                    tracing::info!(
-                        backend = %backend,
-                        execution_id = execution_id.as_deref().unwrap_or("-"),
-                        session_id = %self.session_id,
-                        identity_count = buckets.identity.len(),
-                        preference_count = buckets.preference.len(),
-                        strategic_count = buckets.strategic.len(),
-                        domain_count = buckets.domain.len(),
-                        procedural_count = buckets.procedural.len(),
-                        episodic_count = buckets.episodic.len(),
-                        "engine memory recall completed"
-                    );
-                    Some(buckets)
+        let recall_memory = || {
+            self.memory_store.as_ref().and_then(|store| {
+                let thresholds_cfg = self.effective_config.recall_thresholds();
+                let thresholds = RecallThresholds {
+                    identity: thresholds_cfg.identity,
+                    preference: thresholds_cfg.preference,
+                    strategic: thresholds_cfg.strategic,
+                    domain: thresholds_cfg.domain,
+                    procedural: thresholds_cfg.procedural,
+                    episodic: thresholds_cfg.episodic,
+                };
+                let project_id = cwd.display().to_string();
+                self.record_log_event(
+                    execution_id.as_deref(),
+                    backend,
+                    "info",
+                    "memory.recall.started",
+                    serde_json::json!({
+                        "user_id": "local-user",
+                        "project_id": project_id.clone(),
+                    }),
+                );
+                tracing::info!(
+                    backend = %backend,
+                    execution_id = execution_id.as_deref().unwrap_or("-"),
+                    session_id = %self.session_id,
+                    user_id = "local-user",
+                    project_id = %project_id,
+                    "engine memory recall started"
+                );
+                match store.recall_buckets_with_thresholds(
+                    "local-user",
+                    &project_id,
+                    &self.session_id,
+                    thresholds,
+                ) {
+                    Ok(buckets) => {
+                        self.record_log_event(
+                            execution_id.as_deref(),
+                            backend,
+                            "info",
+                            "memory.recall.completed",
+                            serde_json::json!({
+                                "identity_count": buckets.identity.len(),
+                                "preference_count": buckets.preference.len(),
+                                "strategic_count": buckets.strategic.len(),
+                                "domain_count": buckets.domain.len(),
+                                "procedural_count": buckets.procedural.len(),
+                                "episodic_count": buckets.episodic.len(),
+                            }),
+                        );
+                        tracing::info!(
+                            backend = %backend,
+                            execution_id = execution_id.as_deref().unwrap_or("-"),
+                            session_id = %self.session_id,
+                            identity_count = buckets.identity.len(),
+                            preference_count = buckets.preference.len(),
+                            strategic_count = buckets.strategic.len(),
+                            domain_count = buckets.domain.len(),
+                            procedural_count = buckets.procedural.len(),
+                            episodic_count = buckets.episodic.len(),
+                            "engine memory recall completed"
+                        );
+                        Some(buckets)
+                    }
+                    Err(err) => {
+                        self.record_log_event(
+                            execution_id.as_deref(),
+                            backend,
+                            "warn",
+                            "memory.recall.failed",
+                            serde_json::json!({"error": err.to_string()}),
+                        );
+                        tracing::warn!(
+                            backend = %backend,
+                            execution_id = execution_id.as_deref().unwrap_or("-"),
+                            session_id = %self.session_id,
+                            error = %err,
+                            "engine memory recall failed"
+                        );
+                        None
+                    }
                 }
-                Err(err) => {
-                    self.record_log_event(
-                        execution_id.as_deref(),
-                        backend,
-                        "warn",
-                        "memory.recall.failed",
-                        serde_json::json!({"error": err.to_string()}),
-                    );
-                    tracing::warn!(
-                        backend = %backend,
-                        execution_id = execution_id.as_deref().unwrap_or("-"),
-                        session_id = %self.session_id,
-                        error = %err,
-                        "engine memory recall failed"
-                    );
-                    None
-                }
-            }
-        });
+            })
+        };
+        let memory = if let Some(span) = execution_span.as_ref() {
+            span.in_scope(recall_memory)
+        } else {
+            recall_memory()
+        };
         let memory_event = memory.as_ref().map(|buckets| {
             RuntimeEvent::Memory(MemoryEvent {
                 action: "inject".to_string(),
@@ -503,9 +525,6 @@ impl IotaEngine {
             events.push(output_event);
             self.finish_execution(&execution_id, ExecutionStatus::Completed);
             self.record_execution_active_delta(-1);
-            if let Some(span) = execution_span.as_mut() {
-                spans::end_span_ok(span);
-            }
             self.record_turn(
                 backend,
                 execution_id.as_deref(),
@@ -547,7 +566,15 @@ impl IotaEngine {
         .await
         .context("context composition task panicked")?;
 
-        let client_started = self.ensure_client(backend, cwd.clone()).await?;
+        let client_started = if let Some(span) = execution_span.as_ref() {
+            opentelemetry::trace::FutureExt::with_context(
+                self.ensure_client(backend, cwd.clone()),
+                span.context(),
+            )
+            .await?
+        } else {
+            self.ensure_client(backend, cwd.clone()).await?
+        };
         let key = ClientKey {
             backend,
             cwd: cwd.clone(),
@@ -557,10 +584,26 @@ impl IotaEngine {
             .get_mut(&key)
             .context("ACP client missing after warm")?;
         let startup_timing = client.startup_timing();
-        match client
-            .prompt_with_cwd_timed_for_execution(&cwd, &effective_prompt, execution_id.as_deref())
+        let prompt_result = if let Some(span) = execution_span.as_ref() {
+            opentelemetry::trace::FutureExt::with_context(
+                client.prompt_with_cwd_timed_for_execution(
+                    &cwd,
+                    &effective_prompt,
+                    execution_id.as_deref(),
+                ),
+                span.context(),
+            )
             .await
-        {
+        } else {
+            client
+                .prompt_with_cwd_timed_for_execution(
+                    &cwd,
+                    &effective_prompt,
+                    execution_id.as_deref(),
+                )
+                .await
+        };
+        match prompt_result {
             Ok(mut output) => {
                 output.execution_id = execution_id.clone();
                 if let Some(event) = memory_event.clone() {
@@ -604,7 +647,7 @@ impl IotaEngine {
                     &output.timing,
                 );
                 self.record_execution_active_delta(-1);
-                if let Some(span) = execution_span.as_mut() {
+                if let Some(span) = execution_span.as_ref() {
                     span.set_attribute(opentelemetry::KeyValue::new(
                         "iota.prompt.duration_ms",
                         output.timing.prompt_ms as i64,
@@ -613,7 +656,6 @@ impl IotaEngine {
                         "iota.total.duration_ms",
                         output.timing.total_ms as i64,
                     ));
-                    spans::end_span_ok(span);
                 }
                 tracing::info!(backend = %backend, execution_id = execution_id.as_deref(), total_ms = output.timing.total_ms, prompt_ms = output.timing.prompt_ms, "execution completed");
                 self.record_turn(
@@ -625,12 +667,26 @@ impl IotaEngine {
                 );
                 self.dialogue.push_turn(backend, prompt, &output.text);
                 if !is_explicit_memory_tool_prompt(prompt) {
-                    self.write_episodic_memory(
-                        backend,
-                        prompt,
-                        &output.text,
-                        execution_id.as_deref(),
-                    );
+                    if let Some(span) = execution_span.as_ref() {
+                        span.in_scope(|| {
+                            self.write_episodic_memory(
+                                backend,
+                                prompt,
+                                &output.text,
+                                execution_id.as_deref(),
+                            )
+                        });
+                    } else {
+                        self.write_episodic_memory(
+                            backend,
+                            prompt,
+                            &output.text,
+                            execution_id.as_deref(),
+                        );
+                    }
+                }
+                if let Some(span) = execution_span.as_ref() {
+                    span.end_ok();
                 }
                 Ok(output)
             }
@@ -645,8 +701,8 @@ impl IotaEngine {
                 );
                 self.finish_execution(&execution_id, ExecutionStatus::Failed);
                 self.record_execution_active_delta(-1);
-                if let Some(span) = execution_span.as_mut() {
-                    spans::end_span_error(span, &err.to_string());
+                if let Some(span) = execution_span.as_ref() {
+                    span.end_error(&err.to_string());
                 }
                 tracing::warn!(backend = %backend, execution_id = execution_id.as_deref(), error = %err, "execution failed");
                 self.record_turn(

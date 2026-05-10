@@ -1,56 +1,56 @@
 # iota sympantos
 
-Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-code / codex / gemini / hermes / opencode），共享统一的记忆、技能与上下文层。
+Cross-platform Rust CLI/TUI that routes prompts to five ACP backends (claude-code / codex / gemini / hermes / opencode), sharing a unified memory, skill, and context layer.
 
-## 核心功能
+## Core features
 
-- **跨后端记忆** — Rust 引擎层 SQLite 存储（SHA-256 去重、FTS5、6 召回桶）。任一后端写入的记忆可在其他后端召回注入。
-- **确定性技能** — YAML 声明的技能由 Rust 引擎分发，触发匹配与输出模板与后端无关，所有后端产出一致的结构化结果。
-- **iota-fun 多语言执行** — 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` 支持。
-- **Daemon 热路径** — 可选 TCP daemon 保持 ACP 客户端预热；任何命令加 `--daemon/-d` 即可路由。
-- **交互式 TUI** — ratatui 循环，含多行编辑器、Markdown 渲染、流式输出与权限审批覆层。
+- **Cross-backend memory** — Rust engine layer SQLite storage (SHA-256 deduplication, FTS5, 6 recall buckets). Memory written by any backend can be recalled and injected by any other backend.
+- **Deterministic skills** — YAML-declared skills are dispatched by the Rust engine; trigger matching and output templates are backend-agnostic, so all backends produce consistent structured results.
+- **iota-fun multilanguage execution** — 7-language snippet runner (C++ / TypeScript / Rust / Zig / Java / Python / Go), with compilation cache and `parallel: true` support.
+- **Daemon hot path** — Optional TCP daemon keeps ACP clients pre-warmed; any command can be routed through it with `--daemon`/`-d`.
+- **Interactive TUI** — ratatui loop with multiline editor, Markdown rendering, streaming output, and a permission approval overlay.
 
-## 架构
+## Architecture
 
 ![Architecture Overview](images/iota-sympantos-architecture.png)
 
-| 层级 | 模块 |
-|------|------|
+| Layer | Modules |
+|-------|---------|
 | **UI** | `src/cli/mod.rs`, `src/tui.rs` + `src/tui/` |
-| **编排** | `engine.rs`, `acp/`, `mcp/`, `context/`, `skill/`, `daemon/` |
-| **存储** | `store/memory.rs`, `store/cache.rs`, `store/ledger.rs`, `store/approval.rs` |
-| **观测** | `telemetry/` + Docker OTel Collector / Jaeger / Prometheus / Loki / Grafana |
+| **Orchestration** | `engine.rs`, `acp/`, `mcp/`, `context/`, `skill/`, `daemon/` |
+| **Storage** | `store/memory.rs`, `store/cache.rs`, `store/ledger.rs`, `store/approval.rs` |
+| **Observability** | `telemetry/` + Docker OTel Collector / Jaeger / Prometheus / Loki / Grafana |
 
-详见 [`doc/architecture.md`](doc/architecture.md) 和 [`doc/code-call-chains.md`](doc/code-call-chains.md)。
+See [`doc/architecture.md`](doc/architecture.md) and [`doc/code-call-chains.md`](doc/code-call-chains.md) for details.
 
-## 文档
+## Documentation
 
-| 文档 | 说明 |
-|------|------|
-| [`doc/architecture.md`](doc/architecture.md) | 系统架构设计 |
-| [`doc/code-call-chains.md`](doc/code-call-chains.md) | 代码调用链路 |
-| [`doc/observability.md`](doc/observability.md) | Observability 系统详解 |
-| [`doc/debugging.md`](doc/debugging.md) | 调试指南 |
+| Document | Description |
+|----------|-------------|
+| [`doc/architecture.md`](doc/architecture.md) | System architecture design |
+| [`doc/code-call-chains.md`](doc/code-call-chains.md) | Code call chains |
+| [`doc/observability.md`](doc/observability.md) | Observability system in depth |
+| [`doc/debugging.md`](doc/debugging.md) | Debugging guide |
 
-## 功能实验室
+## Feature lab
 
-| # | 主题 | 报告 |
-|---|------|------|
-| 01 | 跨后端记忆延续 — 6 召回桶、SHA-256 去重、置信度过滤、token 预算 | [`gefsi/exp01-memory.md`](gefsi/exp01-memory.md) |
-| 02 | Skill + iota-fun 多语言执行 — 触发匹配、并行工具、编译缓存、5 后端一致性 | [`gefsi/exp02-skill-fun.md`](gefsi/exp02-skill-fun.md) |
+| # | Topic | Report |
+|---|-------|--------|
+| 01 | Cross-backend memory continuity — 6 recall buckets, SHA-256 deduplication, confidence filtering, token budget | [`gefsi/exp01-memory.md`](gefsi/exp01-memory.md) |
+| 02 | Skill + iota-fun multilanguage execution — trigger matching, parallel tools, compilation cache, 5-backend consistency | [`gefsi/exp02-skill-fun.md`](gefsi/exp02-skill-fun.md) |
 
-## 快速开始
+## Quick start
 
-### 构建
+### Build
 
 ```bash
 cargo build --offline
 cargo install --path .
 ```
 
-### 配置
+### Configuration
 
-配置文件：`~/.i6/nimia.yaml`，每个后端的关键字段：
+Config file: `~/.i6/nimia.yaml`. Key fields for each backend:
 
 ```yaml
 codex:
@@ -68,33 +68,44 @@ codex:
     api_key: "<router-api-key>"
 ```
 
-`iota check` 查看所有后端的生效配置。
+Run `iota check` to inspect the resolved configuration for all backends.
 
-### 运行
+### Running
 
 ```bash
-iota                                              # 交互式 TUI
-iota run codex "ping"                             # 单次 prompt，直连
-iota run --daemon codex --timeout-ms 20000 "ping" # 经由 daemon（热路径）
-iota check                                        # 检查配置与后端状态
-iota logs <execution_id>                          # 从 Loki 查询执行日志
-iota trace <trace_id>                             # 从 Jaeger 查询 trace waterfall
+iota                                              # interactive TUI
+iota run codex "ping"                             # single prompt, direct connection
+iota run --daemon codex --timeout-ms 20000 "ping" # routed through daemon (hot path)
+iota check                                        # check configuration and backend status
+iota logs <execution_id>                          # query execution logs from Loki
+iota trace <trace_id>                             # query trace waterfall from Jaeger
+iota trace --execution <execution_id>             # resolve trace id from Loki, then query Jaeger
+iota metrics --once                               # print local CacheStore Prometheus metrics
+iota metrics --listen 127.0.0.1:47662             # expose /metrics for Prometheus scrape
 ```
 
-`--timing` 将路由与 ACP 阶段耗时以 JSON 格式输出到 stderr。
+`--timing` prints route and ACP phase timing in JSON format to stderr.
 
 ### Observability
 
-当前实现使用 OpenTelemetry。`iota` 默认向 `OTEL_EXPORTER_OTLP_ENDPOINT` 发送 logs/traces/metrics，默认地址为 `http://localhost:4317`。如果没有运行 Docker observability stack，程序仍会执行，日志会输出到 stderr，但 OTLP 数据没有持久化后端。
+iota uses OpenTelemetry. By default `iota` sends logs/traces/metrics to `OTEL_EXPORTER_OTLP_ENDPOINT`, defaulting to `http://localhost:4317`. If no Docker observability stack is running, the program still executes; logs are written to stderr and by default to daily rolling files under `~/.i6/logs/`, but OTLP data has no durable backend.
 
-启动本地观测后端：
+Local file logging is controlled by environment variables:
+
+```bash
+IOTA_LOG_FILE=off iota run codex "ping"           # disable local file logging
+IOTA_LOG_DIR=/tmp/iota-logs iota run codex "ping" # change local log directory
+IOTA_LOG_RETENTION_DAYS=14 iota run codex "ping"  # delete iota.log.YYYY-MM-DD files older than 14 days
+```
+
+Start the local observability backend:
 
 ```bash
 cd docker/observability
 docker compose up -d
 ```
 
-如果默认端口已被其他 stack 占用，可以覆盖 host port，例如：
+If the default ports are already in use by another stack, override the host ports:
 
 ```bash
 OTEL_GRPC_PORT=14317 OTEL_HTTP_PORT=14318 JAEGER_PORT=16687 \
@@ -102,12 +113,12 @@ PROMETHEUS_PORT=19090 LOKI_PORT=13100 GRAFANA_PORT=13000 \
 docker compose up -d
 ```
 
-数据去向：
+Where data goes:
 
-| 信号 | 无 Docker | 有 Docker |
-|------|-----------|-----------|
-| Logs | stderr；启用 OTel 时尝试发送到 OTLP endpoint | OTel Collector -> Loki，Grafana Loki datasource 或 `iota logs <execution_id>` 查询 |
-| Traces | 尝试发送到 OTLP endpoint；iota 不写本地 trace DB | OTel Collector -> Jaeger，Jaeger UI / Grafana / `iota trace <trace_id>` 查询 |
-| Metrics | OTel meter 记录并尝试发送到 OTLP endpoint；无本地 Prometheus endpoint | OTel Collector -> Prometheus remote write，Grafana/Prometheus 查询 |
+| Signal | Without Docker | With Docker |
+|--------|----------------|-------------|
+| Logs | stderr + `~/.i6/logs/iota.log.YYYY-MM-DD`; attempted as OTLP when telemetry is enabled | OTel Collector -> Loki; query via Grafana Loki datasource or `iota logs <execution_id>` |
+| Traces | Attempted to OTLP endpoint; iota does not write a local trace database | OTel Collector -> Jaeger; query via Jaeger UI / Grafana / `iota trace <trace_id>` |
+| Metrics | Recorded by OTel meter and attempted to OTLP endpoint; `iota metrics` can expose local CacheStore metrics | OTel Collector -> Prometheus remote write; query via Grafana / Prometheus |
 
-`~/.i6/context/events.sqlite` 当前是 `CacheStore`，用于 execution replay/dedupe，不是 observability event store。详见 [`doc/observability.md`](doc/observability.md)。
+`~/.i6/context/events.sqlite` is currently the `CacheStore`, used for execution replay/dedupe — it is not an observability event store. See [`doc/observability.md`](doc/observability.md) for details.

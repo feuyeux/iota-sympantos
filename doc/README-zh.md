@@ -24,13 +24,13 @@
 
 ### 三种排障查看方式
 
-#### 1. stderr tracing 日志
+#### 1. stderr tracing 和本地文件日志
 
 ```bash
 IOTA_LOG=iota_sympantos=debug iota run codex "你的 prompt"
 ```
 
-当前实现没有 `~/.i6/logs` file appender。`IOTA_LOG` / `RUST_LOG` 控制 stderr tracing 过滤规则。
+日志默认输出到 stderr，并写入 `~/.i6/logs/iota.log.YYYY-MM-DD`。`IOTA_LOG` / `RUST_LOG` 控制 tracing 过滤规则。可用 `IOTA_LOG_FILE=off` 关闭本地文件日志，用 `IOTA_LOG_DIR=/path/to/logs` 修改目录，用 `IOTA_LOG_RETENTION_DAYS=14` 修改本地日志保留天数。
 
 #### 2. 控制台 log-events（单次运行）
 
@@ -62,7 +62,14 @@ iota logs <execution-id>
 iota trace <trace-id>
 ```
 
-无 Docker 时，logs/traces/metrics 只会尝试发送到 `OTEL_EXPORTER_OTLP_ENDPOINT`，默认 `http://localhost:4317`；没有 collector 时不会写入本地观测数据库。
+无 Docker 时，logs/traces/metrics 仍会尝试发送到 `OTEL_EXPORTER_OTLP_ENDPOINT`，默认 `http://localhost:4317`；没有 collector 时不会写入本地观测数据库，但日志仍会保留在本地文件日志中。
+
+如需本地 Prometheus 文本格式指标：
+
+```bash
+iota metrics --once
+iota metrics --listen 127.0.0.1:47662
+```
 
 #### 需要 grep 时：保存本次 log-events 输出
 

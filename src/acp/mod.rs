@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
+use opentelemetry::trace::Span as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -450,8 +451,17 @@ impl AcpClient {
         }
 
         let spawn_started = Instant::now();
+        let mut spawn_span = spans::start_phase_span("acp.process.spawn");
+        spawn_span.set_attribute(opentelemetry::KeyValue::new(
+            "iota.backend",
+            backend.to_string(),
+        ));
+        spawn_span.set_attribute(opentelemetry::KeyValue::new(
+            "iota.cwd",
+            cwd.display().to_string(),
+        ));
         tracing::debug!(backend = %backend, command = %executable, "starting ACP backend process");
-        let mut child = TokioCommand::new(executable)
+        let spawn_result = TokioCommand::new(executable)
             .args(&args)
             .envs(&env)
             .current_dir(&cwd)
@@ -459,8 +469,18 @@ impl AcpClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("Failed to start ACP backend '{}'", backend))?;
+            .spawn();
+        let mut child = match spawn_result {
+            Ok(child) => {
+                spans::end_span_ok(&mut spawn_span);
+                child
+            }
+            Err(err) => {
+                spans::end_span_error(&mut spawn_span, &err.to_string());
+                return Err(err)
+                    .with_context(|| format!("Failed to start ACP backend '{}'", backend));
+            }
+        };
         let process_spawn_ms = elapsed_ms(spawn_started);
         tracing::info!(backend = %backend, process_spawn_ms, "acp.process.spawn");
         tracing::debug!(backend = %backend, process_spawn_ms, "ACP backend process spawned");
@@ -494,6 +514,11 @@ impl AcpClient {
 
         let mut lines = BufReader::new(stdout).lines();
         let init_started = Instant::now();
+        let mut init_span = spans::start_phase_span("acp.initialize");
+        init_span.set_attribute(opentelemetry::KeyValue::new(
+            "iota.backend",
+            backend.to_string(),
+        ));
         let init_result = timeout(Duration::from_millis(timeout_ms), async {
             send_request(
                 &mut stdin,
@@ -518,10 +543,16 @@ impl AcpClient {
         tracing::debug!(backend = %backend, init_ms, "ACP backend initialized");
 
         if let Err(err) = init_result {
+            spans::end_span_error(&mut init_span, &err.to_string());
             let _ = stdin.shutdown().await;
             terminate_child_tree(&mut child).await;
             return Err(err);
         }
+        init_span.set_attribute(opentelemetry::KeyValue::new(
+            "iota.acp.init_ms",
+            init_ms as i64,
+        ));
+        spans::end_span_ok(&mut init_span);
 
         Ok(Self {
             backend,
@@ -561,31 +592,59 @@ impl AcpClient {
             tracing::debug!(backend = %self.backend, session_reused = session.reused, session_new_ms = session.session_new_ms, "ACP session resolved");
             let id = format!("prompt:{}", self.prompt_counter);
             let prompt_started = Instant::now();
+            let mut prompt_span = spans::start_phase_span("acp.prompt");
+            prompt_span.set_attribute(opentelemetry::KeyValue::new(
+                "iota.backend",
+                self.backend.to_string(),
+            ));
+            if let Some(execution_id) = execution_id {
+                prompt_span.set_attribute(opentelemetry::KeyValue::new(
+                    "iota.execution.id",
+                    execution_id.to_string(),
+                ));
+            }
             tracing::info!(execution_id = execution_id.unwrap_or("-"), backend = %self.backend, "prompt.sent");
-            send_request(
-                &mut self.stdin,
-                id.clone(),
-                "session/prompt",
-                json!({
-                    "sessionId": session.session_id,
-                    "prompt": [{ "type": "text", "text": prompt }]
-                }),
-            )
-            .await?;
-            let stream_tx = self.stream_tx.clone();
-            let (text, events) = read_prompt_events_for_id(
-                &mut self.lines,
-                &mut self.stdin,
-                self.backend,
-                &self.tool_whitelist,
-                self.show_native,
-                self.timeout_ms,
-                &id,
-                stream_tx.as_ref(),
-                execution_id,
-            )
-            .await?;
+            let prompt_result = async {
+                send_request(
+                    &mut self.stdin,
+                    id.clone(),
+                    "session/prompt",
+                    json!({
+                        "sessionId": session.session_id,
+                        "prompt": [{ "type": "text", "text": prompt }]
+                    }),
+                )
+                .await?;
+                let stream_tx = self.stream_tx.clone();
+                read_prompt_events_for_id(
+                    &mut self.lines,
+                    &mut self.stdin,
+                    self.backend,
+                    &self.tool_whitelist,
+                    self.show_native,
+                    self.timeout_ms,
+                    &id,
+                    stream_tx.as_ref(),
+                    execution_id,
+                )
+                .await
+            }
+            .await;
             let prompt_ms_val = elapsed_ms(prompt_started);
+            let (text, events) = match prompt_result {
+                Ok(result) => {
+                    prompt_span.set_attribute(opentelemetry::KeyValue::new(
+                        "iota.acp.prompt_ms",
+                        prompt_ms_val as i64,
+                    ));
+                    spans::end_span_ok(&mut prompt_span);
+                    result
+                }
+                Err(err) => {
+                    spans::end_span_error(&mut prompt_span, &err.to_string());
+                    return Err(err);
+                }
+            };
             tracing::info!(execution_id = execution_id.unwrap_or("-"), prompt_ms = prompt_ms_val, "prompt.completed");
             tracing::debug!(backend = %self.backend, prompt_ms = prompt_ms_val, events = events.len(), "ACP prompt completed");
             Ok::<_, anyhow::Error>((
@@ -634,32 +693,54 @@ impl AcpClient {
 
         let session_request_id = format!("session:new:{}", self.prompt_counter);
         let session_started = Instant::now();
-        send_request(
-            &mut self.stdin,
-            session_request_id.clone(),
-            "session/new",
-            session_new_params_with_options(
-                self.backend,
-                &self.cwd,
-                &self.mcp_servers,
-                self.session_options,
-            ),
-        )
-        .await?;
-        let session_result = wait_for_response(
-            &mut self.lines,
-            &session_request_id,
-            self.show_native,
-            self.timeout_ms,
-        )
-        .await
-        .context("ACP session/new failed")?;
-        let session_id = session_result
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .context("ACP session/new result did not include sessionId")?;
+        let mut session_span = spans::start_phase_span("acp.session.new");
+        session_span.set_attribute(opentelemetry::KeyValue::new(
+            "iota.backend",
+            self.backend.to_string(),
+        ));
+        let session_id = async {
+            send_request(
+                &mut self.stdin,
+                session_request_id.clone(),
+                "session/new",
+                session_new_params_with_options(
+                    self.backend,
+                    &self.cwd,
+                    &self.mcp_servers,
+                    self.session_options,
+                ),
+            )
+            .await?;
+            let session_result = wait_for_response(
+                &mut self.lines,
+                &session_request_id,
+                self.show_native,
+                self.timeout_ms,
+            )
+            .await
+            .context("ACP session/new failed")?;
+            session_result
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .context("ACP session/new result did not include sessionId")
+        }
+        .await;
         let elapsed_ms_val = elapsed_ms(session_started);
+        let session_id = match session_id {
+            Ok(session_id) => {
+                session_span.set_attribute(opentelemetry::KeyValue::new(
+                    "iota.acp.session_new_ms",
+                    elapsed_ms_val as i64,
+                ));
+                spans::end_span_ok(&mut session_span);
+                session_id
+            }
+            Err(err) => {
+                spans::end_span_error(&mut session_span, &err.to_string());
+                return Err(err);
+            }
+        };
         self.session_id = Some(session_id.clone());
         tracing::info!(session_id = %session_id, session_new_ms = elapsed_ms_val, "acp.session.created");
         Ok(AcpSessionResolution {
