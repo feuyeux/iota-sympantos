@@ -9,10 +9,11 @@ use crate::config::{
 };
 use crate::context::{ComposeInput, ContextEngine, DialogueBuffer};
 use crate::runtime_event::{
-    ErrorEvent, LogEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent,
+    ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent,
 };
 use crate::skill::{SkillCache, SkillRegistry};
-use crate::store::events::{EventStore, ExecutionStatus};
+use crate::store::cache::{CacheStore, ExecutionStatus, request_hash};
+use crate::telemetry::metrics;
 use crate::store::ledger::SessionLedger;
 use crate::store::memory::{
     MemoryFacet, MemoryInsert, MemoryScope, MemoryStore, MemoryType, RecallBuckets,
@@ -33,7 +34,7 @@ pub struct IotaEngine {
     timeout_ms: u64,
     context_engine: ContextEngine,
     memory_store: Option<MemoryStore>,
-    event_store: Option<EventStore>,
+    cache_store: Option<CacheStore>,
     dialogue: DialogueBuffer,
     session_id: String,
     session_ledger: Option<SessionLedger>,
@@ -59,9 +60,9 @@ impl IotaEngine {
         let memory_store = effective_config
             .memory_db_path()
             .and_then(|path| MemoryStore::open_with_embedding(path, embedding_cfg).ok());
-        let event_store = EventStore::default_path()
+        let cache_store = CacheStore::default_path()
             .ok()
-            .and_then(|path| EventStore::open(&path).ok());
+            .and_then(|path| CacheStore::open(&path).ok());
         let session_ledger = SessionLedger::default_path()
             .ok()
             .and_then(|path| SessionLedger::open(&path).ok());
@@ -79,7 +80,7 @@ impl IotaEngine {
             timeout_ms,
             context_engine,
             memory_store,
-            event_store,
+            cache_store,
             dialogue: DialogueBuffer::new(50),
             session_id,
             session_ledger,
@@ -102,14 +103,12 @@ impl IotaEngine {
     }
 
     async fn try_join_running(&self, backend: AcpBackend, request_hash: &str) -> Option<String> {
-        let store = self.event_store.as_ref()?.clone();
+        let store = self.cache_store.as_ref()?.clone();
         let running = store
             .find_running_by_request_hash(&backend.to_string(), request_hash)
             .ok()??;
         let deadline =
             tokio::time::Instant::now() + tokio::time::Duration::from_millis(self.timeout_ms);
-        // Poll with exponential back-off (50 ms → 500 ms cap) to avoid busy-wait
-        // while still picking up completion within a reasonable latency budget.
         let mut poll_interval_ms: u64 = 50;
         loop {
             if let Ok(Some(record)) = store.get_execution(&running.execution_id) {
@@ -220,7 +219,7 @@ impl IotaEngine {
         prompt: &str,
         requested_execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
-        let request_hash = crate::store::events::request_hash(&backend.to_string(), &cwd, prompt);
+        let request_hash = request_hash(&backend.to_string(), &cwd, prompt);
         tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
         let skills = SkillRegistry::load_cached(
             &cwd,
@@ -250,7 +249,7 @@ impl IotaEngine {
             .and_then(configured_model);
         self.ensure_session_ledger(backend, &cwd, model.as_deref());
         let handoff = self.prepare_handoff(backend, &cwd);
-        let execution_id = match self.event_store.as_ref() {
+        let execution_id = match self.cache_store.as_ref() {
             Some(store) => {
                 match store.begin_execution_with_id(
                     &backend.to_string(),
@@ -275,6 +274,9 @@ impl IotaEngine {
             None => None,
         };
         self.record_cache_miss();
+        if let Some(ref eid) = execution_id {
+            tracing::info!(execution_id = %eid, backend = %backend, session_id = %self.session_id, "execution.started");
+        }
         tracing::debug!(backend = %backend, execution_id = execution_id.as_deref(), "execution started");
         self.record_event(
             &execution_id,
@@ -557,10 +559,12 @@ impl IotaEngine {
                     self.record_event(&execution_id, event);
                 }
                 if !has_output_event {
+                    let output_text = &output.text;
+                    tracing::info!(execution_id = execution_id.as_deref(), output_len = output_text.len(), "output.final");
                     self.record_event(
                         &execution_id,
                         RuntimeEvent::Output(OutputEvent {
-                            text: output.text.clone(),
+                            text: output_text.clone(),
                             role: Some("assistant".to_string()),
                         }),
                     );
@@ -653,7 +657,7 @@ impl IotaEngine {
     }
 
     fn try_replay_completed(&self, backend: AcpBackend, request_hash: &str) -> Option<String> {
-        let store = self.event_store.as_ref()?;
+        let store = self.cache_store.as_ref()?;
         let record = store
             .find_completed_by_request_hash(&backend.to_string(), request_hash)
             .ok()??;
@@ -744,55 +748,46 @@ impl IotaEngine {
     }
 
     fn record_event(&self, execution_id: &Option<String>, event: RuntimeEvent) {
-        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
-            tracing::debug!(execution_id = %execution_id, event_type = event.event_type(), "recording runtime event");
-            let _ = store.append_event(execution_id, &event);
+        if let (Some(eid), RuntimeEvent::Output(_)) = (execution_id.as_ref(), &event) {
+            if let Some(store) = &self.cache_store {
+                let _ = store.append_output(eid, &event);
+            }
+        }
+        if let RuntimeEvent::TokenUsage(ref tu) = event {
+            let m = metrics::get();
+            m.token_usage_count.add(1, &[]);
+            if let Some(input) = tu.input_tokens { m.token_input.add(input, &[]); }
+            if let Some(output) = tu.output_tokens { m.token_output.add(output, &[]); }
+            if let Some(total) = tu.total_tokens { m.token_total.add(total, &[]); }
+            tracing::info!(input_tokens = tu.input_tokens, output_tokens = tu.output_tokens, total_tokens = tu.total_tokens, "token.usage");
         }
     }
 
     fn record_log_event(
         &self,
-        execution_id: Option<&str>,
+        _execution_id: Option<&str>,
         backend: AcpBackend,
         level: &str,
         event: &str,
         fields: serde_json::Value,
     ) {
-        let Some(store) = &self.event_store else {
-            return;
-        };
-        let Some(execution_id) = execution_id else {
-            return;
-        };
-        let mut log = LogEvent::new(level, "iota::engine", event);
-        log.execution_id = Some(execution_id.to_string());
-        log.session_id = Some(self.session_id.clone());
-        log.backend = Some(backend.to_string());
-        log.route = Some("engine".to_string());
-        log.fields = fields;
-        let _ = store.append_event(execution_id, &RuntimeEvent::Log(log));
-    }
-
-    fn record_cache_hit(&self) {
-        if let Some(store) = &self.event_store {
-            let _ = store.record_cache_hit();
+        match level {
+            "error" => tracing::error!(backend = %backend, fields = %fields, "{}", event),
+            "warn" => tracing::warn!(backend = %backend, fields = %fields, "{}", event),
+            _ => tracing::info!(backend = %backend, fields = %fields, "{}", event),
         }
     }
 
-    fn record_cache_miss(&self) {
-        if let Some(store) = &self.event_store {
-            let _ = store.record_cache_miss();
-        }
-    }
+    fn record_cache_hit(&self) { metrics::get().cache_hit_count.add(1, &[]); tracing::info!("cache.hit"); }
+
+    fn record_cache_miss(&self) { metrics::get().cache_miss_count.add(1, &[]); tracing::debug!("cache.miss"); }
 
     fn record_active_sessions(&self) {
-        if let Some(store) = &self.event_store {
-            let _ = store.set_active_sessions(self.clients.len() as u64);
-        }
+        // Just log — OTel UpDownCounter tracking is best done with explicit +1/-1
     }
 
     fn finish_execution(&self, execution_id: &Option<String>, status: ExecutionStatus) {
-        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
+        if let (Some(store), Some(execution_id)) = (&self.cache_store, execution_id) {
             let _ = store.finish_execution(execution_id, status);
         }
     }
@@ -803,10 +798,17 @@ impl IotaEngine {
         status: ExecutionStatus,
         timing: &acp::AcpPromptTiming,
     ) {
-        if let (Some(store), Some(execution_id)) = (&self.event_store, execution_id) {
-            let _ = store.record_timing(execution_id, timing);
-            let _ = store.finish_execution(execution_id, status);
+        self.finish_execution(execution_id, status.clone());
+        let m = metrics::get();
+        let backend_attr = self.active_backend.as_ref()
+            .map(|b| opentelemetry::KeyValue::new("backend", b.to_string()))
+            .unwrap_or_else(|| opentelemetry::KeyValue::new("backend", "unknown"));
+        m.prompt_duration.record(timing.prompt_ms as f64 / 1000.0, &[backend_attr.clone()]);
+        if let Some(init_ms) = timing.init_ms {
+            m.init_duration.record(init_ms as f64 / 1000.0, &[backend_attr]);
         }
+        let status_attr = opentelemetry::KeyValue::new("status", status.as_str().to_string());
+        m.execution_count.add(1, &[status_attr]);
     }
 
     fn extract_structured_memories(

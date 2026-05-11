@@ -1,30 +1,20 @@
-use anyhow::{Context, Result};
-use prometheus::{
-    Encoder, Gauge, Histogram, HistogramOpts, IntCounter, Registry, TextEncoder, opts,
-};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
-use std::collections::BTreeMap;
 use std::process::Stdio;
-use std::sync::OnceLock;
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use crate::acp;
 use crate::config::{self, NimiaConfig};
 use crate::context::server as context_server;
 use crate::daemon::{self, DaemonPromptRequest};
 use crate::engine::IotaEngine;
-use crate::runtime_event::{LogEvent, RuntimeEvent};
 use crate::skill::SkillRegistry;
 use crate::skill::fun_server;
-use crate::store::events::EventStore;
 use crate::store::memory::MemoryStore;
+use crate::telemetry::{self, TelemetryConfig};
 use crate::{native, skill, tui};
 
-static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
-
 pub async fn run() -> Result<()> {
-    init_logging();
+    let _otel_guard = telemetry::init(&TelemetryConfig::default())?;
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if let Some(command) = args.first().map(String::as_str) {
@@ -44,20 +34,62 @@ pub async fn run() -> Result<()> {
                         options.timeout_ms,
                         None,
                     );
-                    let result = engine
-                        .prompt_in_cwd_timed(options.backend, options.cwd, &options.prompt)
-                        .await;
-                    engine.shutdown().await;
-                    let output = result?;
-                    if options.log_events {
-                        print_log_events(&output.events);
-                    }
-                    if options.timing {
-                        print_route_timing("direct", options.backend, Some(&output.timing));
-                    }
-                    let text = output.text;
-                    if !text.is_empty() {
-                        println!("{}", text);
+                    if options.multi_backend {
+                        // Run all backends and collect results
+                        use tokio::spawn;
+                        let mut handles = Vec::new();
+                        for backend in acp::ALL_BACKENDS {
+                            let backend_name = backend.to_string();
+                            let config = config::read_config()?;
+                            let mut engine = IotaEngine::new_for_session_cwd(
+                                config,
+                                options.show_native,
+                                options.timeout_ms,
+                                None,
+                            );
+                            let cwd = options.cwd.clone();
+                            let prompt = options.prompt.clone();
+                            let timing = options.timing;
+                            handles.push(spawn(async move {
+                                let result = engine.prompt_in_cwd_timed(backend, cwd, &prompt).await;
+                                engine.shutdown().await;
+                                (backend_name, result, timing)
+                            }));
+                        }
+                        for handle in handles {
+                            let (backend_name, result, timing) = handle.await?;
+                            match result {
+                                Ok(output) => {
+                                    if timing {
+                                        print_route_timing("direct", acp::AcpBackend::parse(&backend_name).unwrap_or(acp::AcpBackend::Codex), Some(&output.timing));
+                                    }
+                                    let text = output.text;
+                                    if !text.is_empty() {
+                                        println!("[{}] {}", backend_name, text);
+                                    }
+                                }
+                                Err(e) => eprintln!("[{}] Error: {}", backend_name, e),
+                            }
+                        }
+                    } else {
+                        // existing single backend logic
+                        let result = engine
+                            .prompt_in_cwd_timed(options.backend, options.cwd, &options.prompt)
+                            .await;
+                        engine.shutdown().await;
+                        let output = result?;
+                        if options.log_events {
+                            for event in &output.events {
+                                eprintln!("{}", serde_json::to_string(event).unwrap_or_default());
+                            }
+                        }
+                        if options.timing {
+                            print_route_timing("direct", options.backend, Some(&output.timing));
+                        }
+                        let text = output.text;
+                        if !text.is_empty() {
+                            println!("{}", text);
+                        }
                     }
                     return Ok(());
                 }
@@ -71,8 +103,11 @@ pub async fn run() -> Result<()> {
             "native-materialize" => {
                 return run_native_materialize(&args[1..]);
             }
-            "observability" | "obs" => {
-                return run_observability_command(&args[1..]);
+            "logs" => {
+                return run_logs_command(&args[1..]).await;
+            }
+            "trace" => {
+                return run_trace_command(&args[1..]).await;
             }
             "skill" => {
                 return run_skill_command(&args[1..]).await;
@@ -147,1097 +182,78 @@ fn print_route_timing(
     );
 }
 
-fn print_log_events(events: &[RuntimeEvent]) {
-    for event in events {
-        match event {
-            RuntimeEvent::Log(log) => {
-                eprintln!("{}", render_log_event_text(log));
-            }
-            RuntimeEvent::ToolCall(call) => {
-                if let Some(log) = memory_tool_call_log(call) {
-                    eprintln!("{}", render_log_event_text(&log));
-                } else {
-                    eprintln!("[{}] call {} args={}", call.id, call.name, call.arguments);
-                }
-            }
-            RuntimeEvent::ToolResult(result) => {
-                if let Some(log) = memory_tool_result_log(result) {
-                    eprintln!("{}", render_log_event_text(&log));
-                } else {
-                    eprintln!(
-                        "[{}] result {} ok={} value={}",
-                        result.id,
-                        result.name,
-                        result.ok,
-                        log_result_value(&result.result)
-                    );
-                }
-            }
-            RuntimeEvent::Output(output) if output.role.as_deref() == Some("engine") => {
-                eprintln!("[skill:output] {} bytes", output.text.len());
-            }
-            RuntimeEvent::Memory(memory) => {
-                eprintln!("{}", render_log_event_text(&memory_event_log(memory)));
-            }
-            _ => {}
-        }
-    }
-}
-
-fn memory_tool_call_log(call: &crate::runtime_event::ToolCallEvent) -> Option<LogEvent> {
-    match call.name.as_str() {
-        "iota_memory_search" => {
-            let mut log = LogEvent::new("info", "iota::memory", "memory.search.call");
-            log.route = Some("tool".to_string());
-            log.tool_name = Some(call.name.clone());
-            log.tool_call_id = Some(call.id.clone());
-            log.fields = serde_json::json!({
-                "query": json_field(&call.arguments, "query"),
-                "limit": json_field(&call.arguments, "limit"),
-                "mode": json_field(&call.arguments, "mode"),
-                "arguments": call.arguments.clone(),
-            });
-            Some(log)
-        }
-        "iota_memory_write" => {
-            let content_chars = call
-                .arguments
-                .get("content")
-                .and_then(serde_json::Value::as_str)
-                .map(|content| content.chars().count().to_string())
-                .unwrap_or_else(|| "-".to_string());
-            let mut log = LogEvent::new("info", "iota::memory", "memory.write.call");
-            log.route = Some("tool".to_string());
-            log.tool_name = Some(call.name.clone());
-            log.tool_call_id = Some(call.id.clone());
-            log.fields = serde_json::json!({
-                "type": json_field(&call.arguments, "type"),
-                "facet": json_field(&call.arguments, "facet"),
-                "scope": json_field(&call.arguments, "scope"),
-                "scope_id": json_field(&call.arguments, "scope_id"),
-                "confidence": json_field(&call.arguments, "confidence"),
-                "content_chars": content_chars,
-                "arguments": call.arguments.clone(),
-            });
-            Some(log)
-        }
-        _ => None,
-    }
-}
-
-fn memory_tool_result_log(result: &crate::runtime_event::ToolResultEvent) -> Option<LogEvent> {
-    match result.name.as_str() {
-        "iota_memory_search" => {
-            let mut log = LogEvent::new("info", "iota::memory", "memory.search.result");
-            log.route = Some("tool".to_string());
-            log.tool_name = Some(result.name.clone());
-            log.tool_call_id = Some(result.id.clone());
-            log.ok = Some(result.ok);
-            log.fields = serde_json::json!({
-                "record_count": memory_record_count(&result.result),
-                "result": log_result_value(&result.result),
-            });
-            Some(log)
-        }
-        "iota_memory_write" => {
-            let mut log = LogEvent::new("info", "iota::memory", "memory.write.result");
-            log.route = Some("tool".to_string());
-            log.tool_name = Some(result.name.clone());
-            log.tool_call_id = Some(result.id.clone());
-            log.ok = Some(result.ok);
-            log.fields = serde_json::json!({
-                "memory_id": memory_result_id(&result.result),
-                "result": log_result_value(&result.result),
-            });
-            Some(log)
-        }
-        _ => None,
-    }
-}
-
-fn memory_event_log(memory: &crate::runtime_event::MemoryEvent) -> LogEvent {
-    let mut log = LogEvent::new("info", "iota::memory", format!("memory.{}", memory.action));
-    log.route = Some("engine".to_string());
-    log.fields = serde_json::json!({
-        "memory_id": memory.memory_id.clone(),
-        "payload": memory.payload.clone(),
-    });
-    log
-}
-
-fn render_log_event_text(log: &LogEvent) -> String {
-    match log.event.as_str() {
-        "memory.search.call" => format!(
-            "[memory:read] id={} query={} limit={} mode={} args={}",
-            log.tool_call_id.as_deref().unwrap_or("-"),
-            log_field(&log.fields, "query"),
-            log_field(&log.fields, "limit"),
-            log_field(&log.fields, "mode"),
-            log.fields
-                .get("arguments")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null)
-        ),
-        "memory.search.result" => format!(
-            "[memory:read:result] id={} ok={} record_count={} value={}",
-            log.tool_call_id.as_deref().unwrap_or("-"),
-            log.ok
-                .map(|ok| ok.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            log_field(&log.fields, "record_count"),
-            log_field(&log.fields, "result")
-        ),
-        "memory.write.call" => format!(
-            "[memory:write] id={} type={} facet={} scope={} scope_id={} confidence={} content_chars={} args={}",
-            log.tool_call_id.as_deref().unwrap_or("-"),
-            log_field(&log.fields, "type"),
-            log_field(&log.fields, "facet"),
-            log_field(&log.fields, "scope"),
-            log_field(&log.fields, "scope_id"),
-            log_field(&log.fields, "confidence"),
-            log_field(&log.fields, "content_chars"),
-            log.fields
-                .get("arguments")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null)
-        ),
-        "memory.write.result" => format!(
-            "[memory:write:result] id={} ok={} memory_id={} value={}",
-            log.tool_call_id.as_deref().unwrap_or("-"),
-            log.ok
-                .map(|ok| ok.to_string())
-                .unwrap_or_else(|| "-".to_string()),
-            log_field(&log.fields, "memory_id"),
-            log_field(&log.fields, "result")
-        ),
-        event if event.starts_with("memory.") => format!(
-            "[{}] {}",
-            event.replace('.', ":"),
-            serde_json::to_string(log).unwrap_or_else(|_| log.event.clone())
-        ),
-        _ => format!(
-            "[log:{}:{}] {}",
-            log.level,
-            log.target,
-            serde_json::to_string(log).unwrap_or_else(|_| log.event.clone())
-        ),
-    }
-}
-
-fn log_field(value: &serde_json::Value, key: &str) -> String {
-    value
-        .get(key)
-        .map(|value| match value {
-            serde_json::Value::Null => "-".to_string(),
-            serde_json::Value::String(text) => text.clone(),
-            other => other.to_string(),
-        })
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn json_field(value: &serde_json::Value, key: &str) -> String {
-    value
-        .get(key)
-        .map(|value| match value {
-            serde_json::Value::String(text) => text.clone(),
-            other => other.to_string(),
-        })
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn memory_result_id(value: &serde_json::Value) -> Option<&str> {
-    value
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("structuredContent")
-                .and_then(|structured| structured.get("id"))
-                .and_then(serde_json::Value::as_str)
-        })
-}
-
-fn memory_record_count(value: &serde_json::Value) -> Option<usize> {
-    value
-        .get("records")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::len)
-        .or_else(|| {
-            value
-                .get("structuredContent")
-                .and_then(|structured| structured.get("records"))
-                .and_then(serde_json::Value::as_array)
-                .map(Vec::len)
-        })
-}
-
-fn log_result_value(value: &serde_json::Value) -> String {
-    if let Some(content) = value.get("content").and_then(serde_json::Value::as_array) {
-        let text = content
-            .iter()
-            .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\\n");
-        if !text.is_empty() {
-            return text;
-        }
-    }
-    value.to_string()
-}
-
 fn print_help() {
     println!(
-        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench-cold [rounds] [--daemon|-d]\n  iota bench-warm [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota observability <logging|timing|metrics> [subcommand] [options]\n  iota context-mcp\n  iota fun-mcp\n  iota native-materialize --dry-run <path> <content>\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
+        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench-cold [rounds] [--daemon|-d]\n  iota bench-warm [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota logs <execution_id>\n  iota trace <trace_id>\n  iota context-mcp\n  iota fun-mcp\n  iota native-materialize --dry-run <path> <content>\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
     );
 }
 
-fn init_logging() {
-    let file_filter = logging_filter();
-    let stderr_filter = logging_filter();
-    let stderr_enabled =
-        std::env::var_os("RUST_LOG").is_some() || env_flag("IOTA_LOG_STDERR").unwrap_or(false);
-
-    match log_dir().and_then(|dir| {
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("Failed to create log directory {}", dir.display()))?;
-        Ok(dir)
-    }) {
-        Ok(dir) => {
-            let appender = tracing_appender::rolling::daily(dir, "iota.log");
-            let (writer, guard) = tracing_appender::non_blocking(appender);
-            let file_layer = fmt::layer()
-                .with_writer(writer)
-                .with_ansi(false)
-                .with_target(true)
-                .with_filter(file_filter);
-            let stderr_layer = stderr_enabled.then(|| {
-                fmt::layer()
-                    .with_writer(std::io::stderr)
-                    .with_filter(stderr_filter)
-            });
-            let _ = tracing_subscriber::registry()
-                .with(file_layer)
-                .with(stderr_layer)
-                .try_init();
-            let _ = LOG_GUARD.set(guard);
+async fn run_logs_command(args: &[String]) -> Result<()> {
+    let execution_id = args.first()
+        .ok_or_else(|| anyhow::anyhow!("Usage: iota logs <execution_id>"))?;
+    let loki_url = std::env::var("IOTA_LOKI_URL")
+        .unwrap_or_else(|_| "http://localhost:3100".to_string());
+    let query = format!(r#"{{iota_execution_id="{}"}}"#, execution_id);
+    let url = format!("{}/loki/api/v1/query_range?query={}&limit=1000",
+        loki_url, urlencoding::encode(&query));
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await
+        .with_context(|| format!("Failed to connect to Loki at {}", loki_url))?;
+    if !resp.status().is_success() {
+        bail!("Loki query failed with status {}", resp.status());
+    }
+    let body: serde_json::Value = resp.json().await?;
+    if let Some(results) = body["data"]["result"].as_array() {
+        for stream in results {
+            if let Some(values) = stream["values"].as_array() {
+                for entry in values {
+                    if let Some(arr) = entry.as_array() {
+                        if arr.len() >= 2 {
+                            if let Some(line) = arr[1].as_str() {
+                                println!("{}", line);
+                            }
+                        }
+                    }
+                }
+            }
         }
-        Err(err) => {
-            let _ = tracing_subscriber::fmt()
-                .with_env_filter(stderr_filter)
-                .with_writer(std::io::stderr)
-                .try_init();
-            eprintln!("failed to initialize file logging: {err}");
-        }
-    }
-}
-
-fn logging_filter() -> EnvFilter {
-    let value = std::env::var("IOTA_LOG")
-        .or_else(|_| std::env::var("RUST_LOG"))
-        .unwrap_or_else(|_| "warn,iota_sympantos=info".to_string());
-    EnvFilter::try_new(value).unwrap_or_else(|_| EnvFilter::new("warn,iota_sympantos=info"))
-}
-
-fn log_dir() -> Result<std::path::PathBuf> {
-    if let Some(value) = std::env::var_os("IOTA_LOG_DIR").filter(|value| !value.is_empty()) {
-        return Ok(std::path::PathBuf::from(value));
-    }
-    let home = dirs::home_dir().context("Failed to get home directory")?;
-    Ok(home.join(".i6").join("logs"))
-}
-
-fn env_flag(name: &str) -> Option<bool> {
-    std::env::var(name).ok().map(|value| {
-        matches!(
-            value.to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
-}
-
-fn run_observability_command(args: &[String]) -> Result<()> {
-    let command = args.first().map(String::as_str).unwrap_or("help");
-    if matches!(command, "-h" | "--help" | "help") {
-        print_observability_help();
-        return Ok(());
-    }
-    let store = EventStore::open(&EventStore::default_path()?)?;
-    let sub_args = if args.len() > 1 {
-        &args[1..]
     } else {
-        &[] as &[String]
-    };
-    match command {
-        "logging" | "log" => run_obs_logging(sub_args, &store),
-        "timing" => run_obs_timing(sub_args, &store),
-        "metrics" | "metric" => run_obs_metrics(sub_args, &store),
-        // soft-deprecated aliases kept for backwards compat
-        "summary" => {
-            let limit = parse_limit(args).unwrap_or(10);
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&store.observability_summary(limit)?)?
-            );
-            Ok(())
-        }
-        "recent" => {
-            let limit = parse_limit(args).unwrap_or(10);
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&store.recent_executions(limit)?)?
-            );
-            Ok(())
-        }
-        other => anyhow::bail!(
-            "Unknown observability command '{}'. Run `iota observability --help` for usage.",
-            other
-        ),
-    }
-}
-
-fn print_observability_help() {
-    println!(
-        "Usage:\n  iota observability <command> [subcommand] [options]\n\nCommands:\n  logging   Browse execution logs and event streams\n  timing    Inspect timing and latency data\n  metrics   View aggregated counters and gauges\n\nRun `iota observability <command> --help` for subcommand details."
-    );
-}
-
-// ── logging ──────────────────────────────────────────────────────────────────
-
-fn run_obs_logging(args: &[String], store: &EventStore) -> Result<()> {
-    let sub = args.first().map(String::as_str).unwrap_or("help");
-    if matches!(sub, "-h" | "--help" | "help") {
-        println!(
-            "Usage:\n  iota observability logging recent [--limit N]        Recent executions (id, backend, status, time)\n  iota observability logging errors [--limit N]        Failed executions only\n  iota observability logging events <execution-id>     Full event stream for one execution\n  iota observability logging logs [--limit N] [--event NAME] [--scan N]\n                                                              Structured log events\n  iota observability logging tools [--limit N] [--tool NAME] [--mode calls|results|pairs] [--scan N]\n                                                              Tool call/result events\n  iota observability logging approvals [--limit N]     approval_request/decision events"
-        );
-        return Ok(());
-    }
-    let limit = parse_limit(args).unwrap_or(20);
-    match sub {
-        "recent" => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&store.recent_executions(limit)?)?
-            );
-        }
-        "errors" => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&store.executions_by_status("failed", limit)?)?
-            );
-        }
-        "events" => {
-            let execution_id = args.get(1).ok_or_else(|| {
-                anyhow::anyhow!("Usage: iota observability logging events <execution-id>")
-            })?;
-            #[derive(serde::Serialize)]
-            struct EventEntry {
-                seq: i64,
-                event_type: String,
-                event: serde_json::Value,
-            }
-            let events = store.execution_events(execution_id)?;
-            let out: Vec<EventEntry> = events
-                .into_iter()
-                .map(|(seq, event_type, event)| EventEntry {
-                    seq,
-                    event_type,
-                    event: serde_json::to_value(event).unwrap_or(serde_json::Value::Null),
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&out)?);
-        }
-        "logs" => {
-            let event_filter = parse_log_event_filter(args);
-            let scan = parse_scan(args).unwrap_or_else(|| default_scan_limit(limit));
-            let executions = store.recent_executions(scan)?;
-            let entries = collect_log_entries(store, &executions, limit, event_filter)?;
-            println!("{}", serde_json::to_string_pretty(&entries)?);
-        }
-        "tools" => {
-            let tool_filter = parse_tool_filter(args);
-            let mode = parse_tool_event_mode(args)?;
-            let scan = parse_scan(args).unwrap_or_else(|| default_scan_limit(limit));
-            let executions = store.recent_executions(scan)?;
-            let entries = collect_tool_event_entries(store, &executions, limit, tool_filter, mode)?;
-            println!("{}", serde_json::to_string_pretty(&entries)?);
-        }
-        "approvals" => {
-            use crate::runtime_event::RuntimeEvent;
-            #[derive(serde::Serialize)]
-            struct ApprovalEntry {
-                execution_id: String,
-                backend: String,
-                seq: i64,
-                event_type: String,
-                detail: serde_json::Value,
-            }
-            let executions = store.recent_executions(limit.saturating_mul(5))?;
-            let mut entries: Vec<ApprovalEntry> = Vec::new();
-            'outer: for exec in &executions {
-                for (seq, event_type, event) in store.execution_events(&exec.execution_id)? {
-                    let detail = match &event {
-                        RuntimeEvent::ApprovalRequest(_) | RuntimeEvent::ApprovalDecision(_) => {
-                            Some(serde_json::to_value(&event).unwrap_or(serde_json::Value::Null))
-                        }
-                        _ => None,
-                    };
-                    if let Some(detail) = detail {
-                        entries.push(ApprovalEntry {
-                            execution_id: exec.execution_id.clone(),
-                            backend: exec.backend.clone(),
-                            seq,
-                            event_type,
-                            detail,
-                        });
-                        if entries.len() >= limit {
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-            println!("{}", serde_json::to_string_pretty(&entries)?);
-        }
-        other => anyhow::bail!(
-            "Unknown logging subcommand '{}'. Run `iota observability logging --help`.",
-            other
-        ),
+        println!("No logs found for execution {}", execution_id);
     }
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolEventMode {
-    Calls,
-    Results,
-    Pairs,
-}
-
-const DEFAULT_OBS_SCAN_LIMIT: usize = 500;
-
-#[derive(Serialize)]
-#[serde(tag = "event_type", rename_all = "snake_case")]
-enum ToolEventEntry {
-    ToolCall {
-        execution_id: String,
-        backend: String,
-        seq: i64,
-        tool_name: String,
-        id: String,
-        arguments: serde_json::Value,
-    },
-    ToolResult {
-        execution_id: String,
-        backend: String,
-        seq: i64,
-        tool_name: String,
-        id: String,
-        ok: bool,
-        result: serde_json::Value,
-    },
-    ToolPair {
-        execution_id: String,
-        backend: String,
-        tool_name: String,
-        id: String,
-        status: String,
-        call_seq: Option<i64>,
-        result_seq: Option<i64>,
-        arguments: serde_json::Value,
-        ok: Option<bool>,
-        result: serde_json::Value,
-    },
-}
-
-#[derive(Serialize)]
-struct LogEntry {
-    execution_id: String,
-    backend: String,
-    seq: i64,
-    log: LogEvent,
-}
-
-fn collect_log_entries(
-    store: &EventStore,
-    executions: &[crate::store::events::ExecutionRecord],
-    limit: usize,
-    event_filter: Option<&str>,
-) -> Result<Vec<LogEntry>> {
-    use crate::runtime_event::RuntimeEvent;
-
-    if limit == 0 {
-        return Ok(Vec::new());
+async fn run_trace_command(args: &[String]) -> Result<()> {
+    let trace_id = args.first()
+        .ok_or_else(|| anyhow::anyhow!("Usage: iota trace <trace_id>"))?;
+    let jaeger_url = std::env::var("IOTA_JAEGER_URL")
+        .unwrap_or_else(|_| "http://localhost:16686".to_string());
+    let url = format!("{}/api/traces/{}", jaeger_url, trace_id);
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await
+        .with_context(|| format!("Failed to connect to Jaeger at {}", jaeger_url))?;
+    if !resp.status().is_success() {
+        bail!("Jaeger query failed with status {}", resp.status());
     }
-    let mut entries = Vec::new();
-    'outer: for exec in executions {
-        for (seq, _, event) in store.execution_events(&exec.execution_id)? {
-            let RuntimeEvent::Log(log) = event else {
-                continue;
-            };
-            if event_filter.is_some_and(|event| event != log.event.as_str()) {
-                continue;
-            }
-            entries.push(LogEntry {
-                execution_id: exec.execution_id.clone(),
-                backend: exec.backend.clone(),
-                seq,
-                log,
-            });
-            if entries.len() >= limit {
-                break 'outer;
-            }
-        }
-    }
-    Ok(entries)
-}
-
-fn collect_tool_event_entries(
-    store: &EventStore,
-    executions: &[crate::store::events::ExecutionRecord],
-    limit: usize,
-    tool_filter: Option<&str>,
-    mode: ToolEventMode,
-) -> Result<Vec<ToolEventEntry>> {
-    use crate::runtime_event::RuntimeEvent;
-
-    if limit == 0 {
-        return Ok(Vec::new());
-    }
-    let mut entries = Vec::new();
-    'outer: for exec in executions {
-        let events = store.execution_events(&exec.execution_id)?;
-        if mode == ToolEventMode::Pairs {
-            let mut calls: BTreeMap<(String, String), (i64, serde_json::Value)> = BTreeMap::new();
-            for (seq, _, event) in events {
-                match event {
-                    RuntimeEvent::ToolCall(call) => {
-                        if tool_filter.is_some_and(|name| name != call.name.as_str()) {
-                            continue;
-                        }
-                        calls.insert((call.id, call.name), (seq, call.arguments));
-                    }
-                    RuntimeEvent::ToolResult(result) => {
-                        if tool_filter.is_some_and(|name| name != result.name.as_str()) {
-                            continue;
-                        }
-                        let key = (result.id.clone(), result.name.clone());
-                        let (call_seq, arguments) = calls
-                            .remove(&key)
-                            .map(|(seq, arguments)| (Some(seq), arguments))
-                            .unwrap_or((None, serde_json::Value::Null));
-                        entries.push(ToolEventEntry::ToolPair {
-                            execution_id: exec.execution_id.clone(),
-                            backend: exec.backend.clone(),
-                            tool_name: result.name,
-                            id: result.id,
-                            status: if call_seq.is_some() {
-                                "completed".to_string()
-                            } else {
-                                "missing_call".to_string()
-                            },
-                            call_seq,
-                            result_seq: Some(seq),
-                            arguments,
-                            ok: Some(result.ok),
-                            result: result.result,
-                        });
-                        if entries.len() >= limit {
-                            break 'outer;
-                        }
-                    }
-                    _ => {}
+    let body: serde_json::Value = resp.json().await?;
+    if let Some(traces) = body["data"].as_array() {
+        for trace in traces {
+            if let Some(spans) = trace["spans"].as_array() {
+                for span in spans {
+                    let name = span["operationName"].as_str().unwrap_or("?");
+                    let duration_us = span["duration"].as_u64().unwrap_or(0);
+                    let duration_ms = duration_us / 1000;
+                    let depth = if span["references"].as_array()
+                        .map(|r| r.is_empty()).unwrap_or(true) { 0 } else { 1 };
+                    let indent = "  ".repeat(depth);
+                    println!("{}├── {} ({}ms)", indent, name, duration_ms);
                 }
             }
-            for ((id, tool_name), (call_seq, arguments)) in calls {
-                entries.push(ToolEventEntry::ToolPair {
-                    execution_id: exec.execution_id.clone(),
-                    backend: exec.backend.clone(),
-                    tool_name,
-                    id,
-                    status: "missing_result".to_string(),
-                    call_seq: Some(call_seq),
-                    result_seq: None,
-                    arguments,
-                    ok: None,
-                    result: serde_json::Value::Null,
-                });
-                if entries.len() >= limit {
-                    break 'outer;
-                }
-            }
-            continue;
         }
-
-        for (seq, _, event) in events {
-            match event {
-                RuntimeEvent::ToolCall(call) if mode == ToolEventMode::Calls => {
-                    if tool_filter.is_some_and(|name| name != call.name.as_str()) {
-                        continue;
-                    }
-                    entries.push(ToolEventEntry::ToolCall {
-                        execution_id: exec.execution_id.clone(),
-                        backend: exec.backend.clone(),
-                        seq,
-                        tool_name: call.name,
-                        id: call.id,
-                        arguments: call.arguments,
-                    });
-                }
-                RuntimeEvent::ToolResult(result) if mode == ToolEventMode::Results => {
-                    if tool_filter.is_some_and(|name| name != result.name.as_str()) {
-                        continue;
-                    }
-                    entries.push(ToolEventEntry::ToolResult {
-                        execution_id: exec.execution_id.clone(),
-                        backend: exec.backend.clone(),
-                        seq,
-                        tool_name: result.name,
-                        id: result.id,
-                        ok: result.ok,
-                        result: result.result,
-                    });
-                }
-                _ => {}
-            }
-            if entries.len() >= limit {
-                break 'outer;
-            }
-        }
-    }
-    Ok(entries)
-}
-
-// ── timing ───────────────────────────────────────────────────────────────────
-
-fn run_obs_timing(args: &[String], store: &EventStore) -> Result<()> {
-    let sub = args.first().map(String::as_str).unwrap_or("help");
-    if matches!(sub, "-h" | "--help" | "help") {
-        println!(
-            "Usage:\n  iota observability timing recent [--limit N]        Recent executions with timing fields\n  iota observability timing slow [--limit N]          Slowest executions by total_ms\n  iota observability timing breakdown <execution-id>  5-phase latency breakdown for one execution\n  iota observability timing summary                   avg/p95 latency statistics"
-        );
-        return Ok(());
-    }
-    let limit = parse_limit(args).unwrap_or(20);
-    match sub {
-        "recent" => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&store.recent_executions(limit)?)?
-            );
-        }
-        "slow" => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&store.slowest_executions(limit)?)?
-            );
-        }
-        "breakdown" => {
-            let execution_id = args.get(1).ok_or_else(|| {
-                anyhow::anyhow!("Usage: iota observability timing breakdown <execution-id>")
-            })?;
-            let record = store
-                .get_execution(execution_id)?
-                .ok_or_else(|| anyhow::anyhow!("Execution '{}' not found", execution_id))?;
-            #[derive(serde::Serialize)]
-            struct Phase {
-                phase: &'static str,
-                ms: Option<u64>,
-            }
-            #[derive(serde::Serialize)]
-            struct Breakdown {
-                execution_id: String,
-                backend: String,
-                status: String,
-                process_spawn_ms: Option<u64>,
-                init_ms: Option<u64>,
-                session_new_ms: Option<u64>,
-                prompt_ms: Option<u64>,
-                total_ms: Option<u64>,
-                phases: Vec<Phase>,
-            }
-            let breakdown = Breakdown {
-                phases: vec![
-                    Phase {
-                        phase: "process_spawn",
-                        ms: record.process_spawn_ms,
-                    },
-                    Phase {
-                        phase: "init",
-                        ms: record.init_ms,
-                    },
-                    Phase {
-                        phase: "session_new",
-                        ms: record.session_new_ms,
-                    },
-                    Phase {
-                        phase: "prompt",
-                        ms: record.prompt_ms,
-                    },
-                    Phase {
-                        phase: "total",
-                        ms: record.total_ms,
-                    },
-                ],
-                execution_id: record.execution_id,
-                backend: record.backend,
-                status: record.status.to_string(),
-                process_spawn_ms: record.process_spawn_ms,
-                init_ms: record.init_ms,
-                session_new_ms: record.session_new_ms,
-                prompt_ms: record.prompt_ms,
-                total_ms: record.total_ms,
-            };
-            println!("{}", serde_json::to_string_pretty(&breakdown)?);
-        }
-        "summary" => {
-            let s = store.observability_summary(0)?;
-            #[derive(serde::Serialize)]
-            struct TimingSummary {
-                total_executions: u64,
-                completed_executions: u64,
-                failed_executions: u64,
-                running_executions: u64,
-                avg_prompt_ms: Option<f64>,
-                avg_total_ms: Option<f64>,
-                p95_total_ms: Option<u64>,
-            }
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&TimingSummary {
-                    total_executions: s.total_executions,
-                    completed_executions: s.completed_executions,
-                    failed_executions: s.failed_executions,
-                    running_executions: s.running_executions,
-                    avg_prompt_ms: s.avg_prompt_ms,
-                    avg_total_ms: s.avg_total_ms,
-                    p95_total_ms: s.p95_total_ms,
-                })?
-            );
-        }
-        other => anyhow::bail!(
-            "Unknown timing subcommand '{}'. Run `iota observability timing --help`.",
-            other
-        ),
+    } else {
+        println!("No trace found for {}", trace_id);
     }
     Ok(())
-}
-
-// ── metrics ───────────────────────────────────────────────────────────────────
-
-fn run_obs_metrics(args: &[String], store: &EventStore) -> Result<()> {
-    let sub = args.first().map(String::as_str).unwrap_or("");
-    if matches!(sub, "-h" | "--help" | "help") {
-        println!(
-            "Usage:\n  iota observability metrics [--prometheus]   Human-readable aggregate (or Prometheus exposition)\n  iota observability metrics tokens            Token usage breakdown\n  iota observability metrics cache             Cache hit/miss ratio\n  iota observability metrics sessions          Active sessions and queued prompts\n  iota observability metrics latency           Latency avg and p95"
-        );
-        return Ok(());
-    }
-    // bare `iota observability metrics` or `iota observability metrics --prometheus`
-    if sub.is_empty() || sub.starts_with('-') {
-        let use_prometheus = args.iter().any(|a| a == "--prometheus" || a == "-p");
-        if use_prometheus {
-            return print_prometheus_metrics(store);
-        }
-        let s = store.observability_summary(5)?;
-        #[derive(serde::Serialize)]
-        struct MetricsSummary {
-            executions: serde_json::Value,
-            latency: serde_json::Value,
-            tokens: serde_json::Value,
-            cache: serde_json::Value,
-            runtime: serde_json::Value,
-        }
-        let out = MetricsSummary {
-            executions: serde_json::json!({
-                "total": s.total_executions,
-                "completed": s.completed_executions,
-                "failed": s.failed_executions,
-                "running": s.running_executions,
-            }),
-            latency: serde_json::json!({
-                "avg_prompt_ms": s.avg_prompt_ms,
-                "avg_total_ms": s.avg_total_ms,
-                "p95_total_ms": s.p95_total_ms,
-            }),
-            tokens: serde_json::json!({
-                "events": s.token_usage.events,
-                "input_tokens": s.token_usage.input_tokens,
-                "output_tokens": s.token_usage.output_tokens,
-                "total_tokens": s.token_usage.total_tokens,
-            }),
-            cache: serde_json::json!({
-                "hits": s.cache_hits,
-                "misses": s.cache_misses,
-                "hit_rate": if s.cache_hits + s.cache_misses > 0 {
-                    Some(s.cache_hits as f64 / (s.cache_hits + s.cache_misses) as f64)
-                } else { None },
-            }),
-            runtime: serde_json::json!({
-                "active_sessions": s.active_sessions,
-                "queued_prompts": s.queued_prompts,
-            }),
-        };
-        println!("{}", serde_json::to_string_pretty(&out)?);
-        return Ok(());
-    }
-    match sub {
-        "tokens" => {
-            let s = store.observability_summary(0)?;
-            let u = &s.token_usage;
-            let avg_input = if u.events > 0 {
-                Some(u.input_tokens as f64 / u.events as f64)
-            } else {
-                None
-            };
-            let avg_output = if u.events > 0 {
-                Some(u.output_tokens as f64 / u.events as f64)
-            } else {
-                None
-            };
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "token_usage_events": u.events,
-                    "input_tokens": u.input_tokens,
-                    "output_tokens": u.output_tokens,
-                    "total_tokens": u.total_tokens,
-                    "avg_input_per_execution": avg_input,
-                    "avg_output_per_execution": avg_output,
-                }))?
-            );
-        }
-        "cache" => {
-            let s = store.observability_summary(0)?;
-            let total = s.cache_hits + s.cache_misses;
-            let hit_rate = if total > 0 {
-                Some(s.cache_hits as f64 / total as f64)
-            } else {
-                None
-            };
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "hits": s.cache_hits,
-                    "misses": s.cache_misses,
-                    "total": total,
-                    "hit_rate": hit_rate,
-                }))?
-            );
-        }
-        "sessions" => {
-            let s = store.observability_summary(0)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "active_sessions": s.active_sessions,
-                    "queued_prompts": s.queued_prompts,
-                }))?
-            );
-        }
-        "latency" => {
-            let s = store.observability_summary(0)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "avg_prompt_ms": s.avg_prompt_ms,
-                    "avg_total_ms": s.avg_total_ms,
-                    "p95_total_ms": s.p95_total_ms,
-                }))?
-            );
-        }
-        other => anyhow::bail!(
-            "Unknown metrics subcommand '{}'. Run `iota observability metrics --help`.",
-            other
-        ),
-    }
-    Ok(())
-}
-
-fn print_prometheus_metrics(store: &EventStore) -> Result<()> {
-    let metrics = store.prometheus_metrics()?;
-    let registry = Registry::new();
-    let execution_attempts = IntCounter::with_opts(opts!(
-        "iota_execution_attempts_total",
-        "Total recorded executions"
-    ))?;
-    execution_attempts.inc_by(metrics.execution_attempts);
-    registry.register(Box::new(execution_attempts))?;
-
-    for (name, help, value) in [
-        (
-            "iota_execution_completed_total",
-            "Completed executions",
-            metrics.execution_completed,
-        ),
-        (
-            "iota_execution_failed_total",
-            "Failed executions",
-            metrics.execution_failed,
-        ),
-        (
-            "iota_execution_running",
-            "Currently running executions",
-            metrics.execution_running,
-        ),
-        (
-            "iota_active_sessions",
-            "Active ACP sessions tracked by the engine",
-            metrics.active_sessions,
-        ),
-        (
-            "iota_queued_prompts",
-            "Queued TUI prompts waiting for the current turn",
-            metrics.queued_prompts,
-        ),
-        (
-            "iota_token_usage_events_total",
-            "Token usage events captured",
-            metrics.token_usage.events,
-        ),
-        (
-            "iota_input_tokens_total",
-            "Captured input tokens",
-            metrics.token_usage.input_tokens,
-        ),
-        (
-            "iota_output_tokens_total",
-            "Captured output tokens",
-            metrics.token_usage.output_tokens,
-        ),
-        (
-            "iota_tokens_total",
-            "Captured total tokens",
-            metrics.token_usage.total_tokens,
-        ),
-    ] {
-        let gauge = Gauge::with_opts(opts!(name, help))?;
-        gauge.set(value as f64);
-        registry.register(Box::new(gauge))?;
-    }
-
-    for (name, help, value) in [
-        (
-            "iota_cache_hits_total",
-            "Completed execution cache hits",
-            metrics.cache_hits,
-        ),
-        (
-            "iota_cache_misses_total",
-            "Completed execution cache misses",
-            metrics.cache_misses,
-        ),
-    ] {
-        let counter = IntCounter::with_opts(opts!(name, help))?;
-        counter.inc_by(value);
-        registry.register(Box::new(counter))?;
-    }
-
-    for (name, help, value) in [
-        (
-            "iota_prompt_latency_ms_avg",
-            "Average prompt latency in milliseconds",
-            metrics.avg_prompt_ms,
-        ),
-        (
-            "iota_total_latency_ms_avg",
-            "Average total latency in milliseconds",
-            metrics.avg_total_ms,
-        ),
-        (
-            "iota_total_latency_ms_p95",
-            "P95 total latency in milliseconds",
-            metrics.p95_total_ms.map(|value| value as f64),
-        ),
-    ] {
-        if let Some(value) = value {
-            let gauge = Gauge::with_opts(opts!(name, help))?;
-            gauge.set(value);
-            registry.register(Box::new(gauge))?;
-        }
-    }
-
-    register_histogram(
-        &registry,
-        "iota_prompt_latency_ms",
-        "Prompt latency in milliseconds",
-        &metrics.prompt_latency_ms,
-    )?;
-    register_histogram(
-        &registry,
-        "iota_init_latency_ms",
-        "ACP initialization latency in milliseconds",
-        &metrics.init_latency_ms,
-    )?;
-
-    let encoder = TextEncoder::new();
-    let mut buffer = Vec::new();
-    encoder.encode(&registry.gather(), &mut buffer)?;
-    println!("{}", String::from_utf8(buffer)?);
-    Ok(())
-}
-
-fn register_histogram(registry: &Registry, name: &str, help: &str, values: &[u64]) -> Result<()> {
-    let histogram = Histogram::with_opts(HistogramOpts::new(name, help).buckets(vec![
-        50.0, 100.0, 250.0, 500.0, 1_000.0, 2_500.0, 5_000.0, 10_000.0, 30_000.0, 60_000.0,
-    ]))?;
-    for value in values {
-        histogram.observe(*value as f64);
-    }
-    registry.register(Box::new(histogram))?;
-    Ok(())
-}
-
-fn parse_limit(args: &[String]) -> Option<usize> {
-    args.windows(2)
-        .find_map(|pair| (pair[0] == "--limit").then(|| pair[1].parse::<usize>().ok()))
-        .flatten()
-}
-
-fn parse_scan(args: &[String]) -> Option<usize> {
-    args.windows(2)
-        .find_map(|pair| (pair[0] == "--scan").then(|| pair[1].parse::<usize>().ok()))
-        .flatten()
-}
-
-fn default_scan_limit(limit: usize) -> usize {
-    DEFAULT_OBS_SCAN_LIMIT.max(limit.saturating_mul(20))
-}
-
-fn parse_log_event_filter(args: &[String]) -> Option<&str> {
-    args.windows(2).find_map(|pair| {
-        matches!(pair[0].as_str(), "--event" | "--event-name").then_some(pair[1].as_str())
-    })
-}
-
-fn parse_tool_filter(args: &[String]) -> Option<&str> {
-    args.windows(2).find_map(|pair| {
-        matches!(pair[0].as_str(), "--tool" | "--tool-name").then_some(pair[1].as_str())
-    })
-}
-
-fn parse_tool_event_mode(args: &[String]) -> Result<ToolEventMode> {
-    if args.iter().any(|arg| arg == "--results") {
-        return Ok(ToolEventMode::Results);
-    }
-    if args.iter().any(|arg| arg == "--pairs") {
-        return Ok(ToolEventMode::Pairs);
-    }
-    if args.iter().any(|arg| arg == "--calls") {
-        return Ok(ToolEventMode::Calls);
-    }
-    let Some(mode) = args.windows(2).find_map(|pair| {
-        matches!(pair[0].as_str(), "--mode" | "--events").then_some(pair[1].as_str())
-    }) else {
-        return Ok(ToolEventMode::Calls);
-    };
-    match mode {
-        "calls" | "call" | "tool_call" => Ok(ToolEventMode::Calls),
-        "results" | "result" | "tool_result" => Ok(ToolEventMode::Results),
-        "pairs" | "pair" | "paired" => Ok(ToolEventMode::Pairs),
-        other => anyhow::bail!(
-            "invalid tools event mode '{}'; expected calls, results, or pairs",
-            other
-        ),
-    }
 }
 
 async fn run_skill_command(args: &[String]) -> Result<()> {
@@ -1365,7 +381,9 @@ async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Result<()> {
     let daemon_addr = daemon::daemon_addr();
     let response = send_prompt_autostart_daemon(&daemon_addr, &request).await?;
     if options.log_events {
-        print_log_events(&response.events);
+        for event in &response.events {
+            eprintln!("{}", serde_json::to_string(event).unwrap_or_default());
+        }
     }
     if options.timing {
         print_route_timing("daemon", options.backend, response.timing.as_ref());
@@ -1755,64 +773,5 @@ mod tests {
 
         assert_eq!(value["version_mapping"]["acp"], "0.12.0");
         assert!(value["version_mapping"]["bin"].is_null());
-    }
-
-    #[test]
-    fn parses_observability_tool_filter() {
-        let args = vec![
-            "tools".to_string(),
-            "--limit".to_string(),
-            "5".to_string(),
-            "--tool".to_string(),
-            "iota_memory_write".to_string(),
-        ];
-
-        assert_eq!(parse_tool_filter(&args), Some("iota_memory_write"));
-    }
-
-    #[test]
-    fn parses_observability_scan_and_log_filter() {
-        let args = vec![
-            "logs".to_string(),
-            "--limit".to_string(),
-            "5".to_string(),
-            "--scan".to_string(),
-            "250".to_string(),
-            "--event".to_string(),
-            "memory.write.result".to_string(),
-        ];
-
-        assert_eq!(parse_scan(&args), Some(250));
-        assert_eq!(parse_log_event_filter(&args), Some("memory.write.result"));
-        assert_eq!(default_scan_limit(2), DEFAULT_OBS_SCAN_LIMIT);
-    }
-
-    #[test]
-    fn parses_tool_event_modes() {
-        assert_eq!(
-            parse_tool_event_mode(&["tools".to_string()]).unwrap(),
-            ToolEventMode::Calls
-        );
-        assert_eq!(
-            parse_tool_event_mode(&[
-                "tools".to_string(),
-                "--mode".to_string(),
-                "results".to_string()
-            ])
-            .unwrap(),
-            ToolEventMode::Results
-        );
-        assert_eq!(
-            parse_tool_event_mode(&["tools".to_string(), "--pairs".to_string()]).unwrap(),
-            ToolEventMode::Pairs
-        );
-        assert!(
-            parse_tool_event_mode(&[
-                "tools".to_string(),
-                "--mode".to_string(),
-                "unknown".to_string()
-            ])
-            .is_err()
-        );
     }
 }

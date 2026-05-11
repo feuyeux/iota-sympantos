@@ -41,7 +41,7 @@ impl SessionLedger {
     }
 
     pub fn latest_session_for_cwd(&self, cwd: &Path) -> Result<Option<String>> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.query_row(
             "SELECT iota_session_id FROM sessions WHERE cwd = ?1 ORDER BY last_used_at DESC LIMIT 1",
             params![cwd.display().to_string()],
@@ -59,7 +59,7 @@ impl SessionLedger {
         model: Option<&str>,
     ) -> Result<()> {
         let now = now_ts();
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO sessions (iota_session_id, cwd, active_backend, model, turn_count, created_at, last_used_at)\n             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)\n             ON CONFLICT(iota_session_id) DO UPDATE SET cwd=excluded.cwd, active_backend=COALESCE(excluded.active_backend, sessions.active_backend), model=COALESCE(excluded.model, sessions.model), last_used_at=excluded.last_used_at",
             params![session_id, cwd.display().to_string(), active_backend, model, now],
@@ -75,7 +75,7 @@ impl SessionLedger {
         cwd: &Path,
     ) -> Result<()> {
         let now = now_ts();
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO backend_sessions (iota_session_id, backend, backend_session_id, cwd, created_at, last_used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)\n             ON CONFLICT(iota_session_id, backend, cwd) DO UPDATE SET backend_session_id=COALESCE(excluded.backend_session_id, backend_sessions.backend_session_id), last_used_at=excluded.last_used_at",
             params![session_id, backend, backend_session_id, cwd.display().to_string(), now],
@@ -94,7 +94,7 @@ impl SessionLedger {
     ) -> Result<String> {
         let turn_id = Uuid::new_v4().to_string();
         let now = now_ts();
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO turns (turn_id, iota_session_id, backend, execution_id, prompt_hash, output_summary, status, started_at, finished_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
             params![turn_id, session_id, backend, execution_id, prompt_hash, output_summary, status, now],
@@ -114,7 +114,7 @@ impl SessionLedger {
         cwd: &Path,
         summary: &str,
     ) -> Result<()> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO handoffs (iota_session_id, from_backend, to_backend, cwd, summary, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![session_id, from_backend, to_backend, cwd.display().to_string(), summary, now_ts()],
@@ -128,7 +128,7 @@ impl SessionLedger {
         to_backend: Option<&str>,
         cwd: &Path,
     ) -> Result<Option<String>> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.query_row(
             "SELECT summary FROM handoffs WHERE iota_session_id = ?1 AND cwd = ?2 AND (?3 IS NULL OR to_backend = ?3 OR to_backend IS NULL) ORDER BY created_at DESC LIMIT 1",
             params![session_id, cwd.display().to_string(), to_backend],
@@ -137,7 +137,7 @@ impl SessionLedger {
     }
 
     pub fn summary(&self, session_id: &str) -> Result<Option<SessionSummary>> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.query_row(
             "SELECT s.iota_session_id, s.cwd, s.active_backend, s.turn_count, (SELECT output_summary FROM turns t WHERE t.iota_session_id = s.iota_session_id ORDER BY finished_at DESC LIMIT 1)\n             FROM sessions s WHERE s.iota_session_id = ?1",
             params![session_id],

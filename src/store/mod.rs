@@ -6,7 +6,8 @@
 //! - [`ledger`]   — [`SessionLedger`]: sessions, backend sessions, turns, handoffs
 
 pub mod approval;
+pub mod cache;
 pub mod embedding;
-pub mod events;
+
 pub mod ledger;
 pub mod memory;

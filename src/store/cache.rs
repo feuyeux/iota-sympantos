@@ -1,12 +1,13 @@
 //! Minimal SQLite store for execution cache / replay / dedupe.
 //!
-//! This preserves only cache/replay/deduplication functionality.
-//! Observability data is exported through OpenTelemetry instead of this store.
+//! This is intentionally a stripped-down version of [`super::events::EventStore`]
+//! that preserves only the cache/replay/deduplication functionality.
+//! All observability features (metrics, Prometheus, token usage, timings) have
+//! been removed.  The full EventStore will be deleted in a later migration step.
 
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -52,10 +53,7 @@ impl From<&str> for ExecutionStatus {
             "completed" => Self::Completed,
             "failed" => Self::Failed,
             other => {
-                tracing::warn!(
-                    status = other,
-                    "unknown execution status read from cache store"
-                );
+                tracing::warn!(status = other, "unknown execution status read from cache store");
                 Self::Unknown(other.to_string())
             }
         }
@@ -87,12 +85,6 @@ pub struct CachedExecution {
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub fencing_token: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheMetricsSnapshot {
-    pub execution_status_counts: BTreeMap<String, u64>,
-    pub outputs_total: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +121,7 @@ impl CacheStore {
             .map(str::to_string)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = now_ts();
-        let mut conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let mut conn = crate::utils::lock_or_recover(&self.conn);
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let stale_before = now - RUNNING_EXECUTION_TTL_SECS;
         tx.execute(
@@ -175,7 +167,7 @@ impl CacheStore {
         }
         let event_json =
             serde_json::to_string(event).context("Failed to serialize runtime event")?;
-        let mut conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let mut conn = crate::utils::lock_or_recover(&self.conn);
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let next_seq: i64 = tx
             .query_row(
@@ -194,7 +186,7 @@ impl CacheStore {
     }
 
     pub fn finish_execution(&self, execution_id: &str, status: ExecutionStatus) -> Result<()> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "UPDATE cache_executions SET status = ?2, finished_at = ?3 WHERE execution_id = ?1",
             params![execution_id, status.as_str(), now_ts()],
@@ -207,7 +199,7 @@ impl CacheStore {
         backend: &str,
         request_hash: &str,
     ) -> Result<Option<CachedExecution>> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.query_row(
             "SELECT execution_id, session_id, backend, request_hash, status, \
                     started_at, finished_at, fencing_token \
@@ -228,7 +220,7 @@ impl CacheStore {
     ) -> Result<Option<CachedExecution>> {
         let now = now_ts();
         let stale_before = now - RUNNING_EXECUTION_TTL_SECS;
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "UPDATE cache_executions SET status = 'failed', finished_at = ?3
              WHERE backend = ?1 AND request_hash = ?2 AND status = 'running' AND started_at < ?4",
@@ -248,7 +240,7 @@ impl CacheStore {
     }
 
     pub fn get_execution(&self, execution_id: &str) -> Result<Option<CachedExecution>> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         conn.query_row(
             "SELECT execution_id, session_id, backend, request_hash, status, \
                     started_at, finished_at, fencing_token \
@@ -262,7 +254,7 @@ impl CacheStore {
 
     /// Replay all stored Output events for the given execution, concatenated.
     pub fn output_text(&self, execution_id: &str) -> Result<Option<String>> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
+        let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
             "SELECT event_json FROM cache_outputs \
              WHERE execution_id = ?1 ORDER BY seq ASC",
@@ -284,34 +276,13 @@ impl CacheStore {
         }
     }
 
-    pub fn metrics_snapshot(&self) -> Result<CacheMetricsSnapshot> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
-        let mut stmt =
-            conn.prepare("SELECT status, COUNT(*) FROM cache_executions GROUP BY status")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
-        })?;
-        let mut execution_status_counts = BTreeMap::new();
-        for row in rows {
-            let (status, count) = row?;
-            execution_status_counts.insert(status, count);
-        }
-        let outputs_total = conn.query_row("SELECT COUNT(*) FROM cache_outputs", [], |row| {
-            row.get::<_, u64>(0)
-        })?;
-        Ok(CacheMetricsSnapshot {
-            execution_status_counts,
-            outputs_total,
-        })
-    }
-
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 
     fn init(&self) -> Result<()> {
-        let conn = crate::utils::lock_sqlite_conn(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cache_executions (
     execution_id  TEXT PRIMARY KEY,
@@ -391,42 +362,4 @@ fn purge_old_records(conn: &Connection) {
          AND finished_at < ?1",
         params![cutoff],
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::runtime_event::OutputEvent;
-
-    #[test]
-    fn metrics_snapshot_counts_statuses_and_outputs() {
-        let store = CacheStore::open(Path::new(":memory:")).unwrap();
-        let exec_completed = store
-            .begin_execution_with_id("codex", "session", "hash-1", Some("exec-completed"))
-            .unwrap();
-        let exec_failed = store
-            .begin_execution_with_id("codex", "session", "hash-2", Some("exec-failed"))
-            .unwrap();
-        store
-            .append_output(
-                &exec_completed,
-                &RuntimeEvent::Output(OutputEvent {
-                    text: "ok".to_string(),
-                    role: None,
-                }),
-            )
-            .unwrap();
-        store
-            .finish_execution(&exec_completed, ExecutionStatus::Completed)
-            .unwrap();
-        store
-            .finish_execution(&exec_failed, ExecutionStatus::Failed)
-            .unwrap();
-
-        let snapshot = store.metrics_snapshot().unwrap();
-
-        assert_eq!(snapshot.execution_status_counts["completed"], 1);
-        assert_eq!(snapshot.execution_status_counts["failed"], 1);
-        assert_eq!(snapshot.outputs_total, 1);
-    }
 }

@@ -86,6 +86,7 @@ impl fmt::Display for AcpBackend {
 
 pub struct AcpRunOptions {
     pub backend: AcpBackend,
+    pub multi_backend: bool,
     pub cwd: PathBuf,
     pub prompt: String,
     pub show_native: bool,
@@ -168,6 +169,7 @@ struct JsonRpcResponse {
 
 pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
     let mut backend = AcpBackend::Codex;
+    let mut multi_backend = false;
     let mut cwd = std::env::current_dir().context("Failed to get current directory")?;
     let mut show_native = false;
     let mut use_daemon = false;
@@ -179,6 +181,9 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
 
     while index < args.len() {
         match args[index].as_str() {
+            "5backend" => {
+                multi_backend = true;
+            }
             "-b" | "--backend" => {
                 index += 1;
                 let value = args
@@ -241,6 +246,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
 
     Ok(AcpRunOptions {
         backend,
+        multi_backend,
         cwd,
         prompt,
         show_native,
@@ -647,11 +653,13 @@ impl AcpClient {
             .and_then(Value::as_str)
             .map(str::to_string)
             .context("ACP session/new result did not include sessionId")?;
+        let elapsed_ms_val = elapsed_ms(session_started);
         self.session_id = Some(session_id.clone());
+        tracing::info!(session_id = %session_id, session_new_ms = elapsed_ms_val, "acp.session.created");
         Ok(AcpSessionResolution {
             session_id,
             reused: false,
-            session_new_ms: Some(elapsed_ms(session_started)),
+            session_new_ms: Some(elapsed_ms_val),
         })
     }
 
@@ -664,6 +672,7 @@ impl AcpClient {
     }
 
     pub async fn shutdown(mut self) {
+        tracing::info!(backend = %self.backend, "acp.process.exit");
         let _ = self.stdin.shutdown().await;
         terminate_child_tree(&mut self.child).await;
     }
@@ -1266,5 +1275,17 @@ mod arg_tests {
             Err(err) => err,
         };
         assert!(err.to_string().contains("greater than 0"));
+    }
+
+    #[test]
+    fn parses_5backend_flag() {
+        let options = parse_acp_args(&[
+            "5backend".to_string(),
+            "test prompt".to_string(),
+        ])
+        .unwrap();
+
+        assert!(options.multi_backend);
+        assert_eq!(options.prompt, "test prompt");
     }
 }
