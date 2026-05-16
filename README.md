@@ -12,7 +12,7 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 
 ## 架构
 
-![Architecture Overview](images/iota-sympantos-architecture.png)
+![Architecture Overview](images/iota-sympantos-architecture.svg)
 
 | 层级 | 模块 |
 |------|------|
