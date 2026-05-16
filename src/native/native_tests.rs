@@ -132,6 +132,11 @@ fn dry_run_backend_projection_includes_memory_and_skill_previews() {
 
     assert!(has_memory_preview);
     assert!(has_skill_preview);
+    assert!(previews.iter().any(|preview| {
+        preview.path.ends_with("MEMORY.md")
+            && preview.content.contains("ACP uses JSON-RPC over stdio")
+            && preview.content.contains("## domain")
+    }));
 
     let _ = std::fs::remove_dir_all(&workspace);
 }

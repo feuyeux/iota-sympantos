@@ -54,6 +54,30 @@ pub struct SkillMetadata {
     pub failure_policy: Option<String>,
 }
 
+impl SkillMetadata {
+    pub fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() {
+            anyhow::bail!("Skill name cannot be empty");
+        }
+        for trigger in &self.triggers {
+            if trigger.trim().is_empty() {
+                anyhow::bail!("Trigger in skill '{}' cannot be empty", self.name);
+            }
+        }
+        let mut seen_tools = BTreeSet::new();
+        for tool in &self.execution.tools {
+            let tool_name = tool.name.trim();
+            if tool_name.is_empty() {
+                anyhow::bail!("Tool in skill '{}' cannot be empty", self.name);
+            }
+            if !seen_tools.insert(tool_name.to_string()) {
+                anyhow::bail!("Duplicate tool '{}' in skill '{}'", tool_name, self.name);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillTool {
     pub name: String,
@@ -336,6 +360,7 @@ fn parse_skill_file(path: &Path, priority: usize) -> Result<Skill> {
         .with_context(|| format!("Skill {} is missing YAML frontmatter", path.display()))?;
     let metadata: SkillMetadata = serde_yaml::from_str(frontmatter)
         .with_context(|| format!("Invalid skill YAML in {}", path.display()))?;
+    metadata.validate()?;
     Ok(Skill {
         metadata,
         body: body.trim().to_string(),
@@ -450,5 +475,45 @@ mod tests {
     fn skill_cache_starts_empty() {
         let cache = SkillCache::default();
         assert!(cache.entry.is_none());
+    }
+
+    #[test]
+    fn skill_metadata_validation() {
+        let mut metadata = SkillMetadata {
+            name: "test".to_string(),
+            version: None,
+            summary: None,
+            description: None,
+            triggers: vec!["test".to_string()],
+            backends: vec![],
+            execution: SkillExecution::default(),
+            output: SkillOutput::default(),
+            failure_policy: None,
+        };
+        assert!(metadata.validate().is_ok());
+
+        metadata.triggers = vec![];
+        assert!(metadata.validate().is_ok());
+        metadata.triggers = vec!["test".to_string()];
+
+        metadata.name = " ".to_string();
+        assert!(metadata.validate().is_err());
+        metadata.name = "test".to_string();
+
+        metadata.triggers = vec!["".to_string()];
+        assert!(metadata.validate().is_err());
+        metadata.triggers = vec!["test".to_string()];
+
+        metadata.execution.tools = vec![
+            SkillTool {
+                name: "tool1".to_string(),
+                alias: None,
+            },
+            SkillTool {
+                name: "tool1".to_string(),
+                alias: None,
+            },
+        ];
+        assert!(metadata.validate().is_err());
     }
 }

@@ -9,11 +9,11 @@ use crate::skill::SkillRegistry;
 use crate::store::cache::{ExecutionStatus, request_hash};
 
 use super::IotaEngine;
-use super::telemetry_recorder::event_payload;
 use super::memory_ops::{
     deterministic_memory_answer, is_explicit_memory_tool_prompt, is_memory_query,
     is_memory_write_only_prompt, memory_inject_payload,
 };
+use super::telemetry_recorder::event_payload;
 
 impl IotaEngine {
     /// Run a prompt and return only the final assistant text.
@@ -40,6 +40,17 @@ impl IotaEngine {
     ///
     /// The daemon uses `requested_execution_id` so callers can correlate persisted cache/events
     /// with their own request id. When it is `None`, the cache layer allocates the id.
+    #[tracing::instrument(
+        skip(self, prompt),
+        fields(
+            acp.backend = %backend,
+            cwd = %cwd.display(),
+            session.id = %self.engine_session_id,
+            acp.model = tracing::field::Empty,
+            execution.id = tracing::field::Empty,
+            request.hash = tracing::field::Empty,
+        )
+    )]
     pub async fn run(
         &mut self,
         backend: AcpBackend,
@@ -48,7 +59,9 @@ impl IotaEngine {
         requested_execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
         let request_hash = request_hash(&backend.to_string(), &cwd, prompt);
-        tracing::info!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt.requested");
+        tracing::Span::current().record("request.hash", &request_hash);
+        tracing::info!("prompt.requested");
+
         let skills = SkillRegistry::load_cached(
             &cwd,
             self.effective_config.skill_roots(),
@@ -59,6 +72,10 @@ impl IotaEngine {
             .effective_config
             .backend_config(backend)
             .and_then(configured_model);
+        if let Some(ref m) = model {
+            tracing::Span::current().record("acp.model", m);
+        }
+
         // The ledger records the logical session first, then later records turns and backend ids.
         self.ensure_ledger_session(backend, &cwd, model.as_deref());
         // When switching from one backend to another, inject recent dialogue as handoff text.
@@ -75,8 +92,10 @@ impl IotaEngine {
                 )
             })
             .transpose()?;
+
         if let Some(ref eid) = execution_id {
-            tracing::info!(execution_id = %eid, backend = %backend, session_id = %self.engine_session_id, "execution.started");
+            tracing::Span::current().record("execution.id", eid);
+            tracing::info!("execution.started");
         }
         self.record_runtime_event(
             &execution_id,
@@ -171,12 +190,9 @@ impl IotaEngine {
                 }),
             );
             tracing::info!(
-                backend = %backend,
-                execution_id = execution_id.as_deref().unwrap_or("-"),
-                session_id = %self.engine_session_id,
                 user_id = "local-user",
                 project_id = %project_id,
-                "engine memory recall started"
+                "memory.recall.started"
             );
             match store.recall_buckets_with_thresholds(
                 "local-user",
@@ -200,16 +216,13 @@ impl IotaEngine {
                         }),
                     );
                     tracing::info!(
-                        backend = %backend,
-                        execution_id = execution_id.as_deref().unwrap_or("-"),
-                        session_id = %self.engine_session_id,
                         identity_count = buckets.identity.len(),
                         preference_count = buckets.preference.len(),
                         strategic_count = buckets.strategic.len(),
                         domain_count = buckets.domain.len(),
                         procedural_count = buckets.procedural.len(),
                         episodic_count = buckets.episodic.len(),
-                        "engine memory recall completed"
+                        "memory.recall.completed"
                     );
                     Some(buckets)
                 }
@@ -221,13 +234,7 @@ impl IotaEngine {
                         "memory.recall.failed",
                         serde_json::json!({"error": err.to_string()}),
                     );
-                    tracing::warn!(
-                        backend = %backend,
-                        execution_id = execution_id.as_deref().unwrap_or("-"),
-                        session_id = %self.engine_session_id,
-                        error = %err,
-                        "engine memory recall failed"
-                    );
+                    tracing::warn!(error = %err, "memory.recall.failed");
                     None
                 }
             }
@@ -249,11 +256,8 @@ impl IotaEngine {
                 event_payload(&event),
             );
             tracing::info!(
-                backend = %backend,
-                execution_id = execution_id.as_deref().unwrap_or("-"),
-                session_id = %self.engine_session_id,
                 payload = %event_payload(&event),
-                "engine memory inject event recorded"
+                "memory.inject"
             );
             self.record_runtime_event(&execution_id, event);
         }
@@ -369,7 +373,11 @@ impl IotaEngine {
                     ExecutionStatus::Completed,
                     &output.timing,
                 );
-                tracing::info!(backend = %backend, execution_id = execution_id.as_deref(), total_ms = output.timing.total_ms, prompt_ms = output.timing.prompt_ms, "execution completed");
+                tracing::info!(
+                    total_ms = output.timing.total_ms,
+                    prompt_ms = output.timing.prompt_ms,
+                    "execution.completed"
+                );
                 self.record_ledger_turn(
                     backend,
                     execution_id.as_deref(),
@@ -399,7 +407,7 @@ impl IotaEngine {
                     }),
                 );
                 self.mark_execution_finished(&execution_id, ExecutionStatus::Failed);
-                tracing::warn!(backend = %backend, execution_id = execution_id.as_deref(), error = %err, "execution failed");
+                tracing::warn!(error = %err, "execution.failed");
                 self.record_ledger_turn(
                     backend,
                     execution_id.as_deref(),

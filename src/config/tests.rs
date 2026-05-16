@@ -69,8 +69,8 @@ fn recall_thresholds_default_values() {
     assert_eq!(thresholds.preference, 0.80);
     assert_eq!(thresholds.strategic, 0.80);
     assert_eq!(thresholds.domain, 0.80);
-    assert_eq!(thresholds.procedural, 0.75);
-    assert_eq!(thresholds.episodic, 0.70);
+    assert_eq!(thresholds.procedural, 0.85);
+    assert_eq!(thresholds.episodic, 0.80);
 }
 
 #[test]

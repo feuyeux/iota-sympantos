@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
 
 use crate::acp::AcpBackend;
-use crate::memory::{MemoryRecord, MemoryStore};
+use crate::memory::{MemoryFacet, MemoryRecord, MemoryStore, MemoryType, RecallBuckets};
 use crate::skill::{Skill, SkillRegistry};
 
 const START: &str = "<!-- IOTA_START -->";
@@ -152,13 +152,55 @@ pub fn dry_run_backend_skill(
 }
 
 pub fn render_memory_records(records: &[MemoryRecord]) -> String {
+    let buckets = bucket_memory_records(records);
     let mut body = String::from("# iota memory projection\n\n");
+    body.push_str("This file is a projection of the iota memory store. It is grouped by type and facet to help models without MCP support.\n\n");
+
+    render_bucket(&mut body, "identity", &buckets.identity);
+    render_bucket(&mut body, "preference", &buckets.preference);
+    render_bucket(&mut body, "strategic", &buckets.strategic);
+    render_bucket(&mut body, "domain", &buckets.domain);
+    render_bucket(&mut body, "procedural", &buckets.procedural);
+    render_bucket(&mut body, "episodic", &buckets.episodic);
+
+    body
+}
+
+fn bucket_memory_records(records: &[MemoryRecord]) -> RecallBuckets {
+    let mut buckets = RecallBuckets::default();
+    for record in records {
+        match (&record.memory_type, record.facet.as_ref()) {
+            (MemoryType::Semantic, Some(MemoryFacet::Identity)) => {
+                buckets.identity.push(record.clone())
+            }
+            (MemoryType::Semantic, Some(MemoryFacet::Preference)) => {
+                buckets.preference.push(record.clone())
+            }
+            (MemoryType::Semantic, Some(MemoryFacet::Strategic)) => {
+                buckets.strategic.push(record.clone())
+            }
+            (MemoryType::Semantic, Some(MemoryFacet::Domain)) => {
+                buckets.domain.push(record.clone())
+            }
+            (MemoryType::Procedural, _) => buckets.procedural.push(record.clone()),
+            (MemoryType::Episodic, _) => buckets.episodic.push(record.clone()),
+            (MemoryType::Semantic, None) => {}
+        }
+    }
+    buckets
+}
+
+fn render_bucket(body: &mut String, name: &str, records: &[MemoryRecord]) {
+    if records.is_empty() {
+        return;
+    }
+    body.push_str(&format!("## {}\n\n", name));
     for record in records {
         body.push_str("- ");
         body.push_str(record.content.trim());
         body.push('\n');
     }
-    body
+    body.push('\n');
 }
 
 pub fn dry_run_backend_projection(

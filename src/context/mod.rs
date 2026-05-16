@@ -61,8 +61,8 @@ impl ContextEngine {
         if !self.enabled {
             return input.prompt.to_string();
         }
-        // Fast path: trivial prompts get a minimal capsule (session + memory-tools only).
-        if is_trivial_prompt(input.prompt) {
+        // Fast path: trivial prompts without continuity metadata get a minimal capsule.
+        if is_trivial_prompt(&input) {
             return self.compose_minimal_prompt(&input);
         }
         let mut capsule = String::new();
@@ -78,7 +78,9 @@ impl ContextEngine {
         capsule.push_str("</session>\n\n");
         capsule.push_str("<memory-tools>\n");
         capsule.push_str("MCP tool `iota_memory_write` persists info across sessions.\n");
-        capsule.push_str("Args: content, type(semantic|episodic|procedural), scope(user|project|session), ");
+        capsule.push_str(
+            "Args: content, type(semantic|episodic|procedural), scope(user|project|session), ",
+        );
         capsule.push_str(&format!(
             "scope_id(default: user=\"local-user\", project=\"{}\", session=\"{}\").\n",
             input.cwd.display(),
@@ -108,10 +110,7 @@ impl ContextEngine {
         let workspace = render_workspace(input.cwd);
         if !workspace.trim().is_empty() {
             capsule.push_str("<workspace>\n");
-            capsule.push_str(&trim_section(
-                &workspace,
-                self.budgets.workspace_chars,
-            ));
+            capsule.push_str(&trim_section(&workspace, self.budgets.workspace_chars));
             capsule.push_str("</workspace>\n\n");
         }
         if let Some(skills) = input.skills {
@@ -132,7 +131,7 @@ impl ContextEngine {
         capsule
     }
 
-    /// Minimal capsule for trivial prompts — skips memory, skills, workspace, handoff.
+    /// Minimal capsule for trivial prompts — skips memory, skills, and workspace.
     fn compose_minimal_prompt(&self, input: &ComposeInput<'_>) -> String {
         let mut capsule = String::new();
         capsule.push_str("<iota-context>\n");
@@ -144,6 +143,16 @@ impl ContextEngine {
             input.cwd.display()
         ));
         capsule.push_str("</session>\n");
+        if let Some(model) = input.model.filter(|value| !value.trim().is_empty()) {
+            capsule.push_str("\n<model>\n");
+            capsule.push_str(&format!("You are currently using: {}\n", model.trim()));
+            capsule.push_str("</model>\n");
+        }
+        if let Some(handoff) = input.handoff.filter(|value| !value.trim().is_empty()) {
+            capsule.push_str("\n<handoff>\n");
+            capsule.push_str(&trim_section(handoff, self.budgets.handoff_chars));
+            capsule.push_str("</handoff>\n");
+        }
         capsule.push_str("</iota-context>\n\nUser request:\n");
         capsule.push_str(input.prompt);
         capsule
@@ -200,8 +209,14 @@ impl WorkingMemoryBuffer {
 
 /// A trivial prompt is short and doesn't reference memory tools or complex operations.
 /// These get a minimal context capsule to reduce prompt size and latency.
-fn is_trivial_prompt(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
+fn is_trivial_prompt(input: &ComposeInput<'_>) -> bool {
+    if input.model.is_some_and(|value| !value.trim().is_empty())
+        || input.handoff.is_some_and(|value| !value.trim().is_empty())
+    {
+        return false;
+    }
+
+    let trimmed = input.prompt.trim();
     trimmed.len() <= 80
         && !trimmed.contains("iota_memory")
         && !trimmed.contains("remember")
