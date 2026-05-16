@@ -1,13 +1,24 @@
+---
+name: iota-src-telemetry
+description: Use when working on OpenTelemetry setup, OTLP export, stderr logging, metrics counters/histograms, telemetry shutdown, or files under src/telemetry.
+triggers:
+  - src/telemetry
+  - TelemetryConfig
+  - OtelGuard
+  - IotaMetrics
+  - OTLP
+  - IOTA_LOG
+---
+
 # telemetry — Observability
 
-OpenTelemetry integration providing OTLP export, structured logging, Prometheus metrics, and distributed tracing.
+OpenTelemetry integration providing OTLP trace/log/metric export, stderr logging, and runtime metrics.
 
 ## Responsibilities
 
 - Initialize OpenTelemetry SDK with OTLP exporter
 - Structured logging via `tracing` subscriber
-- Prometheus-compatible metrics (counters, histograms)
-- Span creation and propagation for distributed tracing
+- Metrics via OpenTelemetry counters, up-down counters, and histograms
 - Console output formatting
 
 ## Sub-modules
@@ -15,11 +26,11 @@ OpenTelemetry integration providing OTLP export, structured logging, Prometheus 
 | Module | Purpose |
 |--------|---------|
 | `console` | Console log formatting and filtering |
-| `logs` | Structured log configuration and export |
-| `metrics` | Prometheus metrics: counters, histograms, gauges |
-| `spans` | Span creation helpers and context propagation |
+| `metrics` | Runtime metrics: execution count, queued prompts, token counts, prompt/init duration |
+| `mod` | OTLP trace/log/metric provider setup and shutdown guard |
 
 ## Key Types
 
-- `TelemetryConfig` — OTLP endpoint, service name, log level
+- `TelemetryConfig` — OTLP endpoint and enabled flag
 - `OtelGuard` — RAII guard for graceful shutdown
+- `IotaMetrics` — lazily initialized metric instruments

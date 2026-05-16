@@ -1,3 +1,15 @@
+---
+name: iota-src-mcp
+description: Use when working on MCP stdio server/client code, iota-context tools, ACP tool-call interception, shared tool dispatch, or files under src/mcp.
+triggers:
+  - src/mcp
+  - MCP
+  - iota-context
+  - iota_memory_write
+  - tool_dispatch
+  - McpClient
+---
+
 # mcp — MCP Protocol Layer
 
 Centralised MCP (Model Context Protocol) implementation: stdio server, ACP stream interceptor, shared tool dispatch, and subprocess client.

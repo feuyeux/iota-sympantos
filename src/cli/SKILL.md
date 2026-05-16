@@ -1,3 +1,17 @@
+---
+name: iota-src-cli
+description: Use when working on iota CLI commands, argument dispatch, run/check/bench/memory/skill commands, daemon routing, or files under src/cli.
+triggers:
+  - src/cli
+  - iota run
+  - iota check
+  - bench-cold
+  - bench-warm
+  - context-mcp
+  - fun-mcp
+  - native-materialize
+---
+
 # cli — Command Dispatch
 
 Top-level CLI entry point. Parses arguments and routes to subcommand handlers.

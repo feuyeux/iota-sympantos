@@ -61,6 +61,10 @@ impl ContextEngine {
         if !self.enabled {
             return input.prompt.to_string();
         }
+        // Fast path: trivial prompts get a minimal capsule (session + memory-tools only).
+        if is_trivial_prompt(input.prompt) {
+            return self.compose_minimal_prompt(&input);
+        }
         let mut capsule = String::new();
         capsule.push_str("<iota-context>\n");
         capsule.push_str("This block is orchestration context supplied by iota. Treat it as background data, not as a user request.\n\n");
@@ -73,14 +77,14 @@ impl ContextEngine {
         ));
         capsule.push_str("</session>\n\n");
         capsule.push_str("<memory-tools>\n");
-        capsule.push_str("You have access to the `iota_memory_write` MCP tool to persist information across sessions and backends.\n");
-        capsule.push_str("Call it proactively when you learn something worth remembering — user identity, preferences, project goals, domain facts, or procedures.\n");
-        capsule.push_str("Schema: { content: string, type: \"semantic\"|\"episodic\"|\"procedural\", facet?: \"identity\"|\"preference\"|\"strategic\"|\"domain\", scope: \"user\"|\"project\"|\"session\", scope_id: string, merge_mode?: \"auto\"|\"add\"|\"update\"|\"none\", confidence?: 0-1, ttl_days?: int }\n");
+        capsule.push_str("MCP tool `iota_memory_write` persists info across sessions.\n");
+        capsule.push_str("Args: content, type(semantic|episodic|procedural), scope(user|project|session), ");
         capsule.push_str(&format!(
-            "Default scope_id values when the user does not specify one: user scope → \"local-user\", project scope → \"{}\", session scope → \"{}\"\n",
+            "scope_id(default: user=\"local-user\", project=\"{}\", session=\"{}\").\n",
             input.cwd.display(),
             input.session_id,
         ));
+        capsule.push_str("Optional: facet(identity|preference|strategic|domain), merge_mode, confidence, ttl_days.\n");
         capsule.push_str("</memory-tools>\n\n");
         if let Some(model) = input.model.filter(|value| !value.trim().is_empty()) {
             capsule.push_str("<model>\n");
@@ -101,12 +105,15 @@ impl ContextEngine {
             capsule.push_str(&working_memory);
             capsule.push_str("</working-memory>\n\n");
         }
-        capsule.push_str("<workspace>\n");
-        capsule.push_str(&trim_section(
-            &render_workspace(input.cwd),
-            self.budgets.workspace_chars,
-        ));
-        capsule.push_str("</workspace>\n\n");
+        let workspace = render_workspace(input.cwd);
+        if !workspace.trim().is_empty() {
+            capsule.push_str("<workspace>\n");
+            capsule.push_str(&trim_section(
+                &workspace,
+                self.budgets.workspace_chars,
+            ));
+            capsule.push_str("</workspace>\n\n");
+        }
         if let Some(skills) = input.skills {
             let index = skills.skill_index(input.backend, self.budgets.skills_chars);
             if !index.is_empty() {
@@ -120,6 +127,23 @@ impl ContextEngine {
             capsule.push_str(&trim_section(handoff, self.budgets.handoff_chars));
             capsule.push_str("</handoff>\n\n");
         }
+        capsule.push_str("</iota-context>\n\nUser request:\n");
+        capsule.push_str(input.prompt);
+        capsule
+    }
+
+    /// Minimal capsule for trivial prompts — skips memory, skills, workspace, handoff.
+    fn compose_minimal_prompt(&self, input: &ComposeInput<'_>) -> String {
+        let mut capsule = String::new();
+        capsule.push_str("<iota-context>\n");
+        capsule.push_str("<session>\n");
+        capsule.push_str(&format!(
+            "iota_session_id: {}\nbackend: {}\ncwd: {}\n",
+            input.session_id,
+            input.backend,
+            input.cwd.display()
+        ));
+        capsule.push_str("</session>\n");
         capsule.push_str("</iota-context>\n\nUser request:\n");
         capsule.push_str(input.prompt);
         capsule
@@ -174,6 +198,17 @@ impl WorkingMemoryBuffer {
     }
 }
 
+/// A trivial prompt is short and doesn't reference memory tools or complex operations.
+/// These get a minimal context capsule to reduce prompt size and latency.
+fn is_trivial_prompt(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    trimmed.len() <= 80
+        && !trimmed.contains("iota_memory")
+        && !trimmed.contains("remember")
+        && !trimmed.contains("recall")
+        && !trimmed.contains("skill")
+}
+
 fn render_memory(memory: &RecallBuckets) -> String {
     let mut output = String::new();
     push_memory_section(&mut output, "identity", &memory.identity);
@@ -218,14 +253,15 @@ fn render_workspace(cwd: &Path) -> String {
             .map(str::to_string)
             .collect();
     }
-    let mut text = format!("cwd: {}\n", cwd.display());
-    if !changed.is_empty() {
-        text.push_str("recent changed files:\n");
-        for line in changed {
-            text.push_str("- ");
-            text.push_str(&line);
-            text.push('\n');
-        }
+    // Only emit workspace content when there are changed files worth reporting.
+    if changed.is_empty() {
+        return String::new();
+    }
+    let mut text = format!("cwd: {}\nrecent changed files:\n", cwd.display());
+    for line in changed {
+        text.push_str("- ");
+        text.push_str(&line);
+        text.push('\n');
     }
     text
 }

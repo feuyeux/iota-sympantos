@@ -1,3 +1,16 @@
+---
+name: iota-src-runtime-event
+description: Use when working on normalized runtime events, ACP-to-event mapping, telemetry/TUI routing events, token usage, approvals, or files under src/runtime_event.
+triggers:
+  - src/runtime_event
+  - RuntimeEvent
+  - OutputEvent
+  - ToolCallEvent
+  - ToolResultEvent
+  - ApprovalDecisionEvent
+  - TokenUsage
+---
+
 # runtime_event — Unified Event Types
 
 Normalized event types for telemetry, observability, TUI rendering, and inter-module routing.

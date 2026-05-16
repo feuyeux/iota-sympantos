@@ -417,11 +417,11 @@ fn default_domain_threshold() -> f64 {
 }
 
 fn default_procedural_threshold() -> f64 {
-    0.75
+    0.85
 }
 
 fn default_episodic_threshold() -> f64 {
-    0.70
+    0.80
 }
 
 fn default_episodic_compaction_keep() -> usize {
@@ -429,21 +429,21 @@ fn default_episodic_compaction_keep() -> usize {
 }
 
 fn default_memory_chars() -> usize {
-    2000
-}
-
-fn default_skills_chars() -> usize {
     1200
 }
 
+fn default_skills_chars() -> usize {
+    600
+}
+
 fn default_working_memory_chars() -> usize {
-    1500
+    800
 }
 
 fn default_workspace_chars() -> usize {
-    800
+    400
 }
 
 fn default_handoff_chars() -> usize {
-    800
+    400
 }

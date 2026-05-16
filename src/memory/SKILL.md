@@ -1,3 +1,16 @@
+---
+name: iota-src-memory
+description: Use when working on persistent memory records, recall buckets, SQLite FTS5 search, TF-IDF embeddings, merge modes, or files under src/memory.
+triggers:
+  - src/memory
+  - MemoryStore
+  - MemoryRecord
+  - RecallBuckets
+  - MemoryFacet
+  - EmbeddingEngine
+  - FTS5
+---
+
 # memory — Memory Subsystem
 
 Persistent memory store with SQLite FTS5 full-text search and TF-IDF embedding-based semantic search. Implements a 6-bucket classification system.

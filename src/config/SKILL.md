@@ -1,3 +1,16 @@
+---
+name: iota-src-config
+description: Use when working on nimia.yaml loading, backend environment mapping, model provider config, context budgets, path expansion, or files under src/config.
+triggers:
+  - src/config
+  - nimia.yaml
+  - NimiaConfig
+  - BackendConfig
+  - EffectiveConfig
+  - ContextEngineConfig
+  - normalize_command
+---
+
 # config — Configuration
 
 Parses `~/.i6/nimia.yaml` and provides typed configuration for all modules.
@@ -15,7 +28,7 @@ Parses `~/.i6/nimia.yaml` and provides typed configuration for all modules.
 | Module | Purpose |
 |--------|---------|
 | `backend` | `BackendConfig`, env variable mapping, command resolution |
-| `common` | `expand_home_path()`, `normalize_command()` |
+| `helpers` | `expand_home_path()`, `normalize_command()` |
 | `context` | `ContextEngineConfig`, `RecallThresholdsConfig`, `ContextBudgetsConfig`, `EmbeddingConfig` |
 | `effective` | `EffectiveConfig` — resolved config with defaults applied |
 | `loader` | `read_config()`, `config_path()` |

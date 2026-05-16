@@ -9,7 +9,7 @@ use crate::skill::SkillRegistry;
 use crate::store::cache::{ExecutionStatus, request_hash};
 
 use super::IotaEngine;
-use super::event_loop::event_payload;
+use super::telemetry_recorder::event_payload;
 use super::memory_ops::{
     deterministic_memory_answer, is_explicit_memory_tool_prompt, is_memory_query,
     is_memory_write_only_prompt, memory_inject_payload,

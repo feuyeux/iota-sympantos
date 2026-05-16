@@ -1,3 +1,16 @@
+---
+name: iota-src-acp
+description: Use when working on ACP backend processes, JSON-RPC wire handling, session lifecycle, permissions, backend aliases, streaming responses, or files under src/acp.
+triggers:
+  - src/acp
+  - AcpBackend
+  - AcpClient
+  - ACP
+  - session/new
+  - session/prompt
+  - mcpServers
+---
+
 # acp — ACP Protocol Layer
 
 JSON-RPC 2.0 protocol driver for communicating with AI coding assistant backends over stdin/stdout.
@@ -19,8 +32,8 @@ JSON-RPC 2.0 protocol driver for communicating with AI coding assistant backends
 | `message` | Response parsing: text extraction, tool calls, permissions |
 | `parser` | CLI argument parsing (`AcpRunOptions`) |
 | `permission` | Approval routing — auto-approve iota tools, queue others |
-| `prompt` | Prompt dispatch and streaming event collection |
 | `session` | `session/new` parameter rendering, `mcpServers` shape |
+| `stream_reader` | Streaming update collection and conversion to runtime events |
 | `types` | Shared types: `AcpPromptOutput`, `AcpPromptTiming`, `AcpStartupTiming` |
 | `util` | Helpers: `elapsed_ms`, `should_forward_backend_stderr` |
 | `wire` | Line reading, JSON parsing, response ID matching |

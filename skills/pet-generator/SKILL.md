@@ -1,6 +1,6 @@
 ---
 name: pet-generator
-description: 当用户请求"生成宠物"时，通过 iota-fun MCP server 并行调用 7 个多语言工具函数，将真实结果组合成宠物描述。
+description: Use when the user requests "生成宠物", "generate pet", or "create pet" and expects a generated pet assembled from iota-fun MCP tool results.
 triggers:
   - 生成宠物
   - generate pet
@@ -43,13 +43,13 @@ failurePolicy: report
 
 ## Purpose
 
-当请求中包含"生成宠物"时，通过**并行调用 `fun.*` MCP 工具**获取真实的随机属性值，组合成一只完整的宠物描述。IotaEngine 按 frontmatter 中的 `execution` 结构化声明编排 MCP 调用；backend LLM 只在普通 MCP 请求路径中自行调用工具。
+当请求中包含"生成宠物"、"generate pet" 或 "create pet" 时，必须使用 `fun.*` MCP 工具获取真实随机属性值，并组合成一只完整的宠物描述。IotaEngine 会按 frontmatter 的 `execution` 声明编排 MCP 调用；普通 backend MCP 路径中也只能直接调用当前会话中的 `fun.*` 工具。
 
 **重要：不要凭空编造属性值，不要使用文档中的示例值。** 每个属性必须来自对应工具的真实调用结果。
 
 ## Available Tools
 
-以下工具由 `iota-fun` MCP server 暴露。调用工具时只使用 `fun.*` 工具名，工具内部会执行 `iota-skill/pet-generator/iota-fun/` 目录下的真实函数：
+以下工具由 `iota-fun` MCP server 暴露。调用工具时只使用 `fun.*` 工具名；不要自己读取源码、编译或执行本地文件。
 
 | 工具名           | 返回属性         | 示例输出                                                |
 | ---------------- | ---------------- | ------------------------------------------------------- |
@@ -61,9 +61,9 @@ failurePolicy: report
 | `fun.python`     | lengthCm（数字） | `1`–`100` 的随机整数                                    |
 | `fun.go`         | toyShape（形状） | `circle` / `square` / `triangle` / `star` / `hexagon`   |
 
-## Execution Instructions
+## Execution
 
-获取全部 7 个属性的真实值，然后组合宠物描述：
+获取全部 7 个属性的真实值，然后组合宠物描述。通用 `SkillRunner` 会按 frontmatter 的 `execution.tools` 调用 `fun.*` MCP 工具；普通 backend MCP 路径中，backend LLM 也只能直接调用当前会话中的 `fun.*` MCP 工具。
 
 | 工具 / 程序      | 获取属性 | 源文件路径                                      |
 | ---------------- | -------- | ----------------------------------------------- |
@@ -74,13 +74,6 @@ failurePolicy: report
 | `fun.java`       | animal   | `iota-skill/pet-generator/iota-fun/java/`       |
 | `fun.python`     | lengthCm | `iota-skill/pet-generator/iota-fun/python/`     |
 | `fun.go`         | toyShape | `iota-skill/pet-generator/iota-fun/go/`         |
-
-执行方式：
-
-1. 通用 `SkillRunner` 会按 frontmatter 的 `execution.tools` 调用 `fun.*` MCP 工具。
-2. 普通 backend MCP 路径中，backend LLM 也只能直接调用当前会话中的 `fun.*` MCP 工具。
-3. 不要自己读取源码、编译或执行本地文件；这些工作由 `iota-fun` MCP server 完成。
-4. 不要用 shell、delegate 子任务或普通文件工具替代 `fun.*` MCP 调用。
 
 **并行执行**全部 7 个，等待所有结果后再组合输出。
 

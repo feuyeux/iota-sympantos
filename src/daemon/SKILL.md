@@ -1,3 +1,15 @@
+---
+name: iota-src-daemon
+description: Use when working on the internal TCP daemon, EnginePool reuse by cwd, daemon prompt protocol, warm ACP clients, or files under src/daemon.
+triggers:
+  - src/daemon
+  - EnginePool
+  - DaemonPromptRequest
+  - DaemonPromptResponse
+  - __daemon
+  - 127.0.0.1:47661
+---
+
 # daemon — Background Daemon
 
 TCP server on `127.0.0.1:47661` that keeps `IotaEngine` instances alive across CLI invocations, eliminating cold-start overhead.

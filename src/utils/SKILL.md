@@ -1,3 +1,14 @@
+---
+name: iota-src-utils
+description: Use when working on shared utility helpers, elapsed timing, timestamp helpers, summary truncation, mutex recovery, or files under src/utils.
+triggers:
+  - src/utils
+  - elapsed_ms
+  - now_ts
+  - summarize
+  - lock_or_recover
+---
+
 # utils — Shared Utilities
 
 Common helper functions used across multiple modules.

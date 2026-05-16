@@ -1,7 +1,5 @@
 pub mod console;
-pub mod logs;
 pub mod metrics;
-pub mod spans;
 
 use anyhow::Result;
 use opentelemetry::KeyValue;

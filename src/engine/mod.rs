@@ -13,8 +13,8 @@ use crate::skill::SkillCache;
 use crate::store::cache::CacheStore;
 use crate::store::ledger::SessionLedger;
 
-mod event_loop;
-mod handoff;
+mod telemetry_recorder;
+mod session_ledger;
 mod memory_ops;
 mod prompt;
 
@@ -103,7 +103,7 @@ impl IotaEngine {
             context_engine,
             memory_store,
             cache_store,
-            working_memory: WorkingMemoryBuffer::new(50),
+            working_memory: WorkingMemoryBuffer::new(20),
             engine_session_id,
             session_ledger_store,
             last_used_backend: None,

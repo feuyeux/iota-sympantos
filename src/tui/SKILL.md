@@ -1,3 +1,16 @@
+---
+name: iota-src-tui
+description: Use when working on ratatui interactive UI, composer key handling, markdown rendering, overlays, terminal lifecycle, frame loop, or files under src/tui.
+triggers:
+  - src/tui
+  - TUI
+  - ratatui
+  - composer
+  - status_bar
+  - terminal_lifecycle
+  - loop_runtime
+---
+
 # tui — Interactive Terminal UI
 
 ratatui-based interactive chat interface with markdown rendering, multi-line composer, and backend selector.

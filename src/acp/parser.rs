@@ -21,7 +21,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
     let mut multi_backend = false;
     let mut cwd = std::env::current_dir().context("Failed to get current directory")?;
     let mut show_native = false;
-    let mut use_daemon = false;
+    let mut use_daemon = true;
     let mut log_events = false;
     let mut timing = false;
     let mut timeout_ms = DEFAULT_TIMEOUT_MS;
@@ -50,6 +50,9 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
             }
             "-d" | "--daemon" | "--require-daemon" => {
                 use_daemon = true;
+            }
+            "--no-daemon" => {
+                use_daemon = false;
             }
             "--log-events" => {
                 log_events = true;
@@ -108,7 +111,7 @@ pub fn parse_acp_args(args: &[String]) -> Result<AcpRunOptions> {
 
 pub fn print_acp_help() {
     println!(
-        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon; starts it silently if needed\n      --log-events       Print normalized runtime log/tool events to stderr\n      --timing           Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 60000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --daemon --timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
+        "Usage:\n  iota run [backend] [options] <prompt>\n\nOptions:\n  -b, --backend <name>   claude-code | codex | gemini | hermes | opencode\n      --cwd <path>       Working directory for session/new\n      --show-native      Print raw ACP messages to stderr\n  -d, --daemon           Route through daemon (default: on)\n      --no-daemon         Bypass daemon and run directly\n      --log-events       Print normalized runtime log/tool events to stderr\n      --timing           Print route and ACP phase timings to stderr as JSON\n      --timeout-ms <ms>  ACP response timeout (default: 60000)\n  -h, --help             Show this help\n\nExamples:\n  iota run codex \"What is 2+2?\"\n  iota run --no-daemon --timing codex \"What is 2+2?\"\n  iota run --backend gemini --cwd D:\\\\coding\\\\creative \"Summarize this repo\""
     );
 }
 

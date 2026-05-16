@@ -1,3 +1,15 @@
+---
+name: iota-src-context
+description: Use when working on Context Fabric prompt capsules, memory/skill/workspace injection, working memory, context budgets, or files under src/context.
+triggers:
+  - src/context
+  - ContextEngine
+  - ComposeInput
+  - WorkingMemoryBuffer
+  - iota-context
+  - context capsule
+---
+
 # context — Context Fabric
 
 Composes the `<iota-context>` XML capsule injected into every prompt, assembling memory recall, skill triggers, working memory, and workspace state within budget limits.

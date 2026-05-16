@@ -1,12 +1,25 @@
+---
+name: iota-src-skill
+description: Use when working on skill registry loading, trigger matching, advisory or MCP skill execution, skill cache, sandbox executor, or files under src/skill.
+triggers:
+  - src/skill
+  - SkillRegistry
+  - SkillExecution
+  - SkillExecutionMode
+  - sandbox_executor
+  - iota-fun
+  - skill pull
+---
+
 # skill — Skill Layer
 
-Loads `.md`/`.yaml` skill manifests, matches triggers against prompts, and executes skills via engine-run or MCP fun-server.
+Loads `.md`/`.yaml` skill manifests, matches triggers against prompts, and executes skills in advisory or MCP mode.
 
 ## Responsibilities
 
 - Load skill manifests from configured roots (local or HTTP)
 - Match prompt text against skill trigger patterns
-- Execute skills via engine-run (delegated prompt) or MCP (7-language fun-server)
+- Execute skills via advisory metadata or MCP (7-language sandbox executor)
 - Cache remote skills locally
 
 ## Sub-modules
@@ -14,8 +27,8 @@ Loads `.md`/`.yaml` skill manifests, matches triggers against prompts, and execu
 | Module | Purpose |
 |--------|---------|
 | `cache` | HTTP/local skill fetching and caching |
-| `fun_server` | `iota-fun` MCP server — 7-language execution (C++, Go, Java, Python, Rust, TypeScript, Zig) |
-| `runner` | Engine-run skill execution — delegated prompt turns |
+| `runner` | MCP-mode skill execution and template rendering |
+| `sandbox_executor` | `iota-fun` MCP server — 7-language execution (C++, Go, Java, Python, Rust, TypeScript, Zig) |
 
 ## Key Types
 
@@ -23,5 +36,5 @@ Loads `.md`/`.yaml` skill manifests, matches triggers against prompts, and execu
 - `Skill` — single skill definition with metadata and execution config
 - `SkillMetadata` — name, description, triggers, tags
 - `SkillExecution` — execution mode and parameters
-- `SkillExecutionMode` — EngineRun or Mcp
+- `SkillExecutionMode` — Advisory or Mcp
 - `SkillCache` — local cache for pulled skills

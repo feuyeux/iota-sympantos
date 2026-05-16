@@ -1,3 +1,15 @@
+---
+name: iota-src-engine
+description: Use when working on IotaEngine orchestration, prompt turns, ACP client reuse, context injection, memory writes, session ledger, handoffs, or files under src/engine.
+triggers:
+  - src/engine
+  - IotaEngine
+  - ClientKey
+  - run_with_timing
+  - session ledger
+  - backend handoff
+---
+
 # engine — IotaEngine Orchestration
 
 Core orchestration layer that manages ACP client pools, executes prompt turns, and coordinates memory, skills, ledger, and handoffs.
@@ -14,10 +26,10 @@ Core orchestration layer that manages ACP client pools, executes prompt turns, a
 
 | Module | Purpose |
 |--------|---------|
-| `event_loop` | Streaming event processing during prompt execution |
-| `handoff` | Backend switching with session context transfer |
 | `memory_ops` | Memory extraction, classification, recall, and injection |
 | `prompt` | Core prompt execution flow with early-return paths |
+| `session_ledger` | Session/turn persistence and backend handoff records |
+| `telemetry_recorder` | Runtime event recording into traces, logs, and metrics |
 
 ## Key Types
 

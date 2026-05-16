@@ -3,7 +3,7 @@ mod client;
 mod message;
 mod parser;
 pub mod permission;
-mod prompt;
+mod stream_reader;
 pub mod session;
 mod types;
 mod util;

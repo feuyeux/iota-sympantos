@@ -7,7 +7,7 @@ use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tokio::time::{Duration, timeout};
 
 use super::message::{JsonRpcRequest, JsonRpcResponse};
-use super::prompt::read_prompt_events_for_id;
+use super::stream_reader::read_prompt_events_for_id;
 use super::session::session_new_params_with_options;
 use super::types::{AcpClientStartOptions, AcpSessionResolution};
 use super::util::{elapsed_ms, should_forward_backend_stderr};
@@ -170,7 +170,7 @@ impl AcpClient {
             let (text, events) = read_prompt_events_for_id(
                 &mut self.lines,
                 &mut self.stdin,
-                super::prompt::PromptReadOptions {
+                super::stream_reader::PromptReadOptions {
                     backend: self.backend,
                     tool_whitelist: &self.tool_whitelist,
                     show_native: self.show_native,

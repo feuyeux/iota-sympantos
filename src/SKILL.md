@@ -1,3 +1,15 @@
+---
+name: iota-src-overview
+description: Use when working on iota-sympantos source structure, cross-module architecture, ACP backends, CLI/TUI behavior, Context Fabric, memory, skills, daemon, or telemetry.
+triggers:
+  - src
+  - iota-sympantos
+  - architecture
+  - ACP
+  - Context Fabric
+  - IotaEngine
+---
+
 # iota-sympantos
 
 Lightweight Rust CLI that orchestrates multiple AI coding assistants via ACP (Agent Control Protocol).
@@ -11,7 +23,7 @@ Lightweight Rust CLI that orchestrates multiple AI coding assistants via ACP (Ag
 - **Context Fabric**: Composes XML capsules with memory recall, skill triggers, working memory, and budget enforcement
 - **Skill system**: Loads `.md`/`.yaml` skill manifests with trigger matching; 7-language MCP fun runner (C++, Go, Java, Python, Rust, TypeScript, Zig)
 - **Daemon**: Background TCP server reusing warm ACP connections across CLI invocations
-- **Observability**: OpenTelemetry traces, structured logs, Prometheus metrics
+- **Observability**: OpenTelemetry traces, structured logs, and metrics via OTLP
 
 ## Structure
 
@@ -28,9 +40,9 @@ src/
 ├── memory/              # Persistent memory store (FTS5 + embedding) & types
 ├── native/              # Native file materializer (MEMORY.md, AGENTS.md)
 ├── runtime_event/       # Unified event types for telemetry & routing
-├── skill/               # Skill registry, trigger matching, cache, fun-server
+├── skill/               # Skill registry, trigger matching, cache, sandbox executor
 ├── store/               # SQLite stores (cache, approval, ledger)
-├── telemetry/           # OpenTelemetry: OTLP exporter, logs, metrics, spans
+├── telemetry/           # OpenTelemetry: OTLP exporter, console logging, metrics
 ├── tui/                 # ratatui interactive chat UI
 └── utils/               # Shared utilities (timing, summarize, mutex recovery)
 ```
