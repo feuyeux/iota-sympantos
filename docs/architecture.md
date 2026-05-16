@@ -30,8 +30,7 @@ src/
 │   └── proto.rs             # daemon wire types
 ├── config.rs                # ~/.i6/nimia.yaml、有效配置、后端 env/command、context options
 ├── context/
-│   ├── mod.rs               # ContextEngine、context capsule、WorkingMemoryBuffer、workspace summary
-│   └── server.rs            # iota-context MCP stdio server
+│   └── mod.rs               # ContextEngine、context capsule、WorkingMemoryBuffer、workspace summary
 ├── skill/
 │   ├── mod.rs               # SkillRegistry、frontmatter、trigger、backend compatibility
 │   ├── runner.rs            # execution.mode=mcp 的 engine-run skill
@@ -40,7 +39,9 @@ src/
 ├── mcp/
 │   ├── mod.rs               # MCP 模块入口
 │   ├── client.rs            # engine 侧 stdio MCP client
-│   └── router.rs            # ACP 侧 tool-call 拦截和 iota tool 路由
+│   ├── server.rs            # iota-context MCP stdio server（从 context/server.rs 迁移）
+│   ├── router.rs            # ACP 侧 tool-call 拦截，委托 tool_dispatch
+│   └── tool_dispatch.rs     # 共享工具派发逻辑（解析器、验证器、handlers）
 ├── native/
 │   └── mod.rs               # memory/skill 原生文件投影
 ├── store/
@@ -143,7 +144,9 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 | `acp/wire.rs` | ACP stdout line timeout、JSON parse、response id 判断、error 格式化 | 无项目级依赖 |
 | `acp/permission.rs` | 处理 `session/request_permission`；`iota_*`、`mcp__iota-*` 或 backend `tool_whitelist` 命中时自动批准；否则走 TUI 或 stdin；记录 approval 事件 | `store::approval`, `runtime_event` |
 | `mcp/client.rs` | engine-run skill 使用的 stdio MCP client；启动 server、initialize、tools/call | 无项目级依赖 |
-| `mcp/router.rs` | 拦截 ACP 侧 `tools/call` / `mcp/tools/call` / `mcp/tool_call`；路由 iota memory/skill/session/handoff/fun 工具，拒绝外部工具 | `store::memory`, `store::ledger`, `skill`, `skill::fun_server` |
+| `mcp/server.rs` | `iota-context` MCP stdio server；JSON-RPC 协议适配，工具执行委托 `tool_dispatch` | `mcp::tool_dispatch`, `runtime_event`, `memory`, `store::ledger`, `skill` |
+| `mcp/router.rs` | 拦截 ACP 侧 `tools/call` / `mcp/tools/call` / `mcp/tool_call`；委托 `tool_dispatch` 执行 iota 工具，拒绝外部工具 | `mcp::tool_dispatch`, `memory`, `store::ledger`, `skill`, `skill::fun_server` |
+| `mcp/tool_dispatch.rs` | 共享工具派发逻辑：`ToolContext` 依赖注入、`dispatch_tool()` 统一入口、所有解析器和验证器 | `memory`, `store::ledger`, `skill` |
 | `runtime_event.rs` | 把 ACP update、complete、permission、usage、tool、error 统一为 `RuntimeEvent` | `acp::extract_text` |
 
 协议层只做协议翻译和安全路由，不依赖 CLI/TUI/daemon/engine。
@@ -152,8 +155,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 
 | 模块 | 职责 | 主要下游 |
 |---|---|---|
-| `context/mod.rs` | 组装 `<iota-context>` capsule：session/model、memory tools 提示、memory buckets、working memory、workspace `git status --short`、skill index、handoff | `config`, `store::memory`, `skill` |
-| `context/server.rs` | `iota-context` MCP stdio server；暴露 memory/search/write、skill/search/load、session_summary、handoff_publish/read 和 resources | `store::memory`, `store::ledger`, `skill` |
+| `context/mod.rs` | 组装 `<iota-context>` capsule：session/model、memory tools 提示、memory buckets、working memory、workspace `git status --short`、skill index、handoff | `config`, `memory`, `skill` |
 | `skill/mod.rs` | 加载 workspace `skills/`、workspace `.iota/skills`、配置 roots、`~/.i6/skills`；解析 YAML frontmatter；按 backend 和 trigger 匹配 | `acp::AcpBackend` |
 | `skill/runner.rs` | 执行 `execution.mode = mcp` skill；可顺序或并行调用 MCP tools；渲染 template | `mcp::client`, `runtime_event`, `skill` |
 | `skill/cache.rs` | 从本地路径或 HTTP(S) 拉取 skill，并写入 `~/.i6/skills` | filesystem/network |
@@ -347,7 +349,7 @@ ApprovalDecision
 | `procedural` | none | `project` | procedural |
 | `episodic` | none | `session` / `project` | episodic |
 
-Memory search 支持 `keyword`、`vector`、`hybrid`。Vector 数据写入 `memory_embedding` 表；本地 fallback 使用 128 维 trigram hash projection。注意：engine 打开的 `MemoryStore` 会使用 `context_engine.embedding`，但 `context-mcp` 和 `mcp::router` 当前通过 `MemoryStore::open()` 打开默认 store，查询侧使用本地 fallback。
+Memory search 支持 `keyword`、`vector`、`hybrid`。Vector 数据写入 `memory_embedding` 表；本地 fallback 使用 128 维 trigram hash projection。注意：engine 打开的 `MemoryStore` 会使用 `context_engine.embedding`，但 `mcp::server` 和 `mcp::router` 当前通过 `MemoryStore::open()` 打开默认 store，查询侧使用本地 fallback。
 
 ## 外部边界
 
@@ -394,7 +396,7 @@ config/utils -> shared support
 | 新 CLI 命令 | `src/cli/mod.rs` | 添加 match arm 和 handler，复用 service/context/store |
 | 新 TUI 组件 | `src/tui/*`, `src/tui.rs` | 状态和渲染下沉到子模块，顶层只组合 |
 | 新 RuntimeEvent | `runtime_event.rs`, 相关生产方 | 增加事件类型；按需接入 CLI/TUI 输出 |
-| 新 memory 能力 | `store/memory.rs`, `store/embedding.rs`, `context/server.rs`, `mcp/router.rs` | Store 拥有 schema/query，MCP/router 暴露工具 |
-| 新 MCP 工具 | `context/server.rs` 或 `skill/fun_server.rs`，必要时 `mcp/router.rs` | 添加 descriptor、`tools/call` handler、路由策略 |
+| 新 memory 能力 | `memory/`, `store/embedding.rs`, `mcp/tool_dispatch.rs` | Store 拥有 schema/query，tool_dispatch 暴露工具 |
+| 新 MCP 工具 | `mcp/tool_dispatch.rs`，`mcp/server.rs` tools()，必要时 `mcp/router.rs` | 添加 descriptor、dispatch handler、路由策略 |
 | 新 engine-run skill 行为 | `skill/mod.rs`, `skill/runner.rs` | 扩展 metadata/runner，不改变 ACP prompt path |
 | 新 native projection | `native/mod.rs`, `cli/mod.rs` | 添加目标路径和 render/apply 分支 |

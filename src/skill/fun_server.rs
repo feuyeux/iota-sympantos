@@ -432,10 +432,10 @@ fn cached_path(language: &str, sources: &[PathBuf], suffix: &str) -> Result<Path
             .with_context(|| format!("Failed to stat {}", source.display()))?;
         hasher.update(source.to_string_lossy().as_bytes());
         hasher.update(metadata.len().to_string().as_bytes());
-        if let Ok(modified) = metadata.modified() {
-            if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
-                hasher.update(duration.as_millis().to_string().as_bytes());
-            }
+        if let Ok(modified) = metadata.modified()
+            && let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH)
+        {
+            hasher.update(duration.as_millis().to_string().as_bytes());
         }
     }
     let dir = home.join(".i6").join("iota-fun");

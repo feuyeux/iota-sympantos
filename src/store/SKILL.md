@@ -1,0 +1,23 @@
+# store — SQLite Store Layer
+
+SQLite-backed persistence for execution cache, tool approvals, and session ledger.
+
+## Responsibilities
+
+- Execution lifecycle caching and deduplication (`CacheStore`)
+- Tool approval event recording and policy lookup (`ApprovalStore`)
+- Session/turn/handoff tracking (`SessionLedger`)
+
+## Sub-modules
+
+| Module | Purpose |
+|--------|---------|
+| `approval` | `ApprovalStore` — tool approval events and policy |
+| `cache` | `CacheStore` — execution replay and deduplication |
+| `ledger` | `SessionLedger` — sessions, backend sessions, turns, handoffs |
+
+## Key Types
+
+- `CacheStore` — execution caching with idempotency and fencing
+- `ApprovalStore` — tool approval persistence and policy lookup
+- `SessionLedger` — session/turn/handoff tracking

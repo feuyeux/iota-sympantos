@@ -29,6 +29,7 @@
 - `src/cli/mod.rs` — 命令分发
 - `src/engine.rs` — ACP 运行时编排
 - `src/acp/mod.rs` — ACP 协议交互
+- `src/mcp/server.rs` — iota-context MCP sidecar
 - `src/tui.rs` — TUI 主循环
 
 ### 2. 启动调试

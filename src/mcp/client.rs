@@ -109,9 +109,9 @@ pub async fn call_stdio(
     timeout_ms: u64,
 ) -> Result<McpToolResult> {
     let mut results = call_stdio_batch(command, args, env, vec![call], timeout_ms).await?;
-    Ok(results
+    results
         .pop()
-        .context("MCP batch returned no result for single call")?)
+        .context("MCP batch returned no result for single call")
 }
 
 pub async fn call_stdio_batch(

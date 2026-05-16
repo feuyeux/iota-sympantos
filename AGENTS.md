@@ -46,8 +46,7 @@ iota-sympantos/
 │   │   ├── approval.rs      # ApprovalStore + policy
 │   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
 │   ├── context/
-│   │   ├── mod.rs           # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
-│   │   └── server.rs        # iota-context MCP sidecar（stdio）
+│   │   └── mod.rs           # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
 │   ├── skill/
 │   │   ├── mod.rs           # SkillRegistry（分布式加载 + trigger 匹配）
 │   │   ├── runner.rs        # engine-run skill 执行
@@ -56,7 +55,9 @@ iota-sympantos/
 │   ├── mcp/
 │   │   ├── mod.rs           # MCP 层入口
 │   │   ├── client.rs        # engine 侧 MCP 客户端
-│   │   └── router.rs        # MCP 工具调用拦截路由
+│   │   ├── server.rs        # iota-context MCP stdio server（JSON-RPC 协议适配）
+│   │   ├── router.rs        # ACP tool-call 拦截，委托 tool_dispatch
+│   │   └── tool_dispatch.rs # 共享工具派发逻辑（解析器、验证器、handlers）
 │   ├── native/
 │   │   └── mod.rs           # 原生文件投影（可选）
 │   └── utils.rs             # 共享工具函数
@@ -211,7 +212,7 @@ iota __daemon           # 内部 daemon 入口
 | 4b | Engine-run skill execution | `skill/runner.rs` | ✅ |
 | 4b | 7 种 fn 引擎（iota-fun MCP） | `skill/fun_server.rs` | ✅ |
 | 4b | MCP client | `mcp/client.rs` | ✅ |
-| 5a | MCP sidecar（iota-context） | `context/server.rs` | ✅ |
+| 5a | MCP sidecar（iota-context） | `mcp/server.rs` + `mcp/tool_dispatch.rs` | ✅ |
 | 5a | ACP mcpServers 注入 | `acp/session.rs` | ✅ |
 | 5b | MCP response channel / 拦截 | `mcp/router.rs` | ✅ |
 | 6 | Approval 归一化 + 持久化 | `store/approval.rs` | ✅ |

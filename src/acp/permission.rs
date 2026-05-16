@@ -51,7 +51,6 @@ pub async fn answer_permission_request(
     backend: AcpBackend,
     tool_whitelist: &[String],
 ) -> Result<ApprovalDecisionEvent> {
-    tracing::debug!("[acp-permission] params={}", params);
     let tool_name = params
         .get("toolName")
         .or_else(|| params.get("name"))
@@ -72,7 +71,6 @@ pub async fn answer_permission_request(
         || tool_name.starts_with("mcp__iota-");
     let whitelist_hit = tool_is_whitelisted(&tool_name, tool_whitelist);
     if is_iota_tool || whitelist_hit {
-        tracing::debug!(tool = %tool_name, "[acp-permission] auto-approved iota tool");
         send_approved_response(stdin, id.clone(), &params).await?;
         return Ok(ApprovalDecisionEvent {
             request_id: id
@@ -123,12 +121,11 @@ pub async fn answer_permission_request(
     };
 
     let via_tui = tui_tx.is_some();
-    if via_tui {
-        if let Ok(store) = ApprovalStore::open_default() {
-            if let Ok(request_id) = store.record_request(execution_id, "acp", &tool_name, &params) {
-                let _ = store.record_decision(&request_id, approved, "tui user decision");
-            }
-        }
+    if via_tui
+        && let Ok(store) = ApprovalStore::open_default()
+        && let Ok(request_id) = store.record_request(execution_id, "acp", &tool_name, &params)
+    {
+        let _ = store.record_decision(&request_id, approved, "tui user decision");
     }
 
     send_approved_or_denied_response(stdin, id.clone(), approved, &params).await?;

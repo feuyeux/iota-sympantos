@@ -3,6 +3,7 @@
 .idea/
 .vscode/
 .qoder/
+.claude/worktrees/
 __pycache__/
 *.py[cod]
 

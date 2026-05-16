@@ -38,7 +38,7 @@ impl HistorySearch {
     }
 
     /// Find the most recent history entry at-or-before `start_before` that contains `query`.
-    pub fn find<'a>(&self, history: &'a [String], start_before: Option<usize>) -> Option<usize> {
+    pub fn find(&self, history: &[String], start_before: Option<usize>) -> Option<usize> {
         if self.query.is_empty() {
             return None;
         }

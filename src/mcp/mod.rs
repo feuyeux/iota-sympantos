@@ -1,7 +1,11 @@
-//! MCP tool interception and stdio client wrapper.
+//! MCP protocol layer.
 //!
-//! - [`router`] — intercepts `iota_*` tool calls in the ACP stream
 //! - [`client`] — spawns and communicates with stdio MCP sidecar processes
+//! - [`server`] — stdio JSON-RPC MCP server (`iota context-mcp`)
+//! - [`router`] — intercepts `iota_*` tool calls in the ACP stream
+//! - [`tool_dispatch`] — shared tool execution logic used by both server and router
 
 pub mod client;
 pub mod router;
+pub mod server;
+pub(crate) mod tool_dispatch;

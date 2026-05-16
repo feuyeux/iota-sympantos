@@ -19,7 +19,7 @@ cli::run()
   -> std::env::args().skip(1)
   -> match first arg:
        "run"                -> ACP prompt path
-       "context-mcp"        -> context::server::run_stdio()
+       "context-mcp"        -> mcp::server::run_stdio()
        "fun-mcp"            -> skill::fun_server::run_stdio()
        "native-materialize" -> run_native_materialize()
        "logs"                -> run_logs_command()
@@ -422,8 +422,8 @@ ContextEngine injects <memory-tools>
        -> auto approve
        -> send option outcome if options exist, otherwise {approved:true}
   -> backend calls MCP sidecar tool
-  -> context::server::call_tool("iota_memory_write")
-       or mcp::router::route_memory_write()
+  -> mcp::server (via tool_dispatch) handles iota_memory_write
+       or mcp::router (via tool_dispatch) handles route
   -> MemoryStore::insert_with_merge()
 ```
 
@@ -446,7 +446,7 @@ iota_memory_search { query, limit, mode }
          -> merge keyword and vector rankings
 ```
 
-`IotaEngine` 打开的 memory store 使用 `context_engine.embedding`。`context-mcp` 和 `mcp::router` 当前通过 `MemoryStore::open()` 打开默认 store，因此 MCP 查询侧使用本地 trigram fallback。
+`IotaEngine` 打开的 memory store 使用 `context_engine.embedding`。`mcp::server` 和 `mcp::router` 当前通过 `MemoryStore::open()` 打开默认 store，因此 MCP 查询侧使用本地 trigram fallback。
 
 Embedding schema：
 
@@ -510,13 +510,13 @@ matched skill with execution.mode = "mcp"
 ```text
 iota context-mcp
   -> cli::run()
-  -> context::server::run_stdio()
+  -> mcp::server::run_stdio()
 ```
 
 初始化：
 
 ```text
-context::server::run_stdio()
+mcp::server::run_stdio()
   -> MemoryStore::default_path() + MemoryStore::open()
        -> no context_engine.embedding config is loaded here
   -> workspace = current_dir()
@@ -524,6 +524,7 @@ context::server::run_stdio()
   -> SessionLedger::default_path() + SessionLedger::open()
   -> stdin line loop
   -> handle_request()
+       -> tools/call delegates to mcp::tool_dispatch::dispatch_tool()
 ```
 
 JSON-RPC methods：
@@ -538,7 +539,7 @@ tools/list
   -> tools()
 
 tools/call
-  -> call_tool()
+  -> tool_dispatch::dispatch_tool()
        iota_memory_search
        iota_memory_write
        iota_skill_search
@@ -945,7 +946,8 @@ embed(content)
 | `tui/theme.rs` | TUI 样式 | 4 |
 | `tui/state.rs` | 对话和观测状态 | 4 |
 | `context/mod.rs` | context capsule、WorkingMemoryBuffer、workspace summary | 5 |
-| `context/server.rs` | iota-context MCP server | 6,8 |
+| `mcp/server.rs` | iota-context MCP server（协议适配，委托 tool_dispatch） | 6,8 |
+| `mcp/tool_dispatch.rs` | 共享工具派发逻辑（server 和 router 共用） | 6,8,11 |
 | `skill/mod.rs` | skill 加载、trigger、backend compatibility | 5,7,8,12 |
 | `skill/runner.rs` | engine-run MCP skill | 7 |
 | `skill/cache.rs` | skill pull/cache | 12 |
@@ -971,7 +973,7 @@ embed(content)
 | `acp::permission::send_response()` | stdio | engine | ACP backend | permission decision |
 | `session_new_params_with_options()` | delegated child process | ACP backend | MCP servers | `mcpServers` tells backend how to spawn sidecars |
 | `mcp::client::call_stdio()` | child process + stdio | skill runner | MCP server | initialize/tools/call |
-| `context::server::run_stdio()` | stdio server | ACP backend or skill runner | iota-context | MCP tools/resources |
+| `mcp::server::run_stdio()` | stdio server | ACP backend or skill runner | iota-context | MCP tools/resources |
 | `skill::fun_server::run_stdio()` | stdio server | ACP backend or skill runner | iota-fun | MCP tools |
 | `skill::fun_server::run_command()` | child process | iota-fun | language runtime/compiler | execute code snippets |
 | `context::render_workspace()` | child process | context engine | `git` | `git status --short` |

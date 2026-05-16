@@ -3,8 +3,8 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use super::state::ObservabilityMeta;
 use crate::acp::AcpBackend;
-use crate::tui::state::ObservabilityMeta;
 
 use super::theme;
 

@@ -9,7 +9,7 @@
 //! Sub-modules:
 //! - [`pool`]  — [`EnginePool`] / [`EngineKey`]: backend×cwd engine buckets
 //! - [`proto`] — wire types: [`DaemonPromptRequest`], [`DaemonPromptResponse`],
-//!              [`DaemonWarmRequest`]
+//!   [`DaemonWarmRequest`]
 
 mod pool;
 mod proto;
@@ -317,12 +317,31 @@ async fn warm_selected_backends(
     for backend in backends {
         let backend = AcpBackend::parse(backend)?;
         let engine = engine_pool.lock().await.engine_for(cwd.clone());
-        engine
+        let started = engine
             .lock()
             .await
             .warm_backend(backend, cwd.clone())
             .await?;
-        warmed += 1;
+        record_warm_result(&mut warmed, started);
     }
     Ok(warmed)
+}
+
+fn record_warm_result(warmed: &mut usize, started: bool) {
+    if started {
+        *warmed += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn warm_count_only_increments_for_newly_started_backend() {
+        let mut warmed = 0;
+
+        super::record_warm_result(&mut warmed, false);
+        super::record_warm_result(&mut warmed, true);
+
+        assert_eq!(warmed, 1);
+    }
 }

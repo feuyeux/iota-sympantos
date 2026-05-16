@@ -90,8 +90,9 @@ impl Default for SkillExecution {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SkillExecutionMode {
+    #[default]
     Advisory,
     Mcp,
 }
@@ -106,12 +107,6 @@ impl SkillExecutionMode {
 
     pub fn is_mcp(&self) -> bool {
         matches!(self, Self::Mcp)
-    }
-}
-
-impl Default for SkillExecutionMode {
-    fn default() -> Self {
-        Self::Advisory
     }
 }
 
@@ -417,11 +412,12 @@ fn latest_mtime_depth(path: &Path, depth: usize) -> Option<u128> {
         .and_then(|metadata| metadata.modified().ok())
         .and_then(system_time_ms)
         .unwrap_or(0);
-    if path.is_dir() && depth < MAX_SKILL_DIR_DEPTH {
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                latest = latest.max(latest_mtime_depth(&entry.path(), depth + 1).unwrap_or(0));
-            }
+    if path.is_dir()
+        && depth < MAX_SKILL_DIR_DEPTH
+        && let Ok(entries) = fs::read_dir(path)
+    {
+        for entry in entries.flatten() {
+            latest = latest.max(latest_mtime_depth(&entry.path(), depth + 1).unwrap_or(0));
         }
     }
     Some(latest)

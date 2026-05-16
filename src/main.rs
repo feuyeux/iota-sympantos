@@ -5,6 +5,7 @@ mod context;
 mod daemon;
 mod engine;
 mod mcp;
+mod memory;
 mod native;
 mod runtime_event;
 mod skill;

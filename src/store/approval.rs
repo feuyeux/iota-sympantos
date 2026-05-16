@@ -154,33 +154,31 @@ pub fn classify_operation(tool_name: &str, payload: &serde_json::Value) -> Vec<A
     }
 
     for value in &field_values {
-        if value.contains("http://") || value.contains("https://") || value.contains("ftp://") {
-            if !dimensions.contains(&ApprovalDimension::Network) {
-                dimensions.push(ApprovalDimension::Network);
-            }
+        if (value.contains("http://") || value.contains("https://") || value.contains("ftp://"))
+            && !dimensions.contains(&ApprovalDimension::Network)
+        {
+            dimensions.push(ApprovalDimension::Network);
         }
         // Path traversal / system directory access
-        if value.contains("../")
+        if (value.contains("../")
             || value.contains("..\\")
             || value.starts_with("/etc/")
             || value.starts_with("/root/")
             || value.contains("c:\\windows")
-            || value.contains("c:/windows")
+            || value.contains("c:/windows"))
+            && !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace)
         {
-            if !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace) {
-                dimensions.push(ApprovalDimension::FileOutsideWorkspace);
-            }
+            dimensions.push(ApprovalDimension::FileOutsideWorkspace);
         }
         // Privilege escalation indicators
-        if value.starts_with("sudo ")
+        if (value.starts_with("sudo ")
             || value.contains(" sudo ")
             || value.contains("runas")
             || value.contains("administrator")
-            || value.contains("privilege")
+            || value.contains("privilege"))
+            && !dimensions.contains(&ApprovalDimension::PrivilegeEscalation)
         {
-            if !dimensions.contains(&ApprovalDimension::PrivilegeEscalation) {
-                dimensions.push(ApprovalDimension::PrivilegeEscalation);
-            }
+            dimensions.push(ApprovalDimension::PrivilegeEscalation);
         }
     }
 

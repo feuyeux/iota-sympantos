@@ -1,20 +1,18 @@
 //! Context Fabric Layer.
 //!
-//! - [`ContextEngine`] — composes the `<iota-context>` XML capsule injected
-//!   into every prompt, including memory, skills, working memory, and workspace state.
-//! - [`server`] — `iota-context` stdio MCP server (tools: `iota_memory_*`,
-//!   `iota_skill_*`; resources: `iota://memory/…`, `iota://skill/index`).
-
-pub mod server;
+//! [`ContextEngine`] composes the `<iota-context>` XML capsule injected into
+//! every prompt, including memory, skills, working memory, and workspace state.
+//!
+//! The stdio MCP server that was formerly here now lives in [`crate::mcp::server`].
 
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::Path;
 
 use crate::acp::AcpBackend;
-use crate::config::ContextEngineConfig;
+use crate::config::{ContextBudgetsConfig, ContextEngineConfig};
+use crate::memory::{MemoryRecord, RecallBuckets};
 use crate::skill::SkillRegistry;
-use crate::store::memory::{MemoryRecord, RecallBuckets};
 
 #[derive(Debug, Clone)]
 pub struct ContextEngine {
@@ -22,14 +20,8 @@ pub struct ContextEngine {
     budgets: ContextBudgets,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ContextBudgets {
-    pub memory_chars: usize,
-    pub skills_chars: usize,
-    pub working_memory_chars: usize,
-    pub workspace_chars: usize,
-    pub handoff_chars: usize,
-}
+/// Alias so the context layer uses a shorter name.
+pub type ContextBudgets = ContextBudgetsConfig;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkingMemoryTurn {
@@ -61,16 +53,7 @@ impl ContextEngine {
     pub fn from_config(config: Option<&ContextEngineConfig>) -> Self {
         let enabled = config.map(|cfg| cfg.enabled).unwrap_or(true)
             && config.map(|cfg| !cfg.injection.is_off()).unwrap_or(true);
-        let budgets = config
-            .and_then(|cfg| cfg.budgets.as_ref())
-            .map(|budgets| ContextBudgets {
-                memory_chars: budgets.memory_chars,
-                skills_chars: budgets.skills_chars,
-                working_memory_chars: budgets.working_memory_chars,
-                workspace_chars: budgets.workspace_chars,
-                handoff_chars: 800,
-            })
-            .unwrap_or_default();
+        let budgets = config.and_then(|cfg| cfg.budgets).unwrap_or_default();
         Self { enabled, budgets }
     }
 
@@ -147,14 +130,11 @@ impl ContextEngine {
     }
 }
 
-impl Default for ContextBudgets {
+impl Default for ContextEngine {
     fn default() -> Self {
         Self {
-            memory_chars: 2000,
-            skills_chars: 1200,
-            working_memory_chars: 1500,
-            workspace_chars: 800,
-            handoff_chars: 800,
+            enabled: true,
+            budgets: ContextBudgets::default(),
         }
     }
 }
@@ -230,14 +210,13 @@ fn render_workspace(cwd: &Path) -> String {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_PAGER", "cat")
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            changed = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .take(20)
-                .map(str::to_string)
-                .collect();
-        }
+        changed = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .take(20)
+            .map(str::to_string)
+            .collect();
     }
     let mut text = format!("cwd: {}\n", cwd.display());
     if !changed.is_empty() {
