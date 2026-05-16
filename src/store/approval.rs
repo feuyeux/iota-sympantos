@@ -81,7 +81,9 @@ impl ApprovalStore {
 
     fn init(&self) -> Result<()> {
         let conn = crate::utils::lock_or_recover(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
+        )?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS approval_requests (
   request_id TEXT PRIMARY KEY,

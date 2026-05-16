@@ -53,7 +53,10 @@ impl From<&str> for ExecutionStatus {
             "completed" => Self::Completed,
             "failed" => Self::Failed,
             other => {
-                tracing::warn!(status = other, "unknown execution status read from cache store");
+                tracing::warn!(
+                    status = other,
+                    "unknown execution status read from cache store"
+                );
                 Self::Unknown(other.to_string())
             }
         }

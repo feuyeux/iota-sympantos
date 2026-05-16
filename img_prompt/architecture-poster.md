@@ -1,4 +1,4 @@
-# doc/architecture.md poster prompt
+# docs/architecture.md poster prompt
 
 Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `hand-drawn architectural cutaway`, `fine cross-hatching`, `precise black ink`, `warm paper texture`, `playful engineering narrative`.
 

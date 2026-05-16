@@ -102,7 +102,7 @@ context_engine:
   budgets:
     memory_chars: 2000
     skills_chars: 1200
-    dialogue_chars: 1500
+    working_memory_chars: 1500
     workspace_chars: 800
   recall_thresholds:
     identity: 0.85

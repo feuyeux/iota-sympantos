@@ -1279,11 +1279,7 @@ mod arg_tests {
 
     #[test]
     fn parses_5backend_flag() {
-        let options = parse_acp_args(&[
-            "5backend".to_string(),
-            "test prompt".to_string(),
-        ])
-        .unwrap();
+        let options = parse_acp_args(&["5backend".to_string(), "test prompt".to_string()]).unwrap();
 
         assert!(options.multi_backend);
         assert_eq!(options.prompt, "test prompt");

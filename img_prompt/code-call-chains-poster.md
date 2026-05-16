@@ -1,4 +1,4 @@
-# doc/code-call-chains.md poster prompt
+# docs/code-call-chains.md poster prompt
 
 Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `sequential flow diagram`, `hand-lettered annotations`, `fine cross-hatching`, `mechanical process narrative`, `warm paper texture`.
 

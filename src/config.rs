@@ -206,8 +206,8 @@ pub struct ContextBudgetsConfig {
     pub memory_chars: usize,
     #[serde(default = "default_skills_chars")]
     pub skills_chars: usize,
-    #[serde(default = "default_dialogue_chars")]
-    pub dialogue_chars: usize,
+    #[serde(default = "default_working_memory_chars", alias = "dialogue_chars")]
+    pub working_memory_chars: usize,
     #[serde(default = "default_workspace_chars")]
     pub workspace_chars: usize,
 }
@@ -217,7 +217,7 @@ impl Default for ContextBudgetsConfig {
         Self {
             memory_chars: default_memory_chars(),
             skills_chars: default_skills_chars(),
-            dialogue_chars: default_dialogue_chars(),
+            working_memory_chars: default_working_memory_chars(),
             workspace_chars: default_workspace_chars(),
         }
     }
@@ -938,7 +938,7 @@ fn default_skills_chars() -> usize {
     1200
 }
 
-fn default_dialogue_chars() -> usize {
+fn default_working_memory_chars() -> usize {
     1500
 }
 

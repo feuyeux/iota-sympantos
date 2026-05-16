@@ -1,5 +1,5 @@
-use tracing_subscriber::fmt;
 use tracing_subscriber::Layer;
+use tracing_subscriber::fmt;
 
 pub fn stderr_layer<S>() -> impl Layer<S>
 where

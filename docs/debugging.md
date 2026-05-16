@@ -65,7 +65,7 @@ RUST_LOG=debug        # 启用 logging debug 级别日志，并同时输出到 s
 RUST_BACKTRACE=1      # 启用完整调用栈
 ```
 
-工程日志默认写入 `~/.i6/logs/`，不依赖 EventStore 或 SQLite。可用 `IOTA_LOG_DIR` 覆盖目录，用 `IOTA_LOG` 覆盖文件日志过滤规则。
+工程日志默认写入 `~/.i6/logs/`，不依赖本地 SQLite store。可用 `IOTA_LOG_DIR` 覆盖目录，用 `IOTA_LOG` 覆盖文件日志过滤规则。
 
 如需过滤特定模块日志，修改 `RUST_LOG`：
 

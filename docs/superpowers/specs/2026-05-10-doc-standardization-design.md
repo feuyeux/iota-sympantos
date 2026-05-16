@@ -21,7 +21,7 @@ This applies to: body text, headings, table contents, code block comments, list 
 
 ### Style conventions
 
-The reference baseline is `doc/observability.md` — the repository's existing English document.
+The reference baseline is `docs/observability.md` — the repository's existing English document.
 
 | Element | Convention |
 |---------|------------|
@@ -43,7 +43,7 @@ File names are not changed as part of this standard. The `-zh` suffix convention
 
 | File | Reason |
 |------|--------|
-| `doc/README-zh.md` | Intentional Chinese-language companion document |
+| `docs/README-zh.md` | Intentional Chinese-language companion document |
 
 ### Files that must conform to the standard
 
@@ -51,10 +51,10 @@ File names are not changed as part of this standard. The `-zh` suffix convention
 |------|---------------|
 | `README.md` | Chinese — translate to English |
 | `AGENTS.md` | Chinese — translate to English |
-| `doc/architecture.md` | Chinese — translate to English |
-| `doc/code-call-chains.md` | Chinese — translate to English |
-| `doc/debugging.md` | Chinese — translate to English |
-| `doc/observability.md` | Already English — no action needed |
+| `docs/architecture.md` | Chinese — translate to English |
+| `docs/code-call-chains.md` | Chinese — translate to English |
+| `docs/debugging.md` | Chinese — translate to English |
+| `docs/observability.md` | Already English — no action needed |
 | `gefsi/exp01-memory.md` | Mixed, Chinese-dominant — translate to English |
 | `gefsi/exp02-skill-fun.md` | Mixed, Chinese-dominant — translate to English |
 | `gefsi/exp03-acp-runtime.md` | Mixed, Chinese-dominant — translate to English |
@@ -72,5 +72,5 @@ The `-zh` suffix must be used for any intentional Chinese-language variant.
 
 1. Translate `README.md` — highest visibility, sets tone for the rest
 2. Translate `AGENTS.md` — affects agent behavior and contributor onboarding
-3. Translate `doc/` files — architecture, call chains, debugging (observability already done)
+3. Translate `docs/` files — architecture, call chains, debugging (observability already done)
 4. Translate `gefsi/` experiment reports — historical records, lower urgency

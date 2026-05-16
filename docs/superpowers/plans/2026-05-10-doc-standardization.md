@@ -4,7 +4,7 @@
 
 **Goal:** Bring all non-`-zh` documentation into conformance with the language and style standard defined in `docs/superpowers/specs/2026-05-10-doc-standardization-design.md`.
 
-**Architecture:** Each file is translated and reformatted independently, committed per file. No content is added or removed — this is a standardization pass, not a rewrite. The reference style baseline is `doc/observability.md`.
+**Architecture:** Each file is translated and reformatted independently, committed per file. No content is added or removed — this is a standardization pass, not a rewrite. The reference style baseline is `docs/observability.md`.
 
 **Tech Stack:** Markdown, git
 
@@ -27,14 +27,14 @@
 |------|--------|
 | `README.md` | Translate to English, apply style rules |
 | `AGENTS.md` | Translate to English, apply style rules |
-| `doc/architecture.md` | Translate to English, apply style rules |
-| `doc/code-call-chains.md` | Translate to English, apply style rules |
-| `doc/debugging.md` | Translate to English, apply style rules |
-| `doc/observability.md` | Skip — already English baseline |
+| `docs/architecture.md` | Translate to English, apply style rules |
+| `docs/code-call-chains.md` | Translate to English, apply style rules |
+| `docs/debugging.md` | Translate to English, apply style rules |
+| `docs/observability.md` | Skip — already English baseline |
 | `gefsi/exp01-memory.md` | Translate to English, apply style rules |
 | `gefsi/exp02-skill-fun.md` | Translate to English, apply style rules |
 | `gefsi/exp03-acp-runtime.md` | Translate to English, apply style rules |
-| `doc/README-zh.md` | Skip — protected Chinese companion |
+| `docs/README-zh.md` | Skip — protected Chinese companion |
 
 ---
 
@@ -51,7 +51,7 @@ Open `README.md` and read it fully before making any changes.
 
 - [ ] **Step 2: Rewrite the file in English**
 
-Replace the full contents with an English version. Use `doc/observability.md` as the style reference. Key sections to carry over faithfully:
+Replace the full contents with an English version. Use `docs/observability.md` as the style reference. Key sections to carry over faithfully:
   - Top tagline (one-liner description)
   - Core features table
   - Architecture table + image reference
@@ -121,16 +121,16 @@ git commit -m "docs: translate AGENTS.md to English"
 
 ---
 
-## Task 3: Standardize `doc/architecture.md`
+## Task 3: Standardize `docs/architecture.md`
 
 **Files:**
-- Modify: `doc/architecture.md`
+- Modify: `docs/architecture.md`
 
 Architecture document (~423 lines). Translate all prose, section headings, table content, and ASCII diagram labels. Preserve all code identifiers, module names, and file paths exactly.
 
 - [ ] **Step 1: Read the current file**
 
-Open `doc/architecture.md` and read it fully.
+Open `docs/architecture.md` and read it fully.
 
 - [ ] **Step 2: Rewrite the file in English**
 
@@ -148,22 +148,22 @@ Cross-link references in the file (`[code-call-chains.md](code-call-chains.md)` 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add doc/architecture.md
-git commit -m "docs: translate doc/architecture.md to English"
+git add docs/architecture.md
+git commit -m "docs: translate docs/architecture.md to English"
 ```
 
 ---
 
-## Task 4: Standardize `doc/code-call-chains.md`
+## Task 4: Standardize `docs/code-call-chains.md`
 
 **Files:**
-- Modify: `doc/code-call-chains.md`
+- Modify: `docs/code-call-chains.md`
 
 Largest doc file (~1027 lines). Contains call chain diagrams in text/ASCII format with Chinese labels. Translate all prose, headings, table content, and diagram labels. Preserve function names, module paths, and code identifiers exactly.
 
 - [ ] **Step 1: Read the current file**
 
-Open `doc/code-call-chains.md` and read it fully. Pay attention to the call chain blocks — they mix code identifiers (keep) with Chinese description labels (translate).
+Open `docs/code-call-chains.md` and read it fully. Pay attention to the call chain blocks — they mix code identifiers (keep) with Chinese description labels (translate).
 
 - [ ] **Step 2: Rewrite the file in English**
 
@@ -194,22 +194,22 @@ cli::run()
 - [ ] **Step 4: Commit**
 
 ```bash
-git add doc/code-call-chains.md
-git commit -m "docs: translate doc/code-call-chains.md to English"
+git add docs/code-call-chains.md
+git commit -m "docs: translate docs/code-call-chains.md to English"
 ```
 
 ---
 
-## Task 5: Standardize `doc/debugging.md`
+## Task 5: Standardize `docs/debugging.md`
 
 **Files:**
-- Modify: `doc/debugging.md`
+- Modify: `docs/debugging.md`
 
 Debugging guide (~136 lines). Translate all prose, headings, and table content. Preserve VS Code configuration keys, extension IDs, and command examples exactly.
 
 - [ ] **Step 1: Read the current file**
 
-Open `doc/debugging.md` and read it fully.
+Open `docs/debugging.md` and read it fully.
 
 - [ ] **Step 2: Rewrite the file in English**
 
@@ -224,8 +224,8 @@ Translate all prose and table content. Apply Sentence case to headings. Translat
 - [ ] **Step 4: Commit**
 
 ```bash
-git add doc/debugging.md
-git commit -m "docs: translate doc/debugging.md to English"
+git add docs/debugging.md
+git commit -m "docs: translate docs/debugging.md to English"
 ```
 
 ---
@@ -347,8 +347,8 @@ git commit -m "docs: translate gefsi/exp03-acp-runtime.md to English"
 ```bash
 # Check for CJK characters across all modified docs
 grep -rn --include="*.md" -P "[\x{4e00}-\x{9fff}]" \
-  README.md AGENTS.md doc/architecture.md doc/code-call-chains.md \
-  doc/debugging.md gefsi/exp01-memory.md gefsi/exp02-skill-fun.md \
+  README.md AGENTS.md docs/architecture.md docs/code-call-chains.md \
+  docs/debugging.md gefsi/exp01-memory.md gefsi/exp02-skill-fun.md \
   gefsi/exp03-acp-runtime.md
 ```
 

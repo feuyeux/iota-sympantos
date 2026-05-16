@@ -1,4 +1,4 @@
-# doc/observability.md poster prompt
+# docs/observability.md poster prompt
 
 Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `observatory control room`, `signal routing diagram`, `fine cross-hatching`, `hand-drawn infrastructure map`, `warm paper texture`.
 

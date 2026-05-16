@@ -27,7 +27,7 @@ iota-sympantos/
 │   │   ├── status_bar.rs    # 底部状态栏（后端·模型 / 快捷键提示）
 │   │   ├── theme.rs         # ratatui 颜色主题（洋红主色）
 │   │   └── state.rs         # TUI 状态
-│   ├── engine.rs            # ACP 运行时编排，客户端池
+│   ├── engine.rs            # IotaEngine 编排，ACP client pool、context、memory、skill、ledger
 │   ├── acp/
 │   │   ├── mod.rs           # ACP JSON-RPC 2.0 协议驱动、AcpClient
 │   │   ├── permission.rs    # 权限请求处理（iota 工具自动批准）
@@ -41,12 +41,12 @@ iota-sympantos/
 │   ├── runtime_event.rs     # 统一事件类型（Output/ToolCall/Approval 等）
 │   ├── store/
 │   │   ├── mod.rs           # Store layer 入口
-│   │   ├── events.rs        # EventStore SQLite 事件持久化
+│   │   ├── cache.rs         # CacheStore execution replay / dedupe
 │   │   ├── memory.rs        # MemoryStore（6 桶分类体系）
 │   │   ├── approval.rs      # ApprovalStore + policy
 │   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
 │   ├── context/
-│   │   ├── mod.rs           # ContextEngine + capsule 组装 + budget
+│   │   ├── mod.rs           # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
 │   │   └── server.rs        # iota-context MCP sidecar（stdio）
 │   ├── skill/
 │   │   ├── mod.rs           # SkillRegistry（分布式加载 + trigger 匹配）
@@ -60,10 +60,10 @@ iota-sympantos/
 │   ├── native/
 │   │   └── mod.rs           # 原生文件投影（可选）
 │   └── utils.rs             # 共享工具函数
-├── doc/
+├── docs/
 │   ├── architecture.md      # 分层架构和模块职责
 │   ├── code-call-chains.md  # 入口、IPC 和调用链
-│   └── observability.md     # 观测性命令、存储和指标文档
+│   └── observability.md     # logs/trace、RuntimeEvent、metrics、CacheStore 边界
 ├── gefsi/
 │   └── exp03-acp-runtime.md # ACP 进程模型和 benchmark 验证报告
 ├── Cargo.toml
@@ -82,7 +82,7 @@ initialize → session/new → session/prompt → 流式 session/update → sess
 
 执行路径：
 
-- **直接路径**：`IotaEngine::prompt_in_cwd`，按需启动并复用 ACP 客户端
+- **直接路径**：`IotaEngine::run_prompt_with_timing`，按需启动并复用 ACP 客户端
 - **Daemon 路径**：通过 `IotaEngine` 经内部 daemon（`--daemon` / `-d`）路由
 
 ---
@@ -200,12 +200,12 @@ iota __daemon           # 内部 daemon 入口
 | Phase | 内容 | 文件 | 状态 |
 |-------|------|------|-------|
 | 1 | RuntimeEvent 归一化 | `runtime_event.rs` | ✅ |
-| 1 | EventStore SQLite 持久化 | `store/events.rs` | ✅ |
-| 1 | Execution idempotency + lock + fencing | `store/events.rs` | ✅ |
+| 1 | CacheStore execution replay / dedupe | `store/cache.rs` | ✅ |
+| 1 | Execution idempotency + lock + fencing | `store/cache.rs` | ✅ |
 | 2 | Context Capsule + budget | `context/mod.rs` | ✅ |
 | 3 | MemoryStore（6 桶分类） | `store/memory.rs` | ✅ |
 | 3 | 6 桶 Recall 查询 | `store/memory.rs` | ✅ |
-| 3 | DialogueBuffer | `context/mod.rs` | ✅ |
+| 3 | WorkingMemoryBuffer（短期工作记忆） | `context/mod.rs` | ✅ |
 | 4 | SkillRegistry 分布式加载 | `skill/mod.rs` | ✅ |
 | 4 | Skill trigger 匹配 | `skill/mod.rs` | ✅ |
 | 4b | Engine-run skill execution | `skill/runner.rs` | ✅ |

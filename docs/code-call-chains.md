@@ -22,7 +22,8 @@ cli::run()
        "context-mcp"        -> context::server::run_stdio()
        "fun-mcp"            -> skill::fun_server::run_stdio()
        "native-materialize" -> run_native_materialize()
-       "observability"|"obs"-> run_observability_command()
+       "logs"                -> run_logs_command()
+       "trace"               -> run_trace_command()
        "skill"              -> run_skill_command()
        "__daemon"           -> daemon::run_daemon()
        "check"              -> optional warm daemon + print_combined_info()
@@ -56,10 +57,10 @@ iota run [backend] [options] <prompt>
        -> EffectiveConfig::from_config()
        -> ContextEngine::from_config()
   -> MemoryStore::open_with_embedding(memory_db, embedding_config)
-       -> EventStore::open(events.sqlite)
+       -> CacheStore::open(events.sqlite cache tables)
        -> SessionLedger::open(sessions.sqlite)
        -> latest_session_for_cwd() or new UUID session
-  -> IotaEngine::prompt_in_cwd_timed(backend, cwd, prompt)
+  -> IotaEngine::run_prompt_with_timing(backend, cwd, prompt)
   -> print output text
   -> optional log events / timing to stderr
   -> IotaEngine::shutdown()
@@ -69,7 +70,7 @@ iota run [backend] [options] <prompt>
 Engine 内部调用链：
 
 ```text
-IotaEngine::prompt_in_cwd_timed_with_execution_id()
+IotaEngine::run_prompt_with_optional_execution_id()
   -> request_hash(backend, cwd, prompt)
   -> SkillRegistry::load_cached()
        -> workspace/skills
@@ -83,12 +84,12 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
        memory-classifiable prompt
        explicit iota_memory_write
   -> if !skip_replay:
-       -> EventStore::find_completed_by_request_hash()
-       -> EventStore::output_text()
+       -> CacheStore::find_completed_by_request_hash()
+       -> CacheStore::output_text()
        -> return synthetic output on cache hit
   -> if !skip_replay:
-       -> EventStore::find_running_by_request_hash()
-       -> poll EventStore::get_execution() until completed/failed/timeout
+       -> CacheStore::find_running_by_request_hash()
+       -> poll CacheStore::get_execution() until completed/failed/timeout
        -> return synthetic output on joined running execution
   -> ensure_session_ledger()
        -> SessionLedger::ensure_session()
@@ -96,7 +97,7 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
   -> prepare_handoff()
        -> SessionLedger::publish_handoff()
        -> MemoryStore::insert(handoff episodic memory)
-  -> EventStore::begin_execution_with_id()
+  -> CacheStore::begin_execution_with_id()
        -> idempotency lock
        -> stale running cleanup
        -> fencing token allocation
@@ -111,13 +112,13 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
   -> ContextEngine::compose_effective_prompt() via spawn_blocking
        -> render_workspace()
             -> [child process] git status --short
-  -> ensure_client()
+  -> ensure_acp_client()
   -> AcpClient::prompt_with_cwd_timed_for_execution()
   -> record RuntimeEvent list
-  -> EventStore::record_timing()
-  -> EventStore::finish_execution()
+  -> CacheStore::append_output(Output events only)
+  -> CacheStore::finish_execution()
   -> SessionLedger::record_turn()
-  -> DialogueBuffer::push_turn()
+  -> WorkingMemoryBuffer::push_turn()
   -> MemoryStore::insert(episodic prompt/output memory)
 ```
 
@@ -125,14 +126,14 @@ IPC / 外部边界：
 
 - `git status --short` 是同步子进程，engine 用 `spawn_blocking` 包裹 context 组装。
 - ACP backend 是 child process，stdin/stdout 上跑换行分隔 JSON-RPC 2.0。
-- `EventStore`、`MemoryStore`、`SessionLedger` 是 SQLite 文件边界。
+- `CacheStore`、`MemoryStore`、`SessionLedger` 是 SQLite 文件边界。
 
 ## 链路 2：ACP client 协议驱动
 
 启动链：
 
 ```text
-IotaEngine::ensure_client()
+IotaEngine::ensure_acp_client()
   -> effective_config.backend_config(backend)
   -> backend_process_env_with_context()
   -> normalized_acp_command()
@@ -261,8 +262,8 @@ daemon::handle_prompt()
   -> AcpBackend::parse(request.backend)
   -> EnginePool::engine_for(cwd)
        -> create IotaEngine::new_for_session_cwd(..., Some(cwd)) if absent
-  -> optional engine.set_timeout_ms(request.timeout_ms)
-  -> IotaEngine::prompt_in_cwd_timed_with_execution_id()
+  -> optional engine.set_acp_timeout_ms(request.timeout_ms)
+  -> IotaEngine::run_prompt_with_optional_execution_id()
        -> same engine + ACP chain as direct run
   -> DaemonPromptResponse { ok, text/error, timing, events }
 ```
@@ -276,8 +277,8 @@ iota check --daemon / bench-* --daemon / internal warm path
   -> daemon::handle_warm()
        -> warm_all_backends() if backends empty
        -> warm_selected_backends() otherwise
-       -> IotaEngine::warm_backend_in_cwd()
-       -> ensure_client()
+       -> IotaEngine::warm_backend()
+       -> ensure_acp_client()
        -> AcpClient::start()
   -> DaemonPromptResponse { warmed }
 ```
@@ -288,7 +289,7 @@ Daemon shutdown：
 Ctrl+C in daemon process
   -> CancellationToken::cancel()
   -> engine_pool.all_engines()
-  -> each IotaEngine::shutdown_all_clients()
+  -> each IotaEngine::shutdown_open_clients()
   -> each AcpClient::shutdown()
 ```
 
@@ -310,7 +311,7 @@ iota / iota tui
        -> stdout is_terminal 检查
        -> TuiApp::new()
             -> IotaEngine::new_for_session_cwd(config, false, DEFAULT_TIMEOUT_MS, current_dir)
-            -> EventStore::open(default_path)
+       -> CacheStore::open(default_path)
        -> acp::permission::install_tui_approval_channel()
        -> set panic hook
        -> enter alternate screen
@@ -333,9 +334,9 @@ tui::run_loop()
        -> enqueue or start prompt
   -> when prompt starts:
        -> tokio::spawn(engine task)
-            -> IotaEngine::set_stream_sender(Some(tx))
-            -> IotaEngine::prompt_in_cwd_timed()
-            -> IotaEngine::set_stream_sender(None)
+            -> IotaEngine::set_stream_output_sender(Some(tx))
+            -> IotaEngine::run_prompt_with_timing()
+            -> IotaEngine::set_stream_output_sender(None)
             -> send result to UI channel
   -> stream_rx receives output chunks
   -> approval_rx receives ApprovalRequest
@@ -368,7 +369,7 @@ TUI 边界：
 ## 链路 5：Context Fabric 注入
 
 ```text
-IotaEngine::prompt_in_cwd_timed_with_execution_id()
+IotaEngine::run_prompt_with_optional_execution_id()
   -> MemoryStore::recall_buckets_with_thresholds()
        -> identity: semantic/identity/user
        -> preference: semantic/preference/user
@@ -376,7 +377,7 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
        -> domain: semantic/domain/project
        -> procedural: procedural/project
        -> episodic: episodic/session + episodic/project
-  -> DialogueBuffer::render()
+  -> WorkingMemoryBuffer::render()
   -> prepare_handoff()
   -> ContextEngine::compose_effective_prompt()
        -> <iota-context>
@@ -384,7 +385,7 @@ IotaEngine::prompt_in_cwd_timed_with_execution_id()
             <memory-tools>
             <model> optional
             <memory> buckets
-            <dialogue>
+            <working-memory>
             <workspace>
             <skills>
             <handoff>
@@ -417,7 +418,7 @@ Engine 自动写入：
 
 ```text
 completed ACP/skill output
-  -> IotaEngine::write_episodic_memory()
+  -> IotaEngine::persist_turn_as_episodic_memory()
   -> MemoryStore::insert()
        -> insert_with_merge(..., MemoryMergeMode::Auto)
        -> validate taxonomy
@@ -749,20 +750,18 @@ mcp::router::try_intercept_tool_call(method, params)
        external unknown -> denied by iota policy
 ```
 
-## 链路 12：Observability、check、benchmark、native、skill pull
+## 链路 12：Logs/trace、check、benchmark、native、skill pull
 
-Observability：
+Logs / trace：
 
 ```text
-iota observability <logging|timing|metrics> ...
-  -> cli::run_observability_command()
-  -> EventStore::open(default_path)
-  -> logging:
-       recent / errors / events <execution-id> / tools / approvals
-  -> timing:
-       recent / slow / breakdown <execution-id> / summary
-  -> metrics:
-       aggregate / --prometheus / tokens / cache / sessions / latency
+iota logs <execution_id>
+  -> query Loki HTTP API by iota_execution_id
+
+iota trace <trace_id>
+  -> query Jaeger HTTP API
+  -> print span name and duration
+```
 ```
 
 Check：
@@ -788,14 +787,14 @@ Benchmark：
 iota bench-cold [rounds]
   -> for each enabled backend and each round:
        -> new IotaEngine
-       -> prompt_in_cwd("ping")
+       -> run_prompt_text("ping")
        -> shutdown
 
 iota bench-warm [rounds]
   -> one IotaEngine
-  -> warm_enabled_backends_in_cwd()
+  -> warm_all_enabled_backends()
   -> for each warmed backend and each round:
-       -> prompt_in_cwd("ping")
+       -> run_prompt_text("ping")
 
 iota bench-* --daemon
   -> run_daemon_benchmark()
@@ -872,13 +871,12 @@ search_with_mode()
   -> keyword/vector/hybrid
 ```
 
-EventStore：
+CacheStore：
 
 ```text
-EventStore::open()
-  -> executions table
-  -> events table
-  -> observability counters/gauges
+CacheStore::open()
+  -> cache_executions table
+  -> cache_outputs table
 
 begin_execution_with_id()
   -> transaction immediate
@@ -887,21 +885,16 @@ begin_execution_with_id()
   -> fencing token allocation
   -> insert running execution
 
-append_event()
-  -> allocate seq per execution
-  -> insert event_json
+append_output()
+  -> persist Output events only for replay
 
-finish_execution() / record_timing()
-  -> update status/timing
+finish_execution()
+  -> update status
 
 find_completed_by_request_hash()
 find_running_by_request_hash()
 output_text()
   -> replay and join-running support
-
-observability_summary()
-prometheus_metrics()
-  -> CLI observability output
 ```
 
 SessionLedger：
@@ -959,7 +952,7 @@ embed(content)
 | 模块 | 主要职责 | 覆盖链路 |
 |---|---|---|
 | `main.rs` | Tokio 入口 | 入口总览 |
-| `cli/mod.rs` | 命令分发、daemon autostart、bench、observability、native、skill | 1,3,4,12 |
+| `cli/mod.rs` | 命令分发、daemon autostart、bench、logs/trace、native、skill | 1,3,4,12 |
 | `config.rs` | `~/.i6/nimia.yaml`、EffectiveConfig、backend command/env、MCP/session options、embedding config | 1,2,3,10 |
 | `engine.rs` | 核心编排、replay/join、memory、skill、context、ACP pool、store 写回 | 1,3,4,5,6,7 |
 | `acp/mod.rs` | ACP backend、子进程、JSON-RPC、prompt event loop | 1,2 |
@@ -976,7 +969,7 @@ embed(content)
 | `tui/status_bar.rs` | 状态栏 | 4 |
 | `tui/theme.rs` | TUI 样式 | 4 |
 | `tui/state.rs` | 对话和观测状态 | 4 |
-| `context/mod.rs` | context capsule、DialogueBuffer、workspace summary | 5 |
+| `context/mod.rs` | context capsule、WorkingMemoryBuffer、workspace summary | 5 |
 | `context/server.rs` | iota-context MCP server | 6,8 |
 | `skill/mod.rs` | skill 加载、trigger、backend compatibility | 5,7,8,12 |
 | `skill/runner.rs` | engine-run MCP skill | 7 |
@@ -987,7 +980,7 @@ embed(content)
 | `native/mod.rs` | 原生文件投影 | 12 |
 | `store/memory.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
 | `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
-| `store/events.rs` | execution/events/observability | 1,3,4,12 |
+| `store/cache.rs` | execution replay / join-running / dedupe | 1,3,4,12 |
 | `store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
 | `store/approval.rs` | approval 事件和风险分类 | 11 |
 | `utils.rs` | 时间、摘要、lock recovery | 多条链路 |

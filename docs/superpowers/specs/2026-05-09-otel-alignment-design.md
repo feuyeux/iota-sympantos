@@ -1,6 +1,6 @@
 # OpenTelemetry Alignment Design
 
-Status note: this is the historical design document for the OTel migration. For the current runtime behavior and storage locations, see `doc/observability.md`.
+Status note: this is the historical design document for the OTel migration. For the current runtime behavior and storage locations, see `docs/observability.md`.
 
 **Date**: 2026-05-09
 **Approach**: Plan B - Full replacement of all three signal types

@@ -915,7 +915,8 @@ async fn run_loop(
         // event loop (draw + input) remains responsive during engine execution.
         if let Some((backend, cwd, prompt)) = pending_prompt.take() {
             app.streaming_text.clear();
-            app.streaming_version.set(app.streaming_version.get().wrapping_add(1));
+            app.streaming_version
+                .set(app.streaming_version.get().wrapping_add(1));
             app.streaming_backend = Some(backend);
             let engine_arc = app.engine.clone();
             let stream_tx = app.stream_tx.clone();
@@ -923,9 +924,9 @@ async fn run_loop(
             app.turn_task = Some(tokio::spawn(async move {
                 // Lock the engine for the duration of this call.
                 let mut engine = engine_arc.lock().await;
-                engine.set_stream_sender(Some(stream_tx));
-                let result = engine.prompt_in_cwd_timed(backend, cwd, &prompt).await;
-                engine.set_stream_sender(None);
+                engine.set_stream_output_sender(Some(stream_tx));
+                let result = engine.run_prompt_with_timing(backend, cwd, &prompt).await;
+                engine.set_stream_output_sender(None);
                 let _ = engine_tx2
                     .send(result.map(|output| (backend, output)))
                     .await;
@@ -1155,7 +1156,7 @@ async fn run_loop(
                                     if let Some(handle) = app.turn_task.take() {
                                         handle.abort();
                                     }
-                                    app.engine.lock().await.shutdown_all_clients().await;
+                                    app.engine.lock().await.shutdown_open_clients().await;
                                     app.running_turn = false;
                                     app.streaming_text.clear();
                                     app.streaming_version.set(app.streaming_version.get().wrapping_add(1));
@@ -1272,6 +1273,6 @@ async fn run_loop(
     if let Some(handle) = app.turn_task.take() {
         handle.abort();
     }
-    app.engine.lock().await.shutdown_all_clients().await;
+    app.engine.lock().await.shutdown_open_clients().await;
     Ok(())
 }

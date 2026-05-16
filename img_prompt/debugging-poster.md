@@ -1,4 +1,4 @@
-# doc/debugging.md poster prompt
+# docs/debugging.md poster prompt
 
 Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `debugging workshop`, `hand-drawn developer desk`, `fine cross-hatching`, `annotated troubleshooting map`, `warm paper texture`.
 

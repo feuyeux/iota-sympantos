@@ -6,7 +6,7 @@ fn disabled_context_returns_prompt_unchanged() {
         enabled: false,
         budgets: ContextBudgets::default(),
     };
-    let dialogue = DialogueBuffer::new(2);
+    let working_memory = WorkingMemoryBuffer::new(2);
     let prompt = engine.compose_effective_prompt(ComposeInput {
         backend: AcpBackend::Codex,
         cwd: Path::new("."),
@@ -15,7 +15,7 @@ fn disabled_context_returns_prompt_unchanged() {
         prompt: "ping",
         memory: None,
         skills: None,
-        dialogue: &dialogue,
+        working_memory: &working_memory,
         handoff: None,
     });
     assert_eq!(prompt, "ping");
@@ -27,7 +27,7 @@ fn enabled_context_wraps_prompt() {
         enabled: true,
         budgets: ContextBudgets::default(),
     };
-    let dialogue = DialogueBuffer::new(2);
+    let working_memory = WorkingMemoryBuffer::new(2);
     let prompt = engine.compose_effective_prompt(ComposeInput {
         backend: AcpBackend::Codex,
         cwd: Path::new("."),
@@ -36,7 +36,7 @@ fn enabled_context_wraps_prompt() {
         prompt: "ping",
         memory: None,
         skills: None,
-        dialogue: &dialogue,
+        working_memory: &working_memory,
         handoff: None,
     });
     assert!(prompt.contains("<iota-context>"));
@@ -44,8 +44,8 @@ fn enabled_context_wraps_prompt() {
 }
 
 #[test]
-fn dialogue_buffer_push_and_render() {
-    let mut buf = DialogueBuffer::new(5);
+fn working_memory_buffer_push_and_render() {
+    let mut buf = WorkingMemoryBuffer::new(5);
     buf.push_turn(
         AcpBackend::Codex,
         "what is rust?",
@@ -57,8 +57,8 @@ fn dialogue_buffer_push_and_render() {
 }
 
 #[test]
-fn dialogue_buffer_evicts_oldest_when_full() {
-    let mut buf = DialogueBuffer::new(2);
+fn working_memory_buffer_evicts_oldest_when_full() {
+    let mut buf = WorkingMemoryBuffer::new(2);
     buf.push_turn(AcpBackend::Codex, "turn one", "answer one");
     buf.push_turn(AcpBackend::Codex, "turn two", "answer two");
     buf.push_turn(AcpBackend::Codex, "turn three", "answer three");
@@ -70,8 +70,8 @@ fn dialogue_buffer_evicts_oldest_when_full() {
 }
 
 #[test]
-fn dialogue_buffer_budget_limits_output() {
-    let mut buf = DialogueBuffer::new(10);
+fn working_memory_buffer_budget_limits_output() {
+    let mut buf = WorkingMemoryBuffer::new(10);
     for i in 0..10 {
         buf.push_turn(
             AcpBackend::Codex,
@@ -89,7 +89,7 @@ fn context_with_model_includes_model_section() {
         enabled: true,
         budgets: ContextBudgets::default(),
     };
-    let dialogue = DialogueBuffer::new(2);
+    let working_memory = WorkingMemoryBuffer::new(2);
     let prompt = engine.compose_effective_prompt(ComposeInput {
         backend: AcpBackend::Codex,
         cwd: Path::new("."),
@@ -98,7 +98,7 @@ fn context_with_model_includes_model_section() {
         prompt: "hi",
         memory: None,
         skills: None,
-        dialogue: &dialogue,
+        working_memory: &working_memory,
         handoff: None,
     });
     assert!(prompt.contains("gpt-4o"));
@@ -110,7 +110,7 @@ fn context_with_handoff_includes_handoff_section() {
         enabled: true,
         budgets: ContextBudgets::default(),
     };
-    let dialogue = DialogueBuffer::new(2);
+    let working_memory = WorkingMemoryBuffer::new(2);
     let prompt = engine.compose_effective_prompt(ComposeInput {
         backend: AcpBackend::Codex,
         cwd: Path::new("."),
@@ -119,7 +119,7 @@ fn context_with_handoff_includes_handoff_section() {
         prompt: "continue",
         memory: None,
         skills: None,
-        dialogue: &dialogue,
+        working_memory: &working_memory,
         handoff: Some("Previous session: implemented auth module"),
     });
     assert!(prompt.contains("<handoff>"));

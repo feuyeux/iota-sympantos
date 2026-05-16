@@ -82,13 +82,13 @@ pub async fn run_daemon(
             _ = shutdown_token.cancelled() => {
                 eprintln!("Shutting down ACP clients...");
                 let engines = engine_pool.lock().await.all_engines();
-                let mut clients_count = 0;
+                let mut open_client_count = 0;
                 for engine in engines {
                     let mut engine_guard = engine.lock().await;
-                    clients_count += engine_guard.clients_count();
-                    engine_guard.shutdown_all_clients().await;
+                    open_client_count += engine_guard.open_client_count();
+                    engine_guard.shutdown_open_clients().await;
                 }
-                eprintln!("Shut down {} ACP client(s)", clients_count);
+                eprintln!("Shut down {} ACP client(s)", open_client_count);
                 eprintln!("Daemon shutdown complete");
                 return Ok(());
             }
@@ -225,10 +225,10 @@ async fn handle_prompt(
                 events: Vec::new(),
             };
         }
-        engine.set_timeout_ms(timeout_ms);
+        engine.set_acp_timeout_ms(timeout_ms);
     }
     match engine
-        .prompt_in_cwd_timed_with_execution_id(
+        .run_prompt_with_optional_execution_id(
             backend,
             cwd,
             &request.prompt,
@@ -320,7 +320,7 @@ async fn warm_selected_backends(
         engine
             .lock()
             .await
-            .warm_backend_in_cwd(backend, cwd.clone())
+            .warm_backend(backend, cwd.clone())
             .await?;
         warmed += 1;
     }

@@ -1,7 +1,7 @@
 //! SQLite store layer.
 //!
 //! - [`memory`]   — [`MemoryStore`]: episodic/semantic/procedural memory with FTS5
-//! - [`events`]   — [`EventStore`]: execution records, runtime events, Prometheus metrics
+//! - [`cache`]    — [`CacheStore`]: execution replay, join-running, dedupe
 //! - [`approval`] — [`ApprovalStore`]: tool approval events and policy
 //! - [`ledger`]   — [`SessionLedger`]: sessions, backend sessions, turns, handoffs
 

@@ -4,17 +4,14 @@ pub mod metrics;
 pub mod spans;
 
 use anyhow::Result;
-use opentelemetry::global;
-use opentelemetry_sdk::{
-    logs::SdkLoggerProvider,
-    metrics::SdkMeterProvider,
-    trace::SdkTracerProvider,
-    Resource,
-};
-use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithExportConfig};
 use opentelemetry::KeyValue;
+use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithExportConfig};
+use opentelemetry_sdk::{
+    Resource, logs::SdkLoggerProvider, metrics::SdkMeterProvider, trace::SdkTracerProvider,
+};
+use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub struct TelemetryConfig {
     pub endpoint: String,
@@ -99,8 +96,8 @@ pub fn init(config: &TelemetryConfig) -> Result<OtelGuard> {
         .with_tonic()
         .with_endpoint(&config.endpoint)
         .build()?;
-    let metric_reader = opentelemetry_sdk::metrics::PeriodicReader::builder(metric_exporter)
-        .build();
+    let metric_reader =
+        opentelemetry_sdk::metrics::PeriodicReader::builder(metric_exporter).build();
     let meter_provider = SdkMeterProvider::builder()
         .with_resource(resource.clone())
         .with_reader(metric_reader)
@@ -118,11 +115,10 @@ pub fn init(config: &TelemetryConfig) -> Result<OtelGuard> {
         .build();
 
     // tracing-opentelemetry bridge
-    let otel_trace_layer = tracing_opentelemetry::layer()
-        .with_tracer(tracer_provider.tracer("iota"));
-    let otel_log_layer = opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
-        &logger_provider,
-    );
+    let otel_trace_layer =
+        tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("iota"));
+    let otel_log_layer =
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logger_provider);
     let filter = logging_filter();
     let stderr_layer = console::stderr_layer();
 

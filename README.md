@@ -16,22 +16,20 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 
 | 层级 | 模块 |
 |------|------|
-| **UI** | `cli.rs`, `tui.rs` + `tui/` |
-| **编排** | `engine.rs`, `agent.rs`, `acp*.rs`, `mcp_*.rs`, `context.rs`, `skills.rs`, `skill_runner.rs` |
-| **存储** | `memory.rs`, `event_store.rs`, `session_ledger.rs`, `approval.rs` |
+| **UI** | `cli/mod.rs`, `tui.rs` + `tui/` |
+| **编排** | `engine.rs`, `acp/`, `mcp/`, `context/`, `skill/` |
+| **存储** | `memory.rs`, `cache.rs`, `ledger.rs`, `approval.rs` |
 
-详见 [`doc/architecture.md`](doc/architecture.md) 和 [`doc/code-call-chains.md`](doc/code-call-chains.md)。
+详见 [`docs/architecture.md`](docs/architecture.md) 和 [`docs/code-call-chains.md`](docs/code-call-chains.md)。
 
 ## 文档
 
 | 文档 | 说明 |
 |------|------|
-| [`doc/architecture.md`](doc/architecture.md) | 系统架构设计 |
-| [`doc/code-call-chains.md`](doc/code-call-chains.md) | 代码调用链路 |
-| [`doc/observability.md`](doc/observability.md) | Observability 系统详解 |
-| [`doc/debugging.md`](doc/debugging.md) | 调试指南 |
-| [`doc/memory-guide.md`](doc/memory-guide.md) | **记忆系统功能介绍与使用指南** |
-| [`doc/memory-quick-reference.md`](doc/memory-quick-reference.md) | 记忆系统快速参考卡 |
+| [`docs/architecture.md`](docs/architecture.md) | 系统架构设计 |
+| [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
+| [`docs/observability.md`](docs/observability.md) | logs/trace、RuntimeEvent、metrics、CacheStore 边界 |
+| [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
 
 ## 功能实验室
 

@@ -51,7 +51,8 @@ pub async fn run() -> Result<()> {
                             let prompt = options.prompt.clone();
                             let timing = options.timing;
                             handles.push(spawn(async move {
-                                let result = engine.prompt_in_cwd_timed(backend, cwd, &prompt).await;
+                                let result =
+                                    engine.run_prompt_with_timing(backend, cwd, &prompt).await;
                                 engine.shutdown().await;
                                 (backend_name, result, timing)
                             }));
@@ -61,7 +62,12 @@ pub async fn run() -> Result<()> {
                             match result {
                                 Ok(output) => {
                                     if timing {
-                                        print_route_timing("direct", acp::AcpBackend::parse(&backend_name).unwrap_or(acp::AcpBackend::Codex), Some(&output.timing));
+                                        print_route_timing(
+                                            "direct",
+                                            acp::AcpBackend::parse(&backend_name)
+                                                .unwrap_or(acp::AcpBackend::Codex),
+                                            Some(&output.timing),
+                                        );
                                     }
                                     let text = output.text;
                                     if !text.is_empty() {
@@ -74,7 +80,7 @@ pub async fn run() -> Result<()> {
                     } else {
                         // existing single backend logic
                         let result = engine
-                            .prompt_in_cwd_timed(options.backend, options.cwd, &options.prompt)
+                            .run_prompt_with_timing(options.backend, options.cwd, &options.prompt)
                             .await;
                         engine.shutdown().await;
                         let output = result?;
@@ -189,15 +195,22 @@ fn print_help() {
 }
 
 async fn run_logs_command(args: &[String]) -> Result<()> {
-    let execution_id = args.first()
+    let execution_id = args
+        .first()
         .ok_or_else(|| anyhow::anyhow!("Usage: iota logs <execution_id>"))?;
-    let loki_url = std::env::var("IOTA_LOKI_URL")
-        .unwrap_or_else(|_| "http://localhost:3100".to_string());
+    let loki_url =
+        std::env::var("IOTA_LOKI_URL").unwrap_or_else(|_| "http://localhost:3100".to_string());
     let query = format!(r#"{{iota_execution_id="{}"}}"#, execution_id);
-    let url = format!("{}/loki/api/v1/query_range?query={}&limit=1000",
-        loki_url, urlencoding::encode(&query));
+    let url = format!(
+        "{}/loki/api/v1/query_range?query={}&limit=1000",
+        loki_url,
+        urlencoding::encode(&query)
+    );
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await
+    let resp = client
+        .get(&url)
+        .send()
+        .await
         .with_context(|| format!("Failed to connect to Loki at {}", loki_url))?;
     if !resp.status().is_success() {
         bail!("Loki query failed with status {}", resp.status());
@@ -224,13 +237,17 @@ async fn run_logs_command(args: &[String]) -> Result<()> {
 }
 
 async fn run_trace_command(args: &[String]) -> Result<()> {
-    let trace_id = args.first()
+    let trace_id = args
+        .first()
         .ok_or_else(|| anyhow::anyhow!("Usage: iota trace <trace_id>"))?;
-    let jaeger_url = std::env::var("IOTA_JAEGER_URL")
-        .unwrap_or_else(|_| "http://localhost:16686".to_string());
+    let jaeger_url =
+        std::env::var("IOTA_JAEGER_URL").unwrap_or_else(|_| "http://localhost:16686".to_string());
     let url = format!("{}/api/traces/{}", jaeger_url, trace_id);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await
+    let resp = client
+        .get(&url)
+        .send()
+        .await
         .with_context(|| format!("Failed to connect to Jaeger at {}", jaeger_url))?;
     if !resp.status().is_success() {
         bail!("Jaeger query failed with status {}", resp.status());
@@ -243,8 +260,15 @@ async fn run_trace_command(args: &[String]) -> Result<()> {
                     let name = span["operationName"].as_str().unwrap_or("?");
                     let duration_us = span["duration"].as_u64().unwrap_or(0);
                     let duration_ms = duration_us / 1000;
-                    let depth = if span["references"].as_array()
-                        .map(|r| r.is_empty()).unwrap_or(true) { 0 } else { 1 };
+                    let depth = if span["references"]
+                        .as_array()
+                        .map(|r| r.is_empty())
+                        .unwrap_or(true)
+                    {
+                        0
+                    } else {
+                        1
+                    };
                     let indent = "  ".repeat(depth);
                     println!("{}├── {} ({}ms)", indent, name, duration_ms);
                 }
@@ -453,7 +477,7 @@ async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result<()> {
 
 fn start_daemon_silently() -> Result<()> {
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;
-    let mut child = std::process::Command::new(exe)
+    let child = std::process::Command::new(exe)
         .arg("__daemon")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -466,6 +490,7 @@ fn start_daemon_silently() -> Result<()> {
     // we don't block the caller.
     #[cfg(target_os = "windows")]
     std::thread::spawn(move || {
+        let mut child = child;
         let _ = child.wait();
     });
     #[cfg(not(target_os = "windows"))]
@@ -638,7 +663,7 @@ async fn run_cold_benchmark(config: NimiaConfig, rounds: usize) -> Result<()> {
             }
             let mut engine = IotaEngine::new(config.clone(), false, acp::DEFAULT_TIMEOUT_MS);
             let started = std::time::Instant::now();
-            let result = engine.prompt_in_cwd(backend, cwd.clone(), "ping").await;
+            let result = engine.run_prompt_text(backend, cwd.clone(), "ping").await;
             let elapsed = started.elapsed().as_millis();
             engine.shutdown().await;
             let status = if result.is_ok() { "ok" } else { "error" };
@@ -698,16 +723,16 @@ async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) -> Result<()>
 async fn run_warm_benchmark(config: NimiaConfig, rounds: usize) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let mut engine = IotaEngine::new(config, false, acp::DEFAULT_TIMEOUT_MS);
-    engine.warm_enabled_backends_in_cwd(cwd.clone()).await?;
+    engine.warm_all_enabled_backends(cwd.clone()).await?;
 
     println!("backend,round,latency_ms,status");
     for round in 1..=rounds {
         for backend in acp::ALL_BACKENDS {
-            if !engine.is_warmed_in_cwd(backend, &cwd) {
+            if !engine.has_warm_client(backend, &cwd) {
                 continue;
             }
             let started = std::time::Instant::now();
-            let result = engine.prompt_in_cwd(backend, cwd.clone(), "ping").await;
+            let result = engine.run_prompt_text(backend, cwd.clone(), "ping").await;
             let elapsed = started.elapsed().as_millis();
             let status = if result.is_ok() { "ok" } else { "error" };
             println!("{},{},{},{}", backend, round, elapsed, status);

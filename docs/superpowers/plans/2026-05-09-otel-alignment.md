@@ -1,6 +1,6 @@
 # OpenTelemetry Alignment Implementation Plan
 
-Status note: this is the historical implementation plan for the OTel migration. Some steps describe pre-migration code such as `EventStore` and old observability commands. For current runtime behavior and storage locations, see `doc/observability.md`.
+Status note: this is the historical implementation plan for the OTel migration. Some steps describe pre-migration code such as `EventStore` and old observability commands. For current runtime behavior and storage locations, see `docs/observability.md`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

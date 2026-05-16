@@ -279,8 +279,8 @@ cargo run -- fun-mcp
 
 ## Related Documentation
 
-- [Project architecture](../../../doc/architecture.md) - Engine, skill, and iota-fun architecture
-- [Code call chains](../../../doc/code-call-chains.md) - Runtime paths for engine-run skills and MCP tools
+- [Project architecture](../../../docs/architecture.md) - Engine, skill, and iota-fun architecture
+- [Code call chains](../../../docs/code-call-chains.md) - Runtime paths for engine-run skills and MCP tools
 - [iota-fun server implementation](../../../src/skill/fun_server.rs) - Current implementation
 - [Pet generator skill](../SKILL.md) - Skill spec for multi-language pet generation
 

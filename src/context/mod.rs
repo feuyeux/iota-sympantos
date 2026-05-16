@@ -1,7 +1,7 @@
 //! Context Fabric Layer.
 //!
 //! - [`ContextEngine`] — composes the `<iota-context>` XML capsule injected
-//!   into every prompt, including memory, skills, dialogue, and workspace state.
+//!   into every prompt, including memory, skills, working memory, and workspace state.
 //! - [`server`] — `iota-context` stdio MCP server (tools: `iota_memory_*`,
 //!   `iota_skill_*`; resources: `iota://memory/…`, `iota://skill/index`).
 
@@ -26,22 +26,22 @@ pub struct ContextEngine {
 pub struct ContextBudgets {
     pub memory_chars: usize,
     pub skills_chars: usize,
-    pub dialogue_chars: usize,
+    pub working_memory_chars: usize,
     pub workspace_chars: usize,
     pub handoff_chars: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct DialogueTurn {
+pub struct WorkingMemoryTurn {
     pub backend: String,
     pub prompt_summary: String,
     pub output_summary: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct DialogueBuffer {
+pub struct WorkingMemoryBuffer {
     max_turns: usize,
-    turns: VecDeque<DialogueTurn>,
+    turns: VecDeque<WorkingMemoryTurn>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,7 +53,7 @@ pub struct ComposeInput<'a> {
     pub prompt: &'a str,
     pub memory: Option<&'a RecallBuckets>,
     pub skills: Option<&'a SkillRegistry>,
-    pub dialogue: &'a DialogueBuffer,
+    pub working_memory: &'a WorkingMemoryBuffer,
     pub handoff: Option<&'a str>,
 }
 
@@ -66,7 +66,7 @@ impl ContextEngine {
             .map(|budgets| ContextBudgets {
                 memory_chars: budgets.memory_chars,
                 skills_chars: budgets.skills_chars,
-                dialogue_chars: budgets.dialogue_chars,
+                working_memory_chars: budgets.working_memory_chars,
                 workspace_chars: budgets.workspace_chars,
                 handoff_chars: 800,
             })
@@ -110,11 +110,13 @@ impl ContextEngine {
                 self.budgets.memory_chars,
             ));
         }
-        let dialogue = input.dialogue.render(self.budgets.dialogue_chars);
-        if !dialogue.is_empty() {
-            capsule.push_str("<dialogue>\n");
-            capsule.push_str(&dialogue);
-            capsule.push_str("</dialogue>\n\n");
+        let working_memory = input
+            .working_memory
+            .render(self.budgets.working_memory_chars);
+        if !working_memory.is_empty() {
+            capsule.push_str("<working-memory>\n");
+            capsule.push_str(&working_memory);
+            capsule.push_str("</working-memory>\n\n");
         }
         capsule.push_str("<workspace>\n");
         capsule.push_str(&trim_section(
@@ -150,14 +152,14 @@ impl Default for ContextBudgets {
         Self {
             memory_chars: 2000,
             skills_chars: 1200,
-            dialogue_chars: 1500,
+            working_memory_chars: 1500,
             workspace_chars: 800,
             handoff_chars: 800,
         }
     }
 }
 
-impl DialogueBuffer {
+impl WorkingMemoryBuffer {
     pub fn new(max_turns: usize) -> Self {
         Self {
             max_turns,
@@ -166,7 +168,7 @@ impl DialogueBuffer {
     }
 
     pub fn push_turn(&mut self, backend: AcpBackend, prompt: &str, output: &str) {
-        self.turns.push_back(DialogueTurn {
+        self.turns.push_back(WorkingMemoryTurn {
             backend: backend.to_string(),
             prompt_summary: summarize(prompt, 240),
             output_summary: summarize(output, 360),
