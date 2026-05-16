@@ -8,6 +8,7 @@ pub struct ObservabilityMeta {
     pub total_ms: Option<u64>,
     pub prompt_ms: Option<u64>,
     pub input_tokens: Option<u64>,
+    pub cache_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
 }

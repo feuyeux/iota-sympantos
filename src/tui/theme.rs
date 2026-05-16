@@ -5,10 +5,10 @@ pub const MAGENTA_LIGHT: Color = Color::LightMagenta;
 pub const FG_DIM: Color = Color::DarkGray;
 pub const FG_NORMAL: Color = Color::Reset;
 
-pub fn header_style() -> Style {
+pub fn banner_style() -> Style {
     Style::default()
-        .bg(MAGENTA)
-        .fg(Color::White)
+        .bg(Color::Rgb(126, 76, 136))
+        .fg(Color::Rgb(255, 245, 255))
         .add_modifier(Modifier::BOLD)
 }
 
@@ -18,6 +18,12 @@ pub fn status_bar_style() -> Style {
 
 pub fn status_bar_hint_style() -> Style {
     Style::default().fg(FG_DIM)
+}
+
+pub fn status_bar_token_style() -> Style {
+    Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn user_label_style() -> Style {

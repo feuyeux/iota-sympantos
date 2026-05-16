@@ -120,6 +120,8 @@ pub struct TokenUsageEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u64>,
@@ -221,16 +223,42 @@ pub fn map_acp_events(method: &str, params: Option<&Value>) -> Vec<RuntimeEvent>
 
 pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
     let usage = find_usage_object(value)?;
-    let input_tokens = first_u64(
+    let prompt_tokens = first_u64(
         usage,
         &[
             "input_tokens",
             "inputTokens",
             "prompt_tokens",
             "promptTokens",
-            "cache_read_input_tokens",
         ],
     );
+    let cache_tokens = first_u64(
+        usage,
+        &[
+            "cache_tokens",
+            "cacheTokens",
+            "cached_tokens",
+            "cachedTokens",
+            "cache_read_input_tokens",
+            "cacheReadInputTokens",
+        ],
+    )
+    .or_else(|| first_nested_u64(usage, "prompt_tokens_details", &["cached_tokens"]))
+    .or_else(|| first_nested_u64(usage, "promptTokensDetails", &["cachedTokens"]));
+    let input_tokens = first_u64(
+        usage,
+        &[
+            "uncached_prompt_tokens",
+            "uncachedPromptTokens",
+            "uncached_input_tokens",
+            "uncachedInputTokens",
+        ],
+    )
+    .or_else(|| match (prompt_tokens, cache_tokens) {
+        (Some(prompt), Some(cache)) => Some(prompt.saturating_sub(cache)),
+        (Some(prompt), None) => Some(prompt),
+        (None, _) => None,
+    });
     let output_tokens = first_u64(
         usage,
         &[
@@ -246,11 +274,16 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
             .zip(output_tokens)
             .map(|(input, output)| input + output)
     });
-    if input_tokens.is_none() && output_tokens.is_none() && total_tokens.is_none() {
+    if input_tokens.is_none()
+        && cache_tokens.is_none()
+        && output_tokens.is_none()
+        && total_tokens.is_none()
+    {
         return None;
     }
     Some(TokenUsageEvent {
         input_tokens,
+        cache_tokens,
         output_tokens,
         total_tokens,
         model: first_string(value, &["model", "modelName"])
@@ -285,6 +318,12 @@ fn has_any_token_key(value: &Value) -> bool {
         "inputTokens",
         "prompt_tokens",
         "promptTokens",
+        "cache_tokens",
+        "cacheTokens",
+        "cached_tokens",
+        "cachedTokens",
+        "cache_read_input_tokens",
+        "cacheReadInputTokens",
         "output_tokens",
         "outputTokens",
         "completion_tokens",
@@ -307,6 +346,13 @@ fn first_u64(value: &Value, keys: &[&str]) -> Option<u64> {
     })
 }
 
+fn first_nested_u64(value: &Value, object_key: &str, keys: &[&str]) -> Option<u64> {
+    value
+        .get(object_key)
+        .filter(|nested| nested.is_object())
+        .and_then(|nested| first_u64(nested, keys))
+}
+
 fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(Value::as_str))
@@ -315,13 +361,17 @@ fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
 
 fn map_session_update_events(params: &Value) -> Vec<RuntimeEvent> {
     let update = params.get("update").unwrap_or(params);
+    let mut events = token_usage_from_value(update)
+        .or_else(|| token_usage_from_value(params))
+        .map(|usage| vec![RuntimeEvent::TokenUsage(usage)])
+        .unwrap_or_default();
     let update_type = update
         .get("sessionUpdate")
         .or_else(|| update.get("type"))
         .and_then(Value::as_str)
         .unwrap_or("unknown");
 
-    match update_type {
+    let mapped = match update_type {
         "agent_message" | "agent_message_chunk" => {
             extract_text(update).map_or_else(Vec::new, |text| {
                 vec![RuntimeEvent::Output(OutputEvent {
@@ -386,7 +436,9 @@ fn map_session_update_events(params: &Value) -> Vec<RuntimeEvent> {
             state: other.to_string(),
             detail: Some(update.clone()),
         })],
-    }
+    };
+    events.extend(mapped);
+    events
 }
 
 fn map_tool_call_update(update: &Value) -> Vec<RuntimeEvent> {

@@ -54,8 +54,8 @@ pub(super) fn banner_lines() -> Vec<Line<'static>> {
     let build_time = env!("BUILD_TIMESTAMP");
     vec![
         Line::from(Span::styled(
-            format!(" ιώτα  v{}-{}", version, build_time),
-            theme::header_style(),
+            format!("│ ιώτα  v{}-{} │", version, build_time),
+            theme::banner_style(),
         )),
         Line::raw(""),
     ]
@@ -162,10 +162,15 @@ fn observability_line(meta: &ObservabilityMeta) -> Option<String> {
             meta.output_tokens.unwrap_or(0)
         ));
     }
-    if let Some(execution_id) = meta.execution_id.as_deref() {
-        parts.push(format!("exec {}", execution_id));
+    if parts.is_empty() {
+        return None;
     }
-    (!parts.is_empty()).then(|| parts.join(" · "))
+    let line = parts.join(" · ");
+    meta.execution_id
+        .as_deref()
+        .map(|execution_id| execution_id.chars().take(8).collect::<String>())
+        .filter(|short| !short.is_empty())
+        .map_or(Some(line.clone()), |short| Some(format!("{}: {}", short, line)))
 }
 
 #[cfg(test)]
@@ -179,6 +184,16 @@ mod tests {
         let lines = user_lines("hello");
 
         assert_eq!(lines[0].spans[0].content.as_ref(), "●  ");
+    }
+
+    #[test]
+    fn banner_wraps_logo_and_version_with_separators() {
+        let lines = banner_lines();
+        let text = lines[0].spans[0].content.as_ref();
+
+        assert!(text.starts_with("│ "));
+        assert!(text.ends_with(" │"));
+        assert_eq!(lines[0].spans[0].style, theme::banner_style());
     }
 
     #[test]
@@ -207,6 +222,20 @@ mod tests {
         for (backend, expected) in cases {
             assert_eq!(assistant_label(backend), expected);
         }
+    }
+
+    #[test]
+    fn observability_line_shortens_execution_id() {
+        let line = observability_line(&ObservabilityMeta {
+            execution_id: Some("2255c021-eb0c-494e-b538-25b4499a2b85".into()),
+            total_ms: Some(4634),
+            prompt_ms: Some(4199),
+            total_tokens: Some(28624),
+            ..ObservabilityMeta::default()
+        })
+        .unwrap();
+
+        assert_eq!(line, "2255c021: total 4634ms · prompt 4199ms · 28624 tokens");
     }
 }
 

@@ -67,6 +67,9 @@ where
             if let Some(text) = extract_text(result) {
                 output.push_str(&text);
             }
+            if let Some(usage) = runtime_event::token_usage_from_value(result) {
+                events.push(RuntimeEvent::TokenUsage(usage));
+            }
             if is_terminal_result(result) {
                 break;
             }

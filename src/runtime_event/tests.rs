@@ -28,6 +28,43 @@ fn extracts_token_usage_from_session_complete_payload() {
 }
 
 #[test]
+fn extracts_cache_token_usage_separately() {
+    let usage = token_usage_from_value(&json!({
+        "usage": {
+            "prompt_tokens": 19,
+            "prompt_tokens_details": {
+                "cached_tokens": 7
+            },
+            "completion_tokens": 8
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.input_tokens, Some(12));
+    assert_eq!(usage.cache_tokens, Some(7));
+    assert_eq!(usage.output_tokens, Some(8));
+}
+
+#[test]
+fn uncached_prompt_tokens_take_precedence_for_input_tokens() {
+    let usage = token_usage_from_value(&json!({
+        "usage": {
+            "prompt_tokens": 19,
+            "uncached_prompt_tokens": 11,
+            "prompt_tokens_details": {
+                "cached_tokens": 7
+            },
+            "completion_tokens": 8
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.input_tokens, Some(11));
+    assert_eq!(usage.cache_tokens, Some(7));
+    assert_eq!(usage.output_tokens, Some(8));
+}
+
+#[test]
 fn maps_session_complete_to_state() {
     let event = map_acp_event(
         "session/complete",
@@ -41,6 +78,37 @@ fn maps_session_complete_to_state() {
     )
     .unwrap();
     assert!(matches!(event, RuntimeEvent::State(StateEvent { state, .. }) if state == "complete"));
+}
+
+#[test]
+fn session_update_usage_emits_token_usage() {
+    let events = map_acp_events(
+        "session/update",
+        Some(&json!({
+            "update": {
+                "sessionUpdate": "usage",
+                "usage": {
+                    "prompt_tokens": 19,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 7
+                    },
+                    "completion_tokens": 8
+                }
+            }
+        })),
+    );
+
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TokenUsage(usage) => Some(usage),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(usage.input_tokens, Some(12));
+    assert_eq!(usage.cache_tokens, Some(7));
+    assert_eq!(usage.output_tokens, Some(8));
 }
 
 #[test]

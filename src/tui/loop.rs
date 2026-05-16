@@ -220,6 +220,7 @@ fn observability_from_output(output: &AcpPromptOutput) -> ObservabilityMeta {
         total_ms: Some(output.timing.total_ms),
         prompt_ms: Some(output.timing.prompt_ms),
         input_tokens: token_usage.and_then(|usage| usage.input_tokens),
+        cache_tokens: token_usage.and_then(|usage| usage.cache_tokens),
         output_tokens: token_usage.and_then(|usage| usage.output_tokens),
         total_tokens: token_usage.and_then(|usage| usage.total_tokens),
     }
