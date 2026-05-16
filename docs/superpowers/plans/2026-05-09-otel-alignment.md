@@ -1396,7 +1396,7 @@ cache_store: Option<CacheStore>,
 
 - [ ] **Step 3: Update constructor initialization**
 
-In `new_for_session_cwd`, replace EventStore opening:
+In `create_session`, replace EventStore opening:
 ```rust
 let event_store = EventStore::default_path()
     .ok()
@@ -1723,7 +1723,7 @@ tracing::info!(
 
 - [ ] **Step 3: Add log gap fill to prompt lifecycle**
 
-In `prompt_with_cwd_timed_for_execution`:
+In `execute`:
 
 At prompt send:
 ```rust

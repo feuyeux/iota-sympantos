@@ -82,7 +82,7 @@ initialize → session/new → session/prompt → 流式 session/update → sess
 
 执行路径：
 
-- **直接路径**：`IotaEngine::run_prompt_with_timing`，按需启动并复用 ACP 客户端
+- **直接路径**：`IotaEngine::run_with_timing`，按需启动并复用 ACP 客户端
 - **Daemon 路径**：通过 `IotaEngine` 经内部 daemon（`--daemon` / `-d`）路由
 
 ---

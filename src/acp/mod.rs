@@ -545,7 +545,7 @@ impl AcpClient {
         self.stream_tx = tx;
     }
 
-    pub async fn prompt_with_cwd_timed_for_execution(
+    pub async fn execute(
         &mut self,
         cwd: &PathBuf,
         prompt: &str,

@@ -44,7 +44,7 @@ impl EnginePool {
         self.engines
             .entry(key)
             .or_insert_with(|| {
-                Arc::new(Mutex::new(IotaEngine::new_for_session_cwd(
+                Arc::new(Mutex::new(IotaEngine::create_session(
                     self.config.clone(),
                     self.show_native,
                     timeout_ms,

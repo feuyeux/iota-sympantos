@@ -228,7 +228,7 @@ async fn handle_prompt(
         engine.set_acp_timeout_ms(timeout_ms);
     }
     match engine
-        .run_prompt_with_optional_execution_id(
+        .run(
             backend,
             cwd,
             &request.prompt,

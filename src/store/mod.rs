@@ -1,7 +1,7 @@
 //! SQLite store layer.
 //!
 //! - [`memory`]   — [`MemoryStore`]: episodic/semantic/procedural memory with FTS5
-//! - [`cache`]    — [`CacheStore`]: execution replay, join-running, dedupe
+//! - [`cache`]    — [`CacheStore`]: execution lifecycle
 //! - [`approval`] — [`ApprovalStore`]: tool approval events and policy
 //! - [`ledger`]   — [`SessionLedger`]: sessions, backend sessions, turns, handoffs
 

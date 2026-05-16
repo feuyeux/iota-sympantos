@@ -42,7 +42,7 @@ pub struct IotaEngine {
     context_engine: ContextEngine,
     /// Optional persistent memory database. `None` keeps the engine usable without memory.
     memory_store: Option<MemoryStore>,
-    /// Optional execution cache used for idempotency, replay, and joining in-flight prompts.
+    /// Optional execution store used for turn lifecycle persistence.
     cache_store: Option<CacheStore>,
     /// Recent prompt/output turns used to compose context and backend handoff summaries.
     working_memory: WorkingMemoryBuffer,
@@ -60,11 +60,11 @@ impl IotaEngine {
     /// Build an engine bound to the process current directory when a ledger session exists.
     pub fn new(config: NimiaConfig, show_native: bool, timeout_ms: u64) -> Self {
         let session_cwd = std::env::current_dir().ok();
-        Self::new_for_session_cwd(config, show_native, timeout_ms, session_cwd.as_deref())
+        Self::create_session(config, show_native, timeout_ms, session_cwd.as_deref())
     }
 
     /// Build an engine and optionally reuse the latest ledger session for `session_cwd`.
-    pub fn new_for_session_cwd(
+    pub fn create_session(
         config: NimiaConfig,
         show_native: bool,
         timeout_ms: u64,
@@ -120,42 +120,6 @@ impl IotaEngine {
     #[allow(dead_code)]
     pub async fn shutdown_open_clients_in_place(&mut self) {
         self.shutdown_open_clients().await;
-    }
-
-    /// Wait for another process handling the same request hash, then reuse its output.
-    ///
-    /// This prevents duplicate backend work when TUI/daemon/CLI submit identical prompts at the
-    /// same time. The wait uses exponential backoff and is capped by `acp_timeout_ms`.
-    async fn wait_for_matching_running_execution(
-        &self,
-        backend: AcpBackend,
-        request_hash: &str,
-    ) -> Option<String> {
-        let store = self.cache_store.as_ref()?.clone();
-        let running = store
-            .find_running_by_request_hash(&backend.to_string(), request_hash)
-            .ok()??;
-        let deadline =
-            tokio::time::Instant::now() + tokio::time::Duration::from_millis(self.acp_timeout_ms);
-        let mut poll_interval_ms: u64 = 50;
-        loop {
-            // A completed peer execution can be replayed as if this engine produced it.
-            if let Ok(Some(record)) = store.get_execution(&running.execution_id) {
-                if record.status == ExecutionStatus::Completed {
-                    return store.output_text(&running.execution_id).ok().flatten();
-                }
-                // Failed/cancelled/stale executions are not safe to reuse.
-                if record.status != ExecutionStatus::Running {
-                    return None;
-                }
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return None;
-            }
-            // Start responsive, then back off to avoid hot-polling SQLite.
-            tokio::time::sleep(tokio::time::Duration::from_millis(poll_interval_ms)).await;
-            poll_interval_ms = (poll_interval_ms * 2).min(500);
-        }
     }
 
     /// Start ACP clients for every enabled backend in `cwd` and keep them in the client pool.
@@ -238,28 +202,24 @@ impl IotaEngine {
         cwd: PathBuf,
         prompt: &str,
     ) -> Result<String> {
-        Ok(self
-            .run_prompt_with_timing(backend, cwd, prompt)
-            .await?
-            .text)
+        Ok(self.run_with_timing(backend, cwd, prompt).await?.text)
     }
 
     /// Run a prompt and return text, runtime events, backend session id, and timing data.
-    pub async fn run_prompt_with_timing(
+    pub async fn run_with_timing(
         &mut self,
         backend: AcpBackend,
         cwd: PathBuf,
         prompt: &str,
     ) -> Result<AcpPromptOutput> {
-        self.run_prompt_with_optional_execution_id(backend, cwd, prompt, None)
-            .await
+        self.run(backend, cwd, prompt, None).await
     }
 
     /// Run a prompt with an optional externally supplied execution id.
     ///
     /// The daemon uses `requested_execution_id` so callers can correlate persisted cache/events
     /// with their own request id. When it is `None`, the cache layer allocates the id.
-    pub async fn run_prompt_with_optional_execution_id(
+    pub async fn run(
         &mut self,
         backend: AcpBackend,
         cwd: PathBuf,
@@ -268,37 +228,12 @@ impl IotaEngine {
     ) -> Result<AcpPromptOutput> {
         let request_hash = request_hash(&backend.to_string(), &cwd, prompt);
         tracing::debug!(backend = %backend, cwd = %cwd.display(), request_hash = %request_hash, "prompt requested");
-        // Load skills before cache lookup because engine-run skills and memory writes have
-        // side effects and must not be replayed from previous text output.
         let skills = SkillRegistry::load_cached(
             &cwd,
             self.effective_config.skill_roots(),
             &mut self.skill_registry_cache,
         );
         let matched_skill = skills.match_skill(backend, prompt);
-        // Prompts with side effects or deterministic memory answers must execute fresh.
-        let skip_replay = matched_skill.is_some()
-            || is_memory_query(prompt)
-            || !classify_memory_prompt(prompt).is_empty()
-            || prompt.contains("iota_memory_write");
-        if !skip_replay
-            && let Some(output) = self.replay_completed_execution(backend, &request_hash)
-        {
-            self.record_cache_hit_metric();
-            tracing::info!(backend = %backend, request_hash = %request_hash, "replaying completed execution");
-            self.working_memory.push_turn(backend, prompt, &output);
-            return Ok(AcpPromptOutput::synthetic(output));
-        }
-        if !skip_replay
-            && let Some(output) = self
-                .wait_for_matching_running_execution(backend, &request_hash)
-                .await
-        {
-            self.record_cache_hit_metric();
-            tracing::info!(backend = %backend, request_hash = %request_hash, "joined running execution");
-            self.working_memory.push_turn(backend, prompt, &output);
-            return Ok(AcpPromptOutput::synthetic(output));
-        }
         let model = self
             .effective_config
             .backend_config(backend)
@@ -309,7 +244,6 @@ impl IotaEngine {
         let handoff = self.prepare_backend_handoff(backend, &cwd);
         let execution_id = match self.cache_store.as_ref() {
             Some(store) => {
-                // The cache store provides idempotency fencing for this request hash.
                 match store.begin_execution_with_id(
                     &backend.to_string(),
                     &self.engine_session_id,
@@ -317,23 +251,11 @@ impl IotaEngine {
                     requested_execution_id,
                 ) {
                     Ok(execution_id) => Some(execution_id),
-                    Err(_) => {
-                        if !skip_replay
-                            && let Some(output) = self
-                                .wait_for_matching_running_execution(backend, &request_hash)
-                                .await
-                        {
-                            self.record_cache_hit_metric();
-                            self.working_memory.push_turn(backend, prompt, &output);
-                            return Ok(AcpPromptOutput::synthetic(output));
-                        }
-                        None
-                    }
+                    Err(_) => None,
                 }
             }
             None => None,
         };
-        self.record_cache_miss_metric();
         if let Some(ref eid) = execution_id {
             tracing::info!(execution_id = %eid, backend = %backend, session_id = %self.engine_session_id, "execution.started");
         }
@@ -607,7 +529,7 @@ impl IotaEngine {
             .context("ACP client missing after warm")?;
         let startup_timing = client.startup_timing();
         match client
-            .prompt_with_cwd_timed_for_execution(&cwd, &effective_prompt, execution_id.as_deref())
+            .execute(&cwd, &effective_prompt, execution_id.as_deref())
             .await
         {
             Ok(mut output) => {
@@ -630,8 +552,8 @@ impl IotaEngine {
                     self.record_runtime_event(&execution_id, event);
                 }
                 if !has_output_event {
-                    // Some backends only return final text. Synthesize an Output event so cache
-                    // replay and event consumers see a consistent shape.
+                    // Some backends only return final text. Synthesize an Output event so
+                    // event consumers see a consistent shape.
                     let output_text = &output.text;
                     tracing::info!(
                         execution_id = execution_id.as_deref(),
@@ -743,19 +665,6 @@ impl IotaEngine {
         self.record_active_sessions();
     }
 
-    /// Return cached output for a previously completed identical request.
-    fn replay_completed_execution(
-        &self,
-        backend: AcpBackend,
-        request_hash: &str,
-    ) -> Option<String> {
-        let store = self.cache_store.as_ref()?;
-        let record = store
-            .find_completed_by_request_hash(&backend.to_string(), request_hash)
-            .ok()??;
-        store.output_text(&record.execution_id).ok().flatten()
-    }
-
     /// Persist the backend-native session id after ACP returns it.
     fn persist_backend_session_id(
         &self,
@@ -853,13 +762,7 @@ impl IotaEngine {
     }
 
     /// Persist or count the runtime side effects represented by one engine event.
-    fn record_runtime_event(&self, execution_id: &Option<String>, event: RuntimeEvent) {
-        // Output events are appended to the execution cache so completed turns can be replayed.
-        if let (Some(eid), RuntimeEvent::Output(_)) = (execution_id.as_ref(), &event) {
-            if let Some(store) = &self.cache_store {
-                let _ = store.append_output(eid, &event);
-            }
-        }
+    fn record_runtime_event(&self, _execution_id: &Option<String>, event: RuntimeEvent) {
         // Token usage is metric-only here; the raw event remains in the ACP output event list.
         if let RuntimeEvent::TokenUsage(ref tu) = event {
             let m = metrics::get();
@@ -896,16 +799,6 @@ impl IotaEngine {
             "warn" => tracing::warn!(backend = %backend, fields = %fields, "{}", event),
             _ => tracing::info!(backend = %backend, fields = %fields, "{}", event),
         }
-    }
-
-    fn record_cache_hit_metric(&self) {
-        metrics::get().cache_hit_count.add(1, &[]);
-        tracing::info!("cache.hit");
-    }
-
-    fn record_cache_miss_metric(&self) {
-        metrics::get().cache_miss_count.add(1, &[]);
-        tracing::debug!("cache.miss");
     }
 
     fn record_active_sessions(&self) {

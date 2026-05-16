@@ -24,11 +24,11 @@ pub async fn run() -> Result<()> {
                 if options.use_daemon && options.show_native {
                     anyhow::bail!("--daemon cannot be combined with --show-native");
                 }
-                if options.use_daemon {
-                    return run_prompt_via_daemon(&options).await;
+                return if options.use_daemon {
+                    run_prompt_via_daemon(&options).await
                 } else {
                     let config = config::read_config()?;
-                    let mut engine = IotaEngine::new_for_session_cwd(
+                    let mut engine = IotaEngine::create_session(
                         config,
                         options.show_native,
                         options.timeout_ms,
@@ -41,7 +41,7 @@ pub async fn run() -> Result<()> {
                         for backend in acp::ALL_BACKENDS {
                             let backend_name = backend.to_string();
                             let config = config::read_config()?;
-                            let mut engine = IotaEngine::new_for_session_cwd(
+                            let mut engine = IotaEngine::create_session(
                                 config,
                                 options.show_native,
                                 options.timeout_ms,
@@ -51,8 +51,7 @@ pub async fn run() -> Result<()> {
                             let prompt = options.prompt.clone();
                             let timing = options.timing;
                             handles.push(spawn(async move {
-                                let result =
-                                    engine.run_prompt_with_timing(backend, cwd, &prompt).await;
+                                let result = engine.run_with_timing(backend, cwd, &prompt).await;
                                 engine.shutdown().await;
                                 (backend_name, result, timing)
                             }));
@@ -80,7 +79,7 @@ pub async fn run() -> Result<()> {
                     } else {
                         // existing single backend logic
                         let result = engine
-                            .run_prompt_with_timing(options.backend, options.cwd, &options.prompt)
+                            .run_with_timing(options.backend, options.cwd, &options.prompt)
                             .await;
                         engine.shutdown().await;
                         let output = result?;
@@ -97,8 +96,8 @@ pub async fn run() -> Result<()> {
                             println!("{}", text);
                         }
                     }
-                    return Ok(());
-                }
+                    Ok(())
+                };
             }
             "context-mcp" => {
                 return context_server::run_stdio();

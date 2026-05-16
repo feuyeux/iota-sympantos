@@ -53,14 +53,14 @@ iota run [backend] [options] <prompt>
        -> --timeout-ms
        -> prompt from args or stdin
   -> config::read_config()
-  -> IotaEngine::new_for_session_cwd(config, show_native, timeout_ms, None)
+  -> IotaEngine::create_session(config, show_native, timeout_ms, None)
        -> EffectiveConfig::from_config()
        -> ContextEngine::from_config()
   -> MemoryStore::open_with_embedding(memory_db, embedding_config)
-       -> CacheStore::open(events.sqlite cache tables)
+       -> CacheStore::open(events.sqlite execution lifecycle tables)
        -> SessionLedger::open(sessions.sqlite)
        -> latest_session_for_cwd() or new UUID session
-  -> IotaEngine::run_prompt_with_timing(backend, cwd, prompt)
+  -> IotaEngine::run_with_timing(backend, cwd, prompt)
   -> print output text
   -> optional log events / timing to stderr
   -> IotaEngine::shutdown()
@@ -70,7 +70,7 @@ iota run [backend] [options] <prompt>
 Engine 内部调用链：
 
 ```text
-IotaEngine::run_prompt_with_optional_execution_id()
+IotaEngine::run()
   -> request_hash(backend, cwd, prompt)
   -> SkillRegistry::load_cached()
        -> workspace/skills
@@ -78,19 +78,6 @@ IotaEngine::run_prompt_with_optional_execution_id()
        -> configured skill_roots
        -> ~/.i6/skills
   -> SkillRegistry::match_skill()
-  -> compute skip_replay:
-       matched skill
-       memory query
-       memory-classifiable prompt
-       explicit iota_memory_write
-  -> if !skip_replay:
-       -> CacheStore::find_completed_by_request_hash()
-       -> CacheStore::output_text()
-       -> return synthetic output on cache hit
-  -> if !skip_replay:
-       -> CacheStore::find_running_by_request_hash()
-       -> poll CacheStore::get_execution() until completed/failed/timeout
-       -> return synthetic output on joined running execution
   -> ensure_session_ledger()
        -> SessionLedger::ensure_session()
        -> SessionLedger::record_backend_session()
@@ -98,8 +85,6 @@ IotaEngine::run_prompt_with_optional_execution_id()
        -> SessionLedger::publish_handoff()
        -> MemoryStore::insert(handoff episodic memory)
   -> CacheStore::begin_execution_with_id()
-       -> idempotency lock
-       -> stale running cleanup
        -> fencing token allocation
   -> record RuntimeEvent::State(started)
   -> extract_structured_memories()
@@ -113,9 +98,8 @@ IotaEngine::run_prompt_with_optional_execution_id()
        -> render_workspace()
             -> [child process] git status --short
   -> ensure_acp_client()
-  -> AcpClient::prompt_with_cwd_timed_for_execution()
+  -> AcpClient::execute()
   -> record RuntimeEvent list
-  -> CacheStore::append_output(Output events only)
   -> CacheStore::finish_execution()
   -> SessionLedger::record_turn()
   -> WorkingMemoryBuffer::push_turn()
@@ -158,7 +142,7 @@ IotaEngine::ensure_acp_client()
 Prompt 链：
 
 ```text
-AcpClient::prompt_with_cwd_timed_for_execution()
+AcpClient::execute()
   -> ensure_session_timed()
        -> session_new_params_with_options()
        -> send_request("session/new")
@@ -261,9 +245,9 @@ Prompt 请求：
 daemon::handle_prompt()
   -> AcpBackend::parse(request.backend)
   -> EnginePool::engine_for(cwd)
-       -> create IotaEngine::new_for_session_cwd(..., Some(cwd)) if absent
+       -> create IotaEngine::create_session(..., Some(cwd)) if absent
   -> optional engine.set_acp_timeout_ms(request.timeout_ms)
-  -> IotaEngine::run_prompt_with_optional_execution_id()
+  -> IotaEngine::run()
        -> same engine + ACP chain as direct run
   -> DaemonPromptResponse { ok, text/error, timing, events }
 ```
@@ -310,7 +294,7 @@ iota / iota tui
   -> tui::run(config)
        -> stdout is_terminal 检查
        -> TuiApp::new()
-            -> IotaEngine::new_for_session_cwd(config, false, DEFAULT_TIMEOUT_MS, current_dir)
+            -> IotaEngine::create_session(config, false, DEFAULT_TIMEOUT_MS, current_dir)
        -> CacheStore::open(default_path)
        -> acp::permission::install_tui_approval_channel()
        -> set panic hook
@@ -335,7 +319,7 @@ tui::run_loop()
   -> when prompt starts:
        -> tokio::spawn(engine task)
             -> IotaEngine::set_stream_output_sender(Some(tx))
-            -> IotaEngine::run_prompt_with_timing()
+            -> IotaEngine::run_with_timing()
             -> IotaEngine::set_stream_output_sender(None)
             -> send result to UI channel
   -> stream_rx receives output chunks
@@ -369,7 +353,7 @@ TUI 边界：
 ## 链路 5：Context Fabric 注入
 
 ```text
-IotaEngine::run_prompt_with_optional_execution_id()
+IotaEngine::run()
   -> MemoryStore::recall_buckets_with_thresholds()
        -> identity: semantic/identity/user
        -> preference: semantic/preference/user
@@ -876,7 +860,6 @@ CacheStore：
 ```text
 CacheStore::open()
   -> cache_executions table
-  -> cache_outputs table
 
 begin_execution_with_id()
   -> transaction immediate
@@ -885,16 +868,8 @@ begin_execution_with_id()
   -> fencing token allocation
   -> insert running execution
 
-append_output()
-  -> persist Output events only for replay
-
 finish_execution()
   -> update status
-
-find_completed_by_request_hash()
-find_running_by_request_hash()
-output_text()
-  -> replay and join-running support
 ```
 
 SessionLedger：
@@ -954,7 +929,7 @@ embed(content)
 | `main.rs` | Tokio 入口 | 入口总览 |
 | `cli/mod.rs` | 命令分发、daemon autostart、bench、logs/trace、native、skill | 1,3,4,12 |
 | `config.rs` | `~/.i6/nimia.yaml`、EffectiveConfig、backend command/env、MCP/session options、embedding config | 1,2,3,10 |
-| `engine.rs` | 核心编排、replay/join、memory、skill、context、ACP pool、store 写回 | 1,3,4,5,6,7 |
+| `engine.rs` | 核心编排、memory、skill、context、ACP pool、store 写回 | 1,3,4,5,6,7 |
 | `acp/mod.rs` | ACP backend、子进程、JSON-RPC、prompt event loop | 1,2 |
 | `acp/session.rs` | session/new 和 mcpServers | 2,10 |
 | `acp/wire.rs` | ACP line read/parse/id/error | 2 |
@@ -980,7 +955,7 @@ embed(content)
 | `native/mod.rs` | 原生文件投影 | 12 |
 | `store/memory.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
 | `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
-| `store/cache.rs` | execution replay / join-running / dedupe | 1,3,4,12 |
+| `store/cache.rs` | execution lifecycle | 1,3,4,12 |
 | `store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
 | `store/approval.rs` | approval 事件和风险分类 | 11 |
 | `utils.rs` | 时间、摘要、lock recovery | 多条链路 |

@@ -27,24 +27,20 @@ ACP update、complete、permission、usage、tool 和 error 会被归一化为 `
 | 指标 | 含义 |
 |---|---|
 | `iota.execution.count` | execution 结束计数，按 status 记录 |
-| `iota.cache.hit.count` / `iota.cache.miss.count` | CacheStore replay/join 命中情况 |
 | `iota.prompt.queued` | TUI prompt 队列长度变化 |
 | `iota.token.*` | token usage 事件和 input/output/total token |
 | `iota.prompt.duration` / `iota.init.duration` | prompt 与 ACP init 耗时直方图 |
 
 如需导出 OTLP，使用 `telemetry::init_otel()` 配置 trace、metric、log exporter；默认 CLI 路径仍可只使用 stderr/file tracing。
 
-## Execution Cache
+## Execution Store
 
-`CacheStore` 位于 `store/cache.rs`，当前只负责 execution replay / dedupe：
+`CacheStore` 位于 `store/cache.rs`，当前只负责 execution lifecycle：
 
 ```text
-run_prompt_with_optional_execution_id()
+run()
   -> request_hash()
-  -> find_completed_by_request_hash()  # replay
-  -> find_running_by_request_hash()    # join in-flight
-  -> begin_execution_with_id()         # lock + fencing token
-  -> append_output(OutputEvent)        # only output events for replay
+  -> begin_execution_with_id()         # execution id + fencing token
   -> finish_execution()
 ```
 
@@ -53,5 +49,5 @@ run_prompt_with_optional_execution_id()
 ## 日志边界
 
 - 工程日志：`tracing` / file appender / stderr layer，用于排查程序自身行为。
-- 运行事件：`RuntimeEvent`，用于 CLI/TUI 展示和部分 replay。
+- 运行事件：`RuntimeEvent`，用于 CLI/TUI 展示。
 - 外部观测：Loki/Jaeger 查询命令只读取外部服务，不依赖本地 SQLite 聚合。

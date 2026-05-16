@@ -925,7 +925,7 @@ async fn run_loop(
                 // Lock the engine for the duration of this call.
                 let mut engine = engine_arc.lock().await;
                 engine.set_stream_output_sender(Some(stream_tx));
-                let result = engine.run_prompt_with_timing(backend, cwd, &prompt).await;
+                let result = engine.run_with_timing(backend, cwd, &prompt).await;
                 engine.set_stream_output_sender(None);
                 let _ = engine_tx2
                     .send(result.map(|output| (backend, output)))

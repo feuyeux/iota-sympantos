@@ -4,8 +4,6 @@ use std::sync::OnceLock;
 
 pub struct IotaMetrics {
     pub execution_count: Counter<u64>,
-    pub cache_hit_count: Counter<u64>,
-    pub cache_miss_count: Counter<u64>,
     pub prompt_queued: UpDownCounter<i64>,
     pub token_usage_count: Counter<u64>,
     pub token_input: Counter<u64>,
@@ -27,16 +25,6 @@ pub fn get() -> &'static IotaMetrics {
                 .u64_counter("iota.execution.count")
                 .with_unit("{execution}")
                 .with_description("Total execution count by status")
-                .build(),
-            cache_hit_count: meter
-                .u64_counter("iota.cache.hit.count")
-                .with_unit("{hit}")
-                .with_description("Cache hit count")
-                .build(),
-            cache_miss_count: meter
-                .u64_counter("iota.cache.miss.count")
-                .with_unit("{miss}")
-                .with_description("Cache miss count")
                 .build(),
             prompt_queued: meter
                 .i64_up_down_counter("iota.prompt.queued")
