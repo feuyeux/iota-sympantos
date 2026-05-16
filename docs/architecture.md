@@ -11,13 +11,18 @@ src/
 ├── main.rs                  # binary 入口，注册模块并进入 cli::run()
 ├── cli/
 │   └── mod.rs               # 命令分发、daemon autostart、bench、logs/trace、native、skill
-├── tui.rs                   # ratatui 主循环、终端生命周期、engine task、stream/approval channel
 ├── tui/
 │   ├── input.rs             # 多行输入、Unicode 光标、历史搜索、kill/yank、word motion
 │   ├── markdown.rs          # Markdown 到 ratatui Line 渲染
-│   ├── status_bar.rs        # 底部状态栏
-│   ├── theme.rs             # TUI 主题
-│   └── state.rs             # 对话、历史和观测展示状态
+│   ├── scrollback.rs        # 终端内联滚动区（无 alt-screen，原生滚动支持）
+│   ├── status_bar.rs        # 底部状态栏（backend · model / 快捷键 / 观测状态）
+│   ├── render.rs            # 主渲染器（history/composer/overlay/state）
+│   ├── state.rs             # 对话、历史和观测展示状态
+│   ├── loop.rs              # Tokio event loop（turn dispatch、stream、approval）
+│   ├── events.rs            # TUI 事件定义（ApprovalRequest、observability）
+│   ├── terminal_lifecycle.rs # raw mode、panic hook、alternate screen guard
+│   └── theme.rs             # TUI 主题
+├── tui.rs                   # TUI 模块入口，导出 `run()` bootstrap
 ├── engine.rs                # IotaEngine 编排、ACP client pool、上下文、skill、store 写回
 ├── acp/
 │   ├── mod.rs               # ACP backend enum、子进程生命周期、JSON-RPC 请求/响应、prompt loop
@@ -51,7 +56,9 @@ src/
 │   ├── cache.rs             # execution lifecycle
 │   ├── ledger.rs            # session、backend session、turn、handoff
 │   └── memory.rs            # memory taxonomy、FTS、vector/hybrid search、recall buckets
-├── runtime_event.rs         # 统一 RuntimeEvent
+├── runtime_event/
+│   ├── mod.rs               # 统一 RuntimeEvent（Output/State/Log/ToolCall/ToolResult/Error/Extension/TokenUsage/Memory/ApprovalRequest/ApprovalDecision）
+│   └── tests.rs             # 事件归一化测试
 └── utils.rs                 # 时间戳、摘要、poison lock recovery
 ```
 
@@ -118,9 +125,14 @@ src/
 | `tui.rs` | 终端生命周期、事件循环、prompt 队列、后台 engine task、流式输出、approval 浮层、pager/help/quit overlay | `engine`, `acp::permission`, `tui/*` |
 | `tui/input.rs` | 多行编辑、历史、搜索、词移动和 kill buffer | 无项目级依赖 |
 | `tui/markdown.rs` | Markdown 渲染为 ratatui 文本行 | 无项目级依赖 |
+| `tui/scrollback.rs` | 终端内联滚动区管理（无 alt-screen，原生终端滚动/copy/selection） | 无项目级依赖 |
 | `tui/status_bar.rs` | backend/model/快捷键/观测状态栏 | `acp`, `tui::state` |
-| `tui/theme.rs` | ratatui 颜色和样式 | 无项目级依赖 |
+| `tui/render.rs` | 主渲染器（history/composer/overlay/state） | `tui::state`, `tui::markdown` |
 | `tui/state.rs` | 对话历史和观测展示模型 | 无项目级依赖 |
+| `tui/loop.rs` | Tokio event loop（turn dispatch、stream、approval） | `tui`, `engine` |
+| `tui/events.rs` | TUI 事件定义（ApprovalRequest、observability） | `acp::permission` |
+| `tui/terminal_lifecycle.rs` | raw mode、panic hook、alternate screen guard | 无项目级依赖 |
+| `tui/theme.rs` | ratatui 颜色和样式 | 无项目级依赖 |
 
 Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngine` 或 daemon client API。
 
@@ -147,7 +159,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 | `mcp/server.rs` | `iota-context` MCP stdio server；JSON-RPC 协议适配，工具执行委托 `tool_dispatch` | `mcp::tool_dispatch`, `runtime_event`, `memory`, `store::ledger`, `skill` |
 | `mcp/router.rs` | 拦截 ACP 侧 `tools/call` / `mcp/tools/call` / `mcp/tool_call`；委托 `tool_dispatch` 执行 iota 工具，拒绝外部工具 | `mcp::tool_dispatch`, `memory`, `store::ledger`, `skill`, `skill::fun_server` |
 | `mcp/tool_dispatch.rs` | 共享工具派发逻辑：`ToolContext` 依赖注入、`dispatch_tool()` 统一入口、所有解析器和验证器 | `memory`, `store::ledger`, `skill` |
-| `runtime_event.rs` | 把 ACP update、complete、permission、usage、tool、error 统一为 `RuntimeEvent` | `acp::extract_text` |
+| `runtime_event/mod.rs` | 把 ACP update、complete、permission、usage、tool、error 统一为 `RuntimeEvent` | `acp::extract_text` |
 
 协议层只做协议翻译和安全路由，不依赖 CLI/TUI/daemon/engine。
 
@@ -225,13 +237,26 @@ iota / iota tui
   -> tui::run()
   -> TuiApp::new(IotaEngine)
   -> install_tui_approval_channel()
-  -> terminal guard + panic hook + raw mode
-  -> event loop
-       -> Composer handles keys
-       -> submit creates background engine task
-       -> ACP chunks stream over Tokio mpsc
-       -> permission request appears as approval overlay
-       -> render history/composer/status/pager/help/approval
+  -> set panic hook
+  -> enable raw mode
+  -> inline viewport (5 rows: spinner + composer + status bar)
+  -> TerminalGuard owns cleanup
+  -> loop::run_loop()
+       -> crossterm EventStream
+       -> frame tick limiter ~30 FPS（throttled）
+       -> keyboard/mouse/resize events
+       -> Composer::handle_key()
+       -> TuiApp::submit()
+       -> tokio::spawn(engine task)
+            -> IotaEngine::set_stream_output_sender(Some(tx))
+            -> IotaEngine::run_with_timing()
+            -> stream chunks to stream_rx
+       -> approval_rx receives ApprovalRequest
+       -> render()
+            -> header/history/composer/status
+            -> markdown::render()
+            -> status_bar::render()
+            -> overlays: help / quit confirm / approval
 ```
 
 ### Context 和 memory 写回
@@ -326,6 +351,7 @@ Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 ```text
 Output
 State
+Log
 ToolCall
 ToolResult
 Error
@@ -336,7 +362,7 @@ ApprovalRequest
 ApprovalDecision
 ```
 
-`RuntimeEvent` 随 `AcpPromptOutput.events` 返回；engine 只把 execution lifecycle 和 timing 写入本地 store。
+`Log` 事件携带结构化字段（ts、level、target、event、tool_name、latency_ms 等），用于 CLI `--log-events` 输出。`RuntimeEvent` 随 `AcpPromptOutput.events` 返回；engine 只把 execution lifecycle 和 timing 写入本地 store。
 
 ### Memory taxonomy
 

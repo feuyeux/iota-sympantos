@@ -308,27 +308,29 @@ iota / iota tui
 事件循环：
 
 ```text
-tui::run_loop()
-  -> crossterm EventStream
-  -> frame tick limiter around 120 FPS
-  -> keyboard/mouse/resize events
-  -> Composer::handle_key()
-       -> submit/newline/history/search/word motion/kill/yank
-  -> TuiApp::submit()
-       -> enqueue or start prompt
-  -> when prompt starts:
-       -> tokio::spawn(engine task)
-            -> IotaEngine::set_stream_output_sender(Some(tx))
-            -> IotaEngine::run_with_timing()
-            -> IotaEngine::set_stream_output_sender(None)
-            -> send result to UI channel
-  -> stream_rx receives output chunks
-  -> approval_rx receives ApprovalRequest
-  -> render()
-       -> header/history/composer/status
-       -> markdown::render()
-       -> status_bar::render()
-       -> overlays: help / pager / quit confirm / approval
+tui::run()
+  -> scrollback::insert_lines(banner_lines)     # emit banner to terminal scrollback
+  -> loop::run_loop()
+       -> crossterm EventStream
+       -> frame tick limiter ~30 FPS
+       -> keyboard/mouse/resize events
+       -> Composer::handle_key()
+            -> submit/newline/history/search/word motion/kill/yank
+       -> TuiApp::submit()
+            -> enqueue or start prompt
+       -> when prompt starts:
+            -> tokio::spawn(engine task)
+                 -> IotaEngine::set_stream_output_sender(Some(tx))
+                 -> IotaEngine::run_with_timing()
+                 -> IotaEngine::set_stream_output_sender(None)
+                 -> send result to UI channel
+       -> stream_rx receives output chunks
+       -> approval_rx receives ApprovalRequest
+       -> render()
+            -> header/history/composer/status
+            -> markdown::render()
+            -> status_bar::render()
+            -> overlays: help / pager / quit confirm / approval
 ```
 
 Approval 浮层：
@@ -939,12 +941,17 @@ embed(content)
 | `daemon/mod.rs` | daemon TCP server、warm/prompt、graceful shutdown | 3 |
 | `daemon/pool.rs` | 按 cwd 复用 IotaEngine | 3 |
 | `daemon/proto.rs` | daemon wire types | 3 |
-| `tui.rs` | TUI 主循环、engine task、stream/approval channel | 4 |
+| `tui/mod.rs` | TUI 模块入口，`run()` bootstrap | 4 |
 | `tui/input.rs` | 输入编辑器 | 4 |
 | `tui/markdown.rs` | Markdown 渲染 | 4 |
+| `tui/scrollback.rs` | 终端内联滚动区 | 4 |
 | `tui/status_bar.rs` | 状态栏 | 4 |
-| `tui/theme.rs` | TUI 样式 | 4 |
+| `tui/render.rs` | 主渲染器 | 4 |
 | `tui/state.rs` | 对话和观测状态 | 4 |
+| `tui/loop.rs` | Tokio event loop | 4 |
+| `tui/events.rs` | TUI 事件定义 | 4 |
+| `tui/terminal_lifecycle.rs` | 终端生命周期 | 4 |
+| `tui/theme.rs` | TUI 样式 | 4 |
 | `context/mod.rs` | context capsule、WorkingMemoryBuffer、workspace summary | 5 |
 | `mcp/server.rs` | iota-context MCP server（协议适配，委托 tool_dispatch） | 6,8 |
 | `mcp/tool_dispatch.rs` | 共享工具派发逻辑（server 和 router 共用） | 6,8,11 |

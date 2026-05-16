@@ -30,7 +30,11 @@
 - `src/engine.rs` — ACP 运行时编排
 - `src/acp/mod.rs` — ACP 协议交互
 - `src/mcp/server.rs` — iota-context MCP sidecar
-- `src/tui.rs` — TUI 主循环
+- `src/tui/mod.rs` — TUI 主循环入口
+- `src/tui/loop.rs` — Tokio event loop（turn dispatch、stream、approval）
+- `src/tui/input.rs` — 多行输入编辑器
+- `src/tui/render.rs` — 主渲染器
+- `src/tui/status_bar.rs` — 状态栏
 
 ### 2. 启动调试
 
@@ -129,5 +133,6 @@ Received event: {event:?}
 ACP 后端是外部进程（npx 启动），无法直接断点。调试 ACP 交互请在以下位置设置断点：
 
 - `src/acp/wire.rs` — 读取/解析 JSON-RPC 消息
-- `src/acp/mod.rs` — 发送请求和处理响应
+- `src/acp/stream_reader.rs` — 流式事件读取
+- `src/acp/client.rs` — 发送请求和处理响应
 - `src/acp/session.rs` — session 参数构建

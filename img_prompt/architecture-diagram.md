@@ -26,13 +26,18 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   Files:
   - `src/main.rs`
   - `src/cli/mod.rs`
-  - `src/tui.rs`
-  - `src/tui/composer.rs`
-  - `src/tui/markdown.rs`
-  - `src/tui/state.rs`
-  - `src/tui/status_bar.rs`
-  - `src/tui/theme.rs`
-  - `src/config.rs`
+  - `src/tui/mod.rs` (TUI module entry, `run()` bootstrap)
+  - `src/tui/input.rs` (multi-line editor, history, word motion, kill/yank)
+  - `src/tui/markdown.rs` (Markdown → ratatui Line rendering)
+  - `src/tui/scrollback.rs` (inline viewport, native terminal scrollback)
+  - `src/tui/status_bar.rs` (backend · model / hotkeys / observability status)
+  - `src/tui/render.rs` (main renderer: history/composer/overlay/state)
+  - `src/tui/state.rs` (conversation and observability state)
+  - `src/tui/loop.rs` (Tokio event loop: turn dispatch, stream, approval)
+  - `src/tui/events.rs` (TUI event definitions)
+  - `src/tui/terminal_lifecycle.rs` (raw mode, panic hook, alternate screen guard)
+  - `src/tui/theme.rs` (TUI color and style)
+  - `src/config/mod.rs`
   - `src/native/mod.rs`
   - `src/utils.rs`
 
@@ -41,11 +46,12 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   - `main.rs -> cli::run()`
   - Default no-args path enters TUI
   - `iota run/check/bench/logs/trace/native/skill`
-  - TUI background engine task
-  - streaming output
-  - approval overlay
+  - TUI: inline 5-row viewport (no alt-screen), 30 FPS tick throttled loop
+  - banner printed to terminal scrollback on startup
+  - background engine task with streaming output
+  - approval overlay via TUI channel
   - pager/help/quit overlays
-  - prompt queue while engine is running
+  - prompt queue while engine is running (Tab to queue)
 
   Column 2: Daemon TCP Plane
   Files:
@@ -66,8 +72,14 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
 
   Column 3: Engine Core
   Files:
-  - `src/engine.rs`
-  - `src/runtime_event.rs`
+  - `src/engine/mod.rs`
+  - `src/engine/prompt.rs`
+  - `src/engine/memory_ops.rs`
+  - `src/engine/session_ledger.rs`
+  - `src/engine/telemetry.rs`
+  - `src/engine/tests.rs`
+  - `src/runtime_event/mod.rs`
+  - `src/runtime_event/tests.rs`
 
   Show:
   - `IotaEngine`
@@ -82,24 +94,25 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   - ACP invocation
   - CacheStore writeback
   - OTel metrics / logs / spans
-  - normalized `RuntimeEvent`
+  - normalized `RuntimeEvent` (Output / State / Log / ToolCall / ToolResult / Error / Extension / TokenUsage / Memory / ApprovalRequest / ApprovalDecision)
 
   Column 4: Context Fabric + Memory
   Files:
-  - `src/context/mod.rs`
-  - `src/context/server.rs`
+  - `src/context/mod.rs` (ContextEngine, WorkingMemoryBuffer, workspace summary)
+  - `src/mcp/server.rs` (iota-context MCP stdio sidecar)
   - `src/store/memory.rs`
   - `src/store/embedding.rs`
 
   Show:
   - `ContextEngine`
   - `<iota-context>` capsule
-  - `DialogueBuffer`
+  - `WorkingMemoryBuffer`
   - workspace summary from `git status --short`
   - memory tools prompt
   - skill index
   - handoff
   - recall buckets
+  - trivial prompt fast path (minimal capsule for short prompts < 80 chars)
   - six memory taxonomy buckets:
     1. identity
     2. preference
@@ -120,11 +133,15 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   Column 5: ACP Adapter
   Files:
   - `src/acp/mod.rs`
+  - `src/acp/client.rs`
+  - `src/acp/stream_reader.rs`
   - `src/acp/wire.rs`
   - `src/acp/session.rs`
   - `src/acp/permission.rs`
-  - `src/acp/session_tests.rs`
-  - `src/acp/wire_tests.rs`
+  - `src/acp/message.rs`
+  - `src/acp/types.rs`
+  - `src/acp/parser.rs`
+  - `src/acp/backend.rs`
 
   Show:
   - `AcpClient`
@@ -149,7 +166,7 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
 
   Column 6: Backend Processes
   Show five backend rows:
-  - Claude Code, command `npx`, aliases `claude`, `claudecode`
+  - Claude Code, command `npx`, aliases `claude`, `claude-code`, `claudecode`
   - Codex, command `npx`, alias `codex`
   - Gemini CLI, command `npx`, aliases `gemini`, `gemini-cli`
   - Hermes Agent, command `hermes acp`, alias `hermes`
@@ -170,10 +187,12 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   - `src/skill/mod.rs`
   - `src/skill/runner.rs`
   - `src/skill/cache.rs`
-  - `src/skill/fun_server.rs`
+  - `src/skill/fun.rs` (iota-fun MCP stdio server, renamed from sandbox_executor)
+  - `src/skill/fun_tests.rs`
   - `src/mcp/mod.rs`
   - `src/mcp/client.rs`
   - `src/mcp/router.rs`
+  - `src/mcp/tool_dispatch.rs`
 
   Show:
   - `SkillRegistry`
@@ -226,13 +245,13 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   - `src/store/cache.rs`
   - `src/store/memory.rs`
   - `src/store/embedding.rs`
-  - `src/store/approval.rs`
+  - `src/store/approvals.rs` (renamed from approval.rs)
+  - `src/store/approvals_tests.rs`
   - `src/store/ledger.rs`
   - `src/telemetry/mod.rs`
-  - `src/telemetry/console.rs`
-  - `src/telemetry/logs.rs`
+  - `src/telemetry/stderr.rs` (renamed from console.rs)
   - `src/telemetry/metrics.rs`
-  - `src/telemetry/spans.rs`
+  - `src/telemetry/tests.rs`
 
   Show store blocks:
   - `CacheStore`
@@ -266,7 +285,7 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   - `Local logs`
     - stderr tracing layer
     - daily files under `~/.i6/logs/`
-    - controlled by `IOTA_LOG_FILE`
+    - controlled by `IOTA_LOG_DIR`
   - `OpenTelemetry`
     - default endpoint `http://localhost:4317`
     - `OTEL_ENABLED=false` disables export
@@ -284,6 +303,9 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
   Do not show Promtail or old SQLite/EventStore metrics pipeline.
   Do not show Docker mounting `~/.i6`.
   Do not show project-level config discovery. Configuration comes only from `~/.i6/nimia.yaml`.
+  Do not show `telemetry/console.rs` — it is now `telemetry/stderr.rs`.
+  Do not show `context/server.rs` — that functionality moved to `mcp/server.rs`.
+  Do not show `skill/sandbox_executor.rs` — it is now `skill/fun.rs`.
 
   Flow arrows:
   - Pink arrows from Entry / TUI to Engine
@@ -326,4 +348,4 @@ Use `gpt-image-2-style-library`: `technical architecture infographic`, `clean bi
 
   Negative prompt:
   Unreadable tiny text, random fake file paths, obsolete modules, `src/store/events.rs`, single `context.db`, Promtail, project-level config discovery, Hermes home override, excessive decorative art, messy arrows, 3D render,
-  dark background, neon cyberpunk, stock cloud icons, blurry labels, incorrect backend names, Korean text, non-Chinese non-English labels.
+  dark background, neon cyberpunk, stock cloud icons, blurry labels, incorrect backend names, Korean text, non-Chinese non-English labels, `telemetry/console.rs`, `context/server.rs`, `skill/sandbox_executor.rs`.
