@@ -9,7 +9,7 @@ use crate::acp::{AcpBackend, AcpPromptOutput};
 
 use super::events::LoopSignal;
 use super::state::{ConversationEntry, ObservabilityMeta};
-use super::{ApprovalRequest, Terminal, TuiApp, TurnMessage};
+use super::{ApprovalRequest, Terminal, TuiApp, TurnMessage, scrollback};
 
 pub(super) async fn run_loop(
     terminal: &mut Terminal,
@@ -34,6 +34,7 @@ pub(super) async fn run_loop(
     let mut pending_prompt: Option<(AcpBackend, PathBuf, String)> = None;
 
     loop {
+        app.run_loop_flush_pending_scrollback(terminal);
         run_loop_draw_if_due(terminal, app, &mut last_draw, MIN_FRAME_MS)?;
         app.run_loop_spawn_pending_prompt_if_any(&mut pending_prompt, &engine_tx);
 
@@ -138,7 +139,7 @@ impl TuiApp {
         let tool_name = req.tool_name.clone();
         self.overlay = super::Overlay::None;
         self.pending_approval = Some(req);
-        self.history.push(ConversationEntry::SystemNotice {
+        self.record_entry(ConversationEntry::SystemNotice {
             text: format!("Approval requested: {}", tool_name),
         });
     }
@@ -149,14 +150,14 @@ impl TuiApp {
             Ok((backend, output)) => {
                 let observability = observability_from_output(&output);
                 self.latest_observability = Some(observability.clone());
-                self.history.push(ConversationEntry::AssistantMessage {
+                self.record_entry(ConversationEntry::AssistantMessage {
                     backend,
                     text: output.text,
                     observability: Some(observability),
                 });
             }
             Err(err) => {
-                self.history.push(ConversationEntry::SystemNotice {
+                self.record_entry(ConversationEntry::SystemNotice {
                     text: format!("Error: {}", err),
                 });
             }
@@ -165,10 +166,9 @@ impl TuiApp {
 
         if let Some(queued) = self.queued_prompt.take() {
             self.record_queued_prompt_delta(-1);
-            self.history.push(ConversationEntry::UserMessage {
+            self.record_entry(ConversationEntry::UserMessage {
                 text: queued.clone(),
             });
-            self.history.scroll_to_bottom();
             self.running_turn = true;
             self.turn_started_at = Some(std::time::Instant::now());
             self.send_turn_prompt(self.active_backend, self.cwd.clone(), queued);
@@ -182,7 +182,6 @@ impl TuiApp {
             .set(self.streaming_version.get().wrapping_add(1));
         self.streaming_backend = None;
         self.turn_started_at = None;
-        self.history.scroll_to_bottom();
     }
 
     async fn run_loop_teardown_turn_and_engine(&mut self) {
@@ -194,13 +193,19 @@ impl TuiApp {
 
     async fn run_loop_handle_terminal_event(&mut self, event: CEvent) -> LoopSignal {
         match event {
-            CEvent::Mouse(mouse) => {
-                self.on_mouse_event(mouse);
-                LoopSignal::Continue
-            }
             CEvent::Key(key) => self.on_key_event(key).await,
             CEvent::Resize(_, _) => LoopSignal::Continue,
             _ => LoopSignal::Continue,
+        }
+    }
+
+    fn run_loop_flush_pending_scrollback(&mut self, terminal: &mut Terminal) {
+        if self.help_requested {
+            let _ = scrollback::insert_help(terminal);
+            self.help_requested = false;
+        }
+        for entry in self.pending_scrollback_entries.drain(..) {
+            let _ = scrollback::insert_entry(terminal, &entry);
         }
     }
 }
@@ -233,7 +238,7 @@ mod tests {
     fn approval_request_closes_existing_overlay_so_prompt_is_visible() {
         let mut app = TuiApp::new(NimiaConfig::default()).unwrap();
         let (reply, _rx) = oneshot::channel();
-        app.overlay = Overlay::Help;
+        app.overlay = Overlay::QuitConfirm;
 
         app.run_loop_handle_approval_request(ApprovalRequest {
             tool_name: "shell".to_string(),

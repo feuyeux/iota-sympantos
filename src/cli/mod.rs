@@ -4,7 +4,7 @@ use crate::acp;
 use crate::config;
 use crate::daemon;
 use crate::mcp::server as mcp_server;
-use crate::skill::sandbox_executor;
+use crate::skill::fun;
 use crate::telemetry::{self, TelemetryConfig};
 use crate::tui;
 
@@ -42,7 +42,7 @@ pub async fn run() -> Result<()> {
                 return mcp_server::run_stdio();
             }
             "fun-mcp" => {
-                return sandbox_executor::run_stdio();
+                return fun::run_stdio();
             }
             "native-materialize" => {
                 return memory_cmd::run_native_materialize(&args[1..]);

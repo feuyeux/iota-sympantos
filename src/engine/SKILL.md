@@ -29,7 +29,7 @@ Core orchestration layer that manages ACP client pools, executes prompt turns, a
 | `memory_ops` | Memory extraction, classification, recall, and injection |
 | `prompt` | Core prompt execution flow with early-return paths |
 | `session_ledger` | Session/turn persistence and backend handoff records |
-| `telemetry_recorder` | Runtime event recording into traces, logs, and metrics |
+| `telemetry` | Runtime event recording into traces, logs, and metrics |
 
 ## Key Types
 

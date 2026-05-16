@@ -199,5 +199,5 @@ pub fn default_decision(dimensions: &[ApprovalDimension]) -> ApprovalPolicyDecis
 }
 
 #[cfg(test)]
-#[path = "approval_tests.rs"]
+#[path = "approvals_tests.rs"]
 mod tests;

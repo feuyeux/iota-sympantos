@@ -461,5 +461,5 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 }
 
 #[cfg(test)]
-#[path = "sandbox_executor_tests.rs"]
+#[path = "fun_tests.rs"]
 mod tests;

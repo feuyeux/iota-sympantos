@@ -9,9 +9,9 @@ use crate::acp::AcpBackend;
 use super::theme;
 
 const KEY_HINTS: &[(&str, &str)] = &[
-    ("↑↓", "scroll"),
+    ("Wheel/Trackpad", "scroll"),
+    ("Drag", "select"),
     ("Ctrl+B", "backend"),
-    ("Ctrl+T", "pager"),
     ("?", "help"),
     ("Ctrl+C", "quit"),
 ];
@@ -20,6 +20,7 @@ const KEY_HINTS: &[(&str, &str)] = &[
 pub fn render(
     frame: &mut Frame,
     area: Rect,
+    cwd: &std::path::Path,
     backend: AcpBackend,
     model: Option<&str>,
     is_searching: bool,
@@ -28,10 +29,10 @@ pub fn render(
     has_queued: bool,
     quit_confirm: bool,
     latest_observability: Option<&ObservabilityMeta>,
-    scrolled_up: bool,
 ) {
     let model_str = model.unwrap_or("—");
-    let left_text = format!(" {} · {} ", backend, model_str);
+    let cwd_str = cwd.display().to_string();
+    let left_text = format!(" {}  {} · {} ", cwd_str, backend, model_str);
     let left = Span::styled(left_text.clone(), theme::status_bar_style());
 
     // Middle context hint
@@ -39,11 +40,6 @@ pub fn render(
         Some(Span::styled(
             "  Press Ctrl+C again to quit",
             theme::tool_result_err_style(),
-        ))
-    } else if scrolled_up {
-        Some(Span::styled(
-            "  [Ctrl+D or End to jump to bottom]",
-            theme::system_notice_style(),
         ))
     } else if is_searching {
         let q = search_query.unwrap_or("");

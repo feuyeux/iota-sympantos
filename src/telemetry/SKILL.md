@@ -25,7 +25,7 @@ OpenTelemetry integration providing OTLP trace/log/metric export, stderr logging
 
 | Module | Purpose |
 |--------|---------|
-| `console` | Console log formatting and filtering |
+| `stderr` | Console log formatting and filtering |
 | `metrics` | Runtime metrics: execution count, queued prompts, token counts, prompt/init duration |
 | `mod` | OTLP trace/log/metric provider setup and shutdown guard |
 

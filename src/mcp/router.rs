@@ -85,12 +85,12 @@ fn route_via_dispatch(name: &str, arguments: &Value) -> Result<Value> {
 }
 
 fn route_fun_tool(name: &str, arguments: &Value) -> Result<Value> {
-    let text = crate::skill::sandbox_executor::run_tool(name, arguments)?;
+    let text = crate::skill::fun::run_tool(name, arguments)?;
     Ok(json!({"content":[{"type":"text","text":text}],"isError":false}))
 }
 
 fn is_fun_tool(name: &str) -> bool {
-    crate::skill::sandbox_executor::TOOLS
+    crate::skill::fun::TOOLS
         .iter()
         .any(|(tool, _)| *tool == name)
 }

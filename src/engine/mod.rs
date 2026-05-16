@@ -13,7 +13,7 @@ use crate::skill::SkillCache;
 use crate::store::cache::CacheStore;
 use crate::store::ledger::SessionLedger;
 
-mod telemetry_recorder;
+mod telemetry;
 mod session_ledger;
 mod memory_ops;
 mod prompt;

@@ -37,8 +37,6 @@ pub enum ConversationEntry {
 pub struct HistoryState {
     pub entries: VecDeque<ConversationEntry>,
     max_entries: usize,
-    /// How many rendered rows are scrolled up from the bottom (0 = stick to bottom).
-    pub scroll_offset: usize,
 }
 
 impl HistoryState {
@@ -46,7 +44,6 @@ impl HistoryState {
         Self {
             entries: VecDeque::new(),
             max_entries,
-            scroll_offset: 0,
         }
     }
 
@@ -55,25 +52,5 @@ impl HistoryState {
         while self.entries.len() > self.max_entries {
             self.entries.pop_front();
         }
-        // If user was at the bottom, keep them there.
-        if self.scroll_offset == 0 {
-            // stay at bottom — nothing to do
-        }
-    }
-
-    pub fn scroll_up(&mut self, rows: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_add(rows);
-    }
-
-    pub fn scroll_down(&mut self, rows: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(rows);
-        // Snap to bottom when close enough — prevents getting stuck near-bottom
-        if self.scroll_offset <= rows {
-            self.scroll_offset = 0;
-        }
-    }
-
-    pub fn scroll_to_bottom(&mut self) {
-        self.scroll_offset = 0;
     }
 }

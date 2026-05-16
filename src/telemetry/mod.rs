@@ -1,4 +1,4 @@
-pub mod console;
+pub mod stderr;
 pub mod metrics;
 
 use anyhow::Result;
@@ -118,7 +118,7 @@ pub fn init(config: &TelemetryConfig) -> Result<OtelGuard> {
     let otel_log_layer =
         opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logger_provider);
     let filter = logging_filter();
-    let stderr_layer = console::stderr_layer();
+    let stderr_layer = stderr::stderr_layer();
 
     tracing_subscriber::registry()
         .with(filter)

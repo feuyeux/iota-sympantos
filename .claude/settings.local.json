@@ -3,7 +3,10 @@
     "allow": [
       "mcp__iota-context__iota_memory_write",
       "mcp__iota-context__iota_memory_search",
-      "Bash(curl -s \"wttr.in/Beijing?format=%l:+%c+%t+%h+%w&lang=zh\")"
+      "Bash(curl -s \"wttr.in/Beijing?format=%l:+%c+%t+%h+%w&lang=zh\")",
+      "WebSearch",
+      "WebFetch(domain:weather.com.cn)",
+      "WebFetch(domain:www.weather.com.cn)"
     ]
   }
 }

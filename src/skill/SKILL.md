@@ -6,7 +6,7 @@ triggers:
   - SkillRegistry
   - SkillExecution
   - SkillExecutionMode
-  - sandbox_executor
+  - fun
   - iota-fun
   - skill pull
 ---
@@ -28,7 +28,7 @@ Loads `.md`/`.yaml` skill manifests, matches triggers against prompts, and execu
 |--------|---------|
 | `cache` | HTTP/local skill fetching and caching |
 | `runner` | MCP-mode skill execution and template rendering |
-| `sandbox_executor` | `iota-fun` MCP server — 7-language execution (C++, Go, Java, Python, Rust, TypeScript, Zig) |
+| `fun` | `iota-fun` MCP server — 7-language execution (C++, Go, Java, Python, Rust, TypeScript, Zig) |
 
 ## Key Types
 

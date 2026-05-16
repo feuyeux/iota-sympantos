@@ -6,9 +6,10 @@
 //!   composer  3 rows — single-line input with history recall
 //!   status    1 row  — bottom-left: backend · model  /  right: key hints
 
-mod composer;
+mod input;
 mod events;
-mod loop_runtime;
+mod scrollback;
+mod r#loop;
 mod markdown;
 mod render;
 mod state;
@@ -21,10 +22,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use crossterm::event::EnableMouseCapture;
-use crossterm::execute;
-use crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
+use crossterm::terminal::enable_raw_mode;
 use ratatui::backend::CrosstermBackend;
+use ratatui::{TerminalOptions, Viewport};
 use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::task::JoinHandle;
 
@@ -33,7 +33,7 @@ use crate::acp::{ALL_BACKENDS, AcpBackend};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
 use crate::telemetry::metrics;
-use composer::Composer;
+use input::Composer;
 use render::observability_line;
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 use terminal_lifecycle::{TerminalGuard, install_terminal_panic_hook};
@@ -42,6 +42,8 @@ type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_HISTORY: usize = 500;
+/// Inline viewport rows: 1 spinner/status row + 3 composer rows + 1 status bar.
+const VIEWPORT_HEIGHT: u16 = 5;
 
 // ── Typed turn message ────────────────────────────────────────────────────────
 
@@ -60,10 +62,7 @@ enum TurnMessage {
 #[derive(Debug, PartialEq, Eq)]
 enum Overlay {
     None,
-    Help,
-    Pager { scroll: usize },
     QuitConfirm,
-    BackendSelector { selected: usize },
 }
 
 // ── TuiApp ──────────────────────────────────────────────────────────────────
@@ -113,17 +112,18 @@ struct TuiApp {
     streaming_text: String,
     /// Monotonically incremented each time `streaming_text` is mutated.
     streaming_version: std::cell::Cell<u64>,
-    /// Cached rendered markdown lines, rebuilt when version differs.
-    rendered_md_lines: std::cell::RefCell<Vec<ratatui::text::Line<'static>>>,
-    rendered_version: std::cell::Cell<u64>,
     /// Backend for the current in-progress streaming turn (for display label).
     streaming_backend: Option<AcpBackend>,
 
     // Overlay/ui flags
-    /// Active overlay (help / pager / quit-confirm).
+    /// Active overlay (quit-confirm only in inline mode).
     overlay: Overlay,
     /// Quit confirmation: tick when first Ctrl+C was pressed.
     quit_confirm_tick: Option<u64>,
+    /// Entries waiting to be inserted into terminal scrollback.
+    pending_scrollback_entries: Vec<ConversationEntry>,
+    /// Deferred help rendering request handled by the loop with terminal access.
+    help_requested: bool,
 }
 
 impl TuiApp {
@@ -171,14 +171,14 @@ impl TuiApp {
             stream_tx,
             streaming_text: String::new(),
             streaming_version: std::cell::Cell::new(0),
-            rendered_md_lines: std::cell::RefCell::new(Vec::new()),
-            rendered_version: std::cell::Cell::new(0),
             streaming_backend: None,
             overlay: Overlay::None,
             turn_task: None,
             turn_started_at: None,
             queued_prompt: None,
             quit_confirm_tick: None,
+            pending_scrollback_entries: Vec::new(),
+            help_requested: false,
         })
     }
 
@@ -205,9 +205,25 @@ impl TuiApp {
             backend,
             self.active_model.as_deref().unwrap_or("—")
         );
-        self.history
-            .push(ConversationEntry::SystemNotice { text: notice });
-        self.history.scroll_to_bottom();
+        self.record_entry(ConversationEntry::SystemNotice { text: notice });
+    }
+
+    fn cycle_backend(&mut self) {
+        let enabled = self.enabled_backends();
+        if enabled.is_empty() {
+            return;
+        }
+        let idx = enabled
+            .iter()
+            .position(|&b| b == self.active_backend)
+            .unwrap_or(0);
+        let next = enabled[(idx + 1) % enabled.len()];
+        self.switch_backend(next);
+    }
+
+    fn record_entry(&mut self, entry: ConversationEntry) {
+        self.history.push(entry.clone());
+        self.pending_scrollback_entries.push(entry);
     }
 
     // ── export ───────────────────────────────────────────────────────────────
@@ -281,14 +297,12 @@ impl TuiApp {
             // Tab-queue: store for after current turn finishes
             self.queued_prompt = Some(text);
             self.record_queued_prompt_delta(1);
-            self.history.push(ConversationEntry::SystemNotice {
+            self.record_entry(ConversationEntry::SystemNotice {
                 text: "Queued (will send after current turn)".into(),
             });
             return;
         }
-        self.history
-            .push(ConversationEntry::UserMessage { text: text.clone() });
-        self.history.scroll_to_bottom();
+        self.record_entry(ConversationEntry::UserMessage { text: text.clone() });
         self.running_turn = true;
         self.turn_started_at = Some(std::time::Instant::now());
         self.send_turn_prompt(self.active_backend, self.cwd.clone(), text);
@@ -316,7 +330,7 @@ impl TuiApp {
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                 tracing::error!("turn channel closed; engine has shut down");
-                self.history.push(ConversationEntry::SystemNotice {
+                self.record_entry(ConversationEntry::SystemNotice {
                     text: "Error: engine channel closed".into(),
                 });
                 self.running_turn = false;
@@ -343,21 +357,26 @@ pub async fn run(config: NimiaConfig) -> Result<()> {
 
     install_terminal_panic_hook();
 
-    // Terminal setup — mouse capture for scroll wheel; Option+drag to select text in macOS
+    // Terminal setup — inline viewport, no alt-screen, no mouse capture.
+    // This lets the terminal own scrollback (native scroll/copy/selection),
+    // mirroring codex's TUI architecture.
     enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.hide_cursor()?;
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Inline(VIEWPORT_HEIGHT),
+        },
+    )?;
 
     // The guard ensures teardown on all exit paths (including `?` propagation).
     let _guard = TerminalGuard;
 
-    let result = loop_runtime::run_loop(&mut terminal, &mut app, approval_rx).await;
+    // Emit the iota banner once so it lives in normal terminal scrollback.
+    let _ = scrollback::insert_lines(&mut terminal, scrollback::banner_lines());
 
-    terminal.show_cursor()?;
-    // _guard drops here and calls disable_raw_mode + LeaveAlternateScreen.
+    let result = r#loop::run_loop(&mut terminal, &mut app, approval_rx).await;
 
     result
 }

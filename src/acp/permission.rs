@@ -7,7 +7,7 @@ use tokio::process::ChildStdin;
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::runtime_event::ApprovalDecisionEvent;
-use crate::store::approval::{self, ApprovalStore};
+use crate::store::approvals::{self, ApprovalStore};
 
 use super::AcpBackend;
 
@@ -107,8 +107,8 @@ pub async fn answer_permission_request(
         } else {
             None
         };
-        let dimensions = approval::classify_operation(&tool_name, &params);
-        let policy = approval::default_decision(&dimensions);
+        let dimensions = approvals::classify_operation(&tool_name, &params);
+        let policy = approvals::default_decision(&dimensions);
         let result = prompt_yes_no(&format!(
             "Approve ACP tool request '{}' [{}]? ",
             tool_name, policy.reason

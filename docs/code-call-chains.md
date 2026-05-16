@@ -940,7 +940,7 @@ embed(content)
 | `daemon/pool.rs` | 按 cwd 复用 IotaEngine | 3 |
 | `daemon/proto.rs` | daemon wire types | 3 |
 | `tui.rs` | TUI 主循环、engine task、stream/approval channel | 4 |
-| `tui/composer.rs` | 输入编辑器 | 4 |
+| `tui/input.rs` | 输入编辑器 | 4 |
 | `tui/markdown.rs` | Markdown 渲染 | 4 |
 | `tui/status_bar.rs` | 状态栏 | 4 |
 | `tui/theme.rs` | TUI 样式 | 4 |
@@ -959,7 +959,7 @@ embed(content)
 | `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
 | `store/cache.rs` | execution lifecycle | 1,3,4,12 |
 | `store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
-| `store/approval.rs` | approval 事件和风险分类 | 11 |
+| `store/approvals.rs` | approval 事件和风险分类 | 11 |
 | `utils.rs` | 时间、摘要、lock recovery | 多条链路 |
 
 ## 进程间和外部调用清单

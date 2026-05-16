@@ -5,10 +5,10 @@ triggers:
   - src/tui
   - TUI
   - ratatui
-  - composer
+  - input
   - status_bar
   - terminal_lifecycle
-  - loop_runtime
+  - loop
 ---
 
 # tui — Interactive Terminal UI
@@ -22,7 +22,7 @@ ratatui-based interactive chat interface with markdown rendering, multi-line com
 │  magenta bg · cwd · active backend  │
 ├─ history ──────────────── fill rows ─┤
 │  scrollable conversation transcript  │
-├─ composer ─────────────── 3+ rows ──┤
+├─ input ──────────────── 3+ rows ──┤
 │  multi-line input with cursor        │
 ├─ status ───────────────── 1 row ────┤
 │  backend·model  /  key hints         │
@@ -44,9 +44,9 @@ ratatui-based interactive chat interface with markdown rendering, multi-line com
 
 | Module | Purpose |
 |--------|---------|
-| `composer` | Multi-line input with kill-buffer, word motion, history search |
+| `input` | Multi-line input with kill-buffer, word motion, history search |
 | `events` | Keyboard/mouse event handling and dispatch |
-| `loop_runtime` | Main event loop, async engine turn, frame timing |
+| `loop` | Main event loop, async engine turn, frame timing |
 | `markdown` | pulldown-cmark rendering to ratatui spans |
 | `render` | Widget layout and drawing |
 | `state` | TUI application state |

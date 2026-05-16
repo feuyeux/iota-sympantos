@@ -3,10 +3,10 @@
 //! - [`SkillRegistry`] / [`Skill`] — load, match and index `.md`/`.yaml` skill files
 //! - [`runner`]     — execute MCP-mode skills via sidecar processes
 //! - [`cache`]      — pull and cache skill files from HTTP/local sources
-//! - [`sandbox_executor`] — `iota-fun` stdio MCP server (multi-language runners)
+//! - [`fun`] — `iota-fun` stdio MCP server (multi-language runners)
 
 pub mod cache;
-pub mod sandbox_executor;
+pub mod fun;
 pub mod runner;
 
 use anyhow::{Context, Result};

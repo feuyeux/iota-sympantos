@@ -22,7 +22,9 @@ iota-sympantos/
 │   │   └── mod.rs           # 命令分发（run/check/tui/bench 等）
 │   ├── tui.rs               # 交互式 TUI 主循环
 │   ├── tui/
-│   │   ├── composer.rs      # 多行输入组件（kill buffer/Ctrl+R/word motion）
+│   │   ├── input.rs        # 多行输入组件（kill buffer/Ctrl+R/word motion）
+│   │   ├── scrollback.rs   # 终端回滚缓冲（insert_before）
+│   │   ├── loop.rs         # TUI 主事件循环
 │   │   ├── markdown.rs      # markdown 渲染（pulldown-cmark）
 │   │   ├── status_bar.rs    # 底部状态栏（后端·模型 / 快捷键提示）
 │   │   ├── theme.rs         # ratatui 颜色主题（洋红主色）
@@ -43,7 +45,7 @@ iota-sympantos/
 │   │   ├── mod.rs           # Store layer 入口
 │   │   ├── cache.rs         # CacheStore execution replay / dedupe
 │   │   ├── memory.rs        # MemoryStore（6 桶分类体系）
-│   │   ├── approval.rs      # ApprovalStore + policy
+│   │   ├── approvals.rs     # ApprovalStore + policy
 │   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
 │   ├── context/
 │   │   └── mod.rs           # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
@@ -51,7 +53,7 @@ iota-sympantos/
 │   │   ├── mod.rs           # SkillRegistry（分布式加载 + trigger 匹配）
 │   │   ├── runner.rs        # engine-run skill 执行
 │   │   ├── cache.rs         # skill pull/cache（HTTP 或本地）
-│   │   └── fun_server.rs    # iota-fun 7 语言 MCP server（stdio）
+│   │   └── fun.rs           # iota-fun 7 语言 MCP server（stdio）
 │   ├── mcp/
 │   │   ├── mod.rs           # MCP 层入口
 │   │   ├── client.rs        # engine 侧 MCP 客户端
@@ -156,12 +158,12 @@ iota __daemon           # 内部 daemon 入口
 
 | 功能 | 文件 | 状态 |
 |------|------|------|
-| 多行输入（Shift+Enter 换行） | `tui/composer.rs` | ✅ |
-| Unicode grapheme 光标 | `tui/composer.rs` | ✅ |
-| Kill buffer（Ctrl+K/Ctrl+Y） | `tui/composer.rs` | ✅ |
-| Ctrl+U/Ctrl+W 词删除 | `tui/composer.rs` | ✅ |
-| Alt+B/Alt+F 词间移动 | `tui/composer.rs` | ✅ |
-| Ctrl+R 增量历史搜索 | `tui/composer.rs` | ✅ |
+| 多行输入（Shift+Enter 换行） | `tui/input.rs` | ✅ |
+| Unicode grapheme 光标 | `tui/input.rs` | ✅ |
+| Kill buffer（Ctrl+K/Ctrl+Y） | `tui/input.rs` | ✅ |
+| Ctrl+U/Ctrl+W 词删除 | `tui/input.rs` | ✅ |
+| Alt+B/Alt+F 词间移动 | `tui/input.rs` | ✅ |
+| Ctrl+R 增量历史搜索 | `tui/input.rs` | ✅ |
 | Markdown 渲染 | `tui/markdown.rs` | ✅ |
 | 状态栏（洋红主色，后端·模型） | `tui/status_bar.rs` | ✅ |
 | 运行指示器（spinner + 耗时） | `tui.rs` | ✅ |
@@ -210,12 +212,12 @@ iota __daemon           # 内部 daemon 入口
 | 4 | SkillRegistry 分布式加载 | `skill/mod.rs` | ✅ |
 | 4 | Skill trigger 匹配 | `skill/mod.rs` | ✅ |
 | 4b | Engine-run skill execution | `skill/runner.rs` | ✅ |
-| 4b | 7 种 fn 引擎（iota-fun MCP） | `skill/fun_server.rs` | ✅ |
+| 4b | 7 种 fn 引擎（iota-fun MCP） | `skill/fun.rs` | ✅ |
 | 4b | MCP client | `mcp/client.rs` | ✅ |
 | 5a | MCP sidecar（iota-context） | `mcp/server.rs` + `mcp/tool_dispatch.rs` | ✅ |
 | 5a | ACP mcpServers 注入 | `acp/session.rs` | ✅ |
 | 5b | MCP response channel / 拦截 | `mcp/router.rs` | ✅ |
-| 6 | Approval 归一化 + 持久化 | `store/approval.rs` | ✅ |
+| 6 | Approval 归一化 + 持久化 | `store/approvals.rs` | ✅ |
 | 7 | SessionLedger + handoff | `store/ledger.rs` | ✅ |
 | 8 | Native materializer | `native/mod.rs` | ✅ |
 | 9 | Config 扩展（context_engine） | `config.rs` | ✅ |

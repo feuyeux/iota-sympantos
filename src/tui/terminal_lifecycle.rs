@@ -1,10 +1,7 @@
-use crossterm::event::DisableMouseCapture;
-use crossterm::execute;
-use crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+use crossterm::terminal::disable_raw_mode;
 
 pub(super) fn restore_terminal_state() {
     let _ = disable_raw_mode();
-    let _ = execute!(std::io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
 }
 
 /// Restores terminal state on drop so that panics and early returns always

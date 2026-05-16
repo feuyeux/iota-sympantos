@@ -24,7 +24,7 @@ SQLite-backed persistence for execution cache, tool approvals, and session ledge
 
 | Module | Purpose |
 |--------|---------|
-| `approval` | `ApprovalStore` — tool approval events and policy |
+| `approvals` | `ApprovalStore` — tool approval events and policy |
 | `cache` | `CacheStore` — execution replay and deduplication |
 | `ledger` | `SessionLedger` — sessions, backend sessions, turns, handoffs |
 

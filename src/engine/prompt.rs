@@ -13,7 +13,7 @@ use super::memory_ops::{
     deterministic_memory_answer, is_explicit_memory_tool_prompt, is_memory_query,
     is_memory_write_only_prompt, memory_inject_payload,
 };
-use super::telemetry_recorder::event_payload;
+use super::telemetry::event_payload;
 
 impl IotaEngine {
     /// Run a prompt and return only the final assistant text.
