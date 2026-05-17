@@ -12,7 +12,13 @@ use uuid::Uuid;
 
 use crate::utils::now_ts;
 
-const RUNNING_EXECUTION_TTL_SECS: i64 = 60 * 60;
+fn running_execution_ttl_secs() -> i64 {
+    crate::config::store_config().cache_running_ttl_secs
+}
+
+fn retention_days() -> i64 {
+    crate::config::store_config().cache_retention_days
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -110,7 +116,7 @@ impl CacheStore {
         let now = now_ts();
         let mut conn = self.lock_conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stale_before = now - RUNNING_EXECUTION_TTL_SECS;
+        let stale_before = now - running_execution_ttl_secs();
         tx.execute(
             "UPDATE cache_executions SET status = 'failed', finished_at = ?3
              WHERE backend = ?1 AND request_hash = ?2 AND status = 'running' AND started_at < ?4",
@@ -210,8 +216,7 @@ pub fn request_hash(backend: &str, cwd: &Path, prompt: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn purge_old_records(conn: &Connection) {
-    const RETENTION_DAYS: i64 = 30;
-    let cutoff = now_ts() - RETENTION_DAYS * 86_400;
+    let cutoff = now_ts() - retention_days() * 86_400;
     let _ = conn.execute(
         "DELETE FROM cache_executions
          WHERE status IN ('completed', 'failed')

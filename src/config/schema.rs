@@ -2,6 +2,48 @@ use serde::{Deserialize, Serialize};
 
 use super::{BackendConfig, ContextEngineBackendConfig, ContextEngineConfig};
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StoreConfig {
+    #[serde(default = "default_cache_retention_days")]
+    pub cache_retention_days: i64,
+
+    #[serde(default = "default_cache_running_ttl_secs")]
+    pub cache_running_ttl_secs: i64,
+
+    #[serde(default = "default_observability_retention_days")]
+    pub observability_retention_days: i64,
+
+    #[serde(default = "default_approvals_max_pending_age_secs")]
+    pub approvals_max_pending_age_secs: i64,
+}
+
+fn default_cache_retention_days() -> i64 {
+    30
+}
+
+fn default_cache_running_ttl_secs() -> i64 {
+    3600
+}
+
+fn default_observability_retention_days() -> i64 {
+    90
+}
+
+fn default_approvals_max_pending_age_secs() -> i64 {
+    604800 // 7 days
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            cache_retention_days: default_cache_retention_days(),
+            cache_running_ttl_secs: default_cache_running_ttl_secs(),
+            observability_retention_days: default_observability_retention_days(),
+            approvals_max_pending_age_secs: default_approvals_max_pending_age_secs(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct NimiaConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,4 +60,6 @@ pub struct NimiaConfig {
     pub context_engine: Option<ContextEngineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_engine_backend: Option<ContextEngineBackendConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<StoreConfig>,
 }

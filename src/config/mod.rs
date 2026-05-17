@@ -31,7 +31,15 @@ pub use helpers::{expand_home_path, normalize_command};
 pub use loader::{config_path, read_config};
 #[allow(unused_imports)]
 pub use model::ModelConfig;
-pub use schema::NimiaConfig;
+pub use schema::{NimiaConfig, StoreConfig};
 
 #[cfg(test)]
 mod tests;
+
+pub fn store_config() -> StoreConfig {
+    if let Ok(cfg) = read_config() {
+        cfg.store.unwrap_or_default()
+    } else {
+        StoreConfig::default()
+    }
+}
