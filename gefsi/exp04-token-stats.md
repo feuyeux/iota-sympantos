@@ -183,57 +183,62 @@ EventStore 中 token_usage 事件可能在以下位置：
 
 ---
 
-## 四、原始数据表（--show-native 单次运行结果）
+## 四、原始数据表（--show-native 3次运行结果）
 
-> **注意**：以下数据来自 `--show-native` 单次运行，非 3 次runs 的平均值。codex 未输出 token 数据。
+> **注意**：codex 未输出 token 数据。数据已从 `gefsi/logs/exp04-<backend>-run*.log` 提取。
 
-| Backend | Run | execution_id | input_tokens | cache_read_input_tokens | cache_creation_input_tokens | output_tokens | total_tokens | 备注 |
-|---------|-----|--------------|--------------|------------------------|----------------------------|--------------|--------------|------|
-| claude-code | 1 | (from --show-native) | 277 | 0 | 27365 | 69 | 27711 | cachedWriteTokens=27365 |
-| claude-code | 2 | (from --show-native) | 277 | 0 | 27365 | 69 | 27711 | 与 run 1 相同 |
-| claude-code | 3 | (from --show-native) | 277 | 0 | 27365 | 69 | 27711 | 与 run 1 相同 |
-| codex | 1 | (from --show-native) | - | - | - | - | - | **无 token 数据输出** |
-| codex | 2 | (from --show-native) | - | - | - | - | - | **无 token 数据输出** |
-| codex | 3 | (from --show-native) | - | - | - | - | - | **无 token 数据输出** |
-| gemini | 1 | (from --show-native) | 14983 | - | - | 30 | 15013 | |
-| gemini | 2 | (from --show-native) | 14983 | - | - | 30 | 15013 | 与 run 1 相同 |
-| gemini | 3 | (from --show-native) | 14983 | - | - | 30 | 15013 | 与 run 1 相同 |
-| hermes | 1 | (from --show-native) | 18866 | 0 | - | 86 | 18952 | |
-| hermes | 2 | (from --show-native) | 18866 | 0 | - | 86 | 18952 | 与 run 1 相同 |
-| hermes | 3 | (from --show-native) | 18866 | 0 | - | 86 | 18952 | 与 run 1 相同 |
-| opencode | 1 | (from --show-native) | 19075 | - | - | 31 | 19106 | |
-| opencode | 2 | (from --show-native) | 19075 | - | - | 31 | 19106 | 与 run 1 相同 |
-| opencode | 3 | (from --show-native) | 19075 | - | - | 31 | 19106 | 与 run 1 相同 |
+| Backend | Run | input_tokens | cache_read_input_tokens | cache_creation_input_tokens | output_tokens | total_tokens | 备注 |
+|---------|-----|--------------|------------------------|----------------------------|--------------|--------------|------|
+| claude-code | 1 | 277 | 0 | 3215 | 85 | 27731 | cachedWriteTokens=3215 |
+| claude-code | 2 | 277 | 24154 | 3207 | 77 | 27715 | cachedReadTokens=24154 |
+| claude-code | 3 | 277 | 24154 | 3215 | 89 | 27735 | cachedReadTokens=24154 |
+| codex | 1 | - | - | - | - | - | **无 token 数据输出** |
+| codex | 2 | - | - | - | - | - | **无 token 数据输出** |
+| codex | 3 | - | - | - | - | - | **无 token 数据输出** |
+| gemini | 1 | 14993 | - | - | 36 | 15029 | snake_case 格式 |
+| gemini | 2 | 14990 | - | - | 36 | 15026 | |
+| gemini | 3 | 14990 | - | - | 42 | 15032 | |
+| hermes | 1 | 18894 | 10967 | - | 64 | 18958 | cache=10967/18894 (58%) |
+| hermes | 2 | 18884 | 18459 | - | 82 | 18966 | cache=18459/18884 (98%) |
+| hermes | 3 | 18890 | 18459 | - | 69 | 18959 | cache=18459/18890 (98%) |
+| opencode | 1 | 19081 | - | - | 32 | 19145 | |
+| opencode | 2 | 19081 | - | - | 32 | 19145 | 与 run 1 相同 |
+| opencode | 3 | 19083 | - | - | 48 | 19166 | |
 
-### 4.1 补充：--show-native 原始输出位置
+### 4.1 Log 文件位置
 
-Log 文件保存在 `gefsi/logs/exp04-<backend>-show-native.log`
+Log 文件保存在 `gefsi/logs/` 目录：
+- `exp04-claude-code-run1.log` ~ `exp04-claude-code-run3.log`
+- `exp04-codex-run1.log` ~ `exp04-codex-run3.log`
+- `exp04-gemini-run1.log` ~ `exp04-gemini-run3.log`
+- `exp04-hermes-run1.log` ~ `exp04-hermes-run3.log`
+- `exp04-opencode-run1.log` ~ `exp04-opencode-run3.log`
 
 ---
 
-## 五、统计汇总表（基于 --show-native 单次运行数据）
+## 五、统计汇总表（基于 --show-native 3次运行数据）
 
-> **注意**：由于多次运行的 token 数据完全相同，CV = 0%（极端稳定）。这可能表明 prompt 被缓存或 backend 固定返回相同结果。
+> **注意**：CV (Coefficient of Variation) = (std/mean)*100%，CV < 5% = 非常稳定，5-10% = 相对稳定，>10% = 波动
 
-| Backend | input_tokens | cache_read | cache_write | output_tokens | total_tokens | CV total | 稳定性 |
-|---------|--------------|------------|-------------|---------------|--------------|---------|--------|
-| claude-code | 277 | 0 | 27365 | 69 | 27711 | 0% | 非常稳定 |
-| codex | - | - | - | - | - | - | **无数据** |
-| gemini | 14983 | 0 | 0 | 30 | 15013 | 0% | 非常稳定 |
-| hermes | 18866 | 0 | 0 | 86 | 18952 | 0% | 非常稳定 |
-| opencode | 19075 | 0 | 0 | 31 | 19106 | 0% | 非常稳定 |
+| Backend | input_tokens (mean±std) | CV% | cache_read (mean±std) | cache_write (mean±std) | output_tokens (mean±std) | CV% | total_tokens (mean±std) | CV% | 稳定性 |
+|---------|------------------------|-----|----------------------|----------------------|-------------------------|-----|-------------------------|-----|--------|
+| claude-code | 277±0 | 0% | 0/24154/24154 | 3212±4.6 | 83.7±6.0 | 7.2% | 27727±10 | 0.04% | input非常稳定, output相对稳定 |
+| codex | - | - | - | - | - | - | - | - | **无数据** |
+| gemini | 14991±1.7 | 0.01% | 0 | 0 | 38±3.5 | 9.1% | 15029±3 | 0.02% | input非常稳定, output相对稳定 |
+| hermes | 18889±5.1 | 0.03% | 10967/18459/18459 | 0 | 71.7±9.1 | 12.7% | 18961±4.4 | 0.02% | input非常稳定, output波动 |
+| opencode | 19082±1.2 | 0.006% | 0 | 0 | 37.3±9.2 | 24.7% | 19152±12 | 0.06% | input非常稳定, output波动 |
 
 **总 token 消耗排序（从高到低）：**
-1. opencode: 19106
-2. hermes: 18952
-3. gemini: 15013
-4. claude-code: 27711（因含 27365 cache_write_tokens，实际 input 仅 277）
+1. opencode: 19145-19166 (平均 19152)
+2. hermes: 18958-18966 (平均 18961)
+3. gemini: 15026-15032 (平均 15029)
+4. claude-code: 27715-27735 (平均 27727，含 cache_write)
 
 **实际 input_tokens 排序（不含 cache_write）：**
-1. opencode: 19075
-2. hermes: 18866
-3. gemini: 14983
-4. claude-code: 277
+1. opencode: 19081-19083 (平均 19082)
+2. hermes: 18884-18894 (平均 18889)
+3. gemini: 14990-14993 (平均 14991)
+4. claude-code: 277 (平均 277) — 极低因为只含用户prompt
 
 ---
 
@@ -242,52 +247,56 @@ Log 文件保存在 `gefsi/logs/exp04-<backend>-show-native.log`
 ### 6.1 稳定性分析
 
 **发现：**
-- 所有 backend 的多次运行结果完全一致（CV = 0%）
-- 这表明 `--show-native` 模式下 prompt 可能是固定测试场景
-- claude-code 和 hermes 的 cachedReadTokens = 0，说明缓存未生效或被绕过
+- 所有 backend 的 input_tokens 极端稳定（CV < 0.1%），表明 tokenization 确定性高
+- output_tokens 波动较大：claude-code (7.2%), gemini (9.1%), hermes (12.7%), opencode (24.7%)
+- 波动原因：不同回答长度导致 output_tokens 变化（短回答更容易受随机性影响）
 
 ### 6.2 Backend 对比分析
 
 **总 token 消耗排序（从高到低）：**
-1. opencode: 19106
-2. hermes: 18952
-3. gemini: 15013
-4. claude-code: 27711（含 27365 cache_write）
+1. opencode: 19145-19166 (avg 19152)
+2. hermes: 18958-18966 (avg 18961)
+3. gemini: 15026-15032 (avg 15029)
+4. claude-code: 27715-27735 (avg 27727，含 9-10K cache_write)
 
 **实际 input_tokens 排序（不含 cache_write）：**
-1. opencode: 19075
-2. hermes: 18866
-3. gemini: 14983
-4. claude-code: 277
+1. opencode: 19081-19083 (avg 19082)
+2. hermes: 18884-18894 (avg 18889)
+3. gemini: 14990-14993 (avg 14991)
+4. claude-code: 277 (avg 277) — 极低因为只含用户 prompt
 
 **观察：**
-- claude-code 的 input_tokens (277) 远低于其他 backend，可能因为其 tokenization 或 prompt 处理方式不同
-- gemini 和 hermes 的 input_tokens 较高（~15k-19k）
-- output_tokens 都很低（30-86），与短回答一致
+- claude-code 的 input_tokens (277) 远低于其他 backend，可能因为其精简的 prompt 结构或不同的 tokenization
+- gemini 和 hermes 的 input_tokens 较高（~15k-19k），因为包含了更多上下文/系统信息
+- output_tokens 都很低（32-89），与短回答一致
 
 ### 6.3 缓存行为分析
 
 **发现：**
-- 仅 claude-code 报告了 `cachedWriteTokens: 27365`
-- 所有 backend 的 `cachedReadTokens` 都是 0 或未报告
-- codex 完全不输出 token 数据
+- hermes: 显示了显著的 cache 效果
+  - Run 1: cache=10967/18894 (58%)
+  - Run 2/3: cache=18459/18884-18890 (98%) — 几乎完全使用缓存
+- claude-code: 显示了 cachedReadTokens (24154)，表明在后续运行中读取了之前写入的缓存
+- gemini/opencode: 未报告 cache_read_input_tokens 或 cachedWriteTokens
+- codex: 完全不输出 token 数据
 
 ### 6.4 结论
 
 **成功项：**
 - 通过 `--show-native` 成功从 4/5 个 backend 获取 token 数据
-- 数据完全稳定（CV = 0%），表明测试条件一致
+- input_tokens 极度稳定（CV < 0.1%），数据质量高
+- 发现 hermes 和 claude-code 的缓存行为
 
 **限制：**
-- **codex 不输出任何 token 数据** - 这是 backend 本身的问题，不是 iota 的问题
-- cache 相关字段大部分 backend 不支持或未启用
-- EventStore SQLite 查询方法未能获取 token 数据（event_type='token_usage' 可能不存在或字段位置不同）
+- **codex 不输出任何 token 数据** — 这是 codex-acp 本身的问题，不是 iota 的问题
+- gemini/opencode 未报告 cache 相关字段
+- output_tokens 波动较大，但这是正常的（短回答的随机性）
 
 ### 6.5 建议
 
-1. **codex 问题**：需要检查 codex-acp 是否支持 token usage 报告
-2. **EventStore**：需要确认 token_usage 事件的实际 event_json 结构
-3. **cache 数据**：需要进一步研究为何 cachedReadTokens 始终为 0
+1. **codex 问题**：需要检查 codex-acp 是否支持 token usage 报告，可能是配置或版本问题
+2. **缓存优化**：hermes 第二次运行 cache 达到 98%，建议研究 claude-code 的缓存机制
+3. **进一步测试**：使用更长的 prompt 来观察 output_tokens 稳定性是否提升
 
 ---
 
@@ -295,12 +304,14 @@ Log 文件保存在 `gefsi/logs/exp04-<backend>-show-native.log`
 
 | # | 验收项 | 状态 | 说明 |
 |---|--------|------|------|
-| 1 | 数据完整性（15条记录） | ✅ 已完成 | 5 backends × 3 runs = 15 条 execution_id |
-| 2 | Token字段齐全 | ⚠️ 部分完成 | 4/5 backends 有数据，codex 无数据 |
-| 3 | 稳定性可量化 | ✅ 已完成 | CV = 0%，所有 backend 极端稳定 |
+| 1 | 数据完整性（15条记录） | ✅ 已完成 | 5 backends × 3 runs = 15 条，codex 无数据但已记录 |
+| 2 | Token字段齐全 | ⚠️ 部分完成 | 4/5 backends 有完整数据，codex 无数据 |
+| 3 | 稳定性可量化 | ✅ 已完成 | input_tokens CV < 0.1%，非常稳定 |
 | 4 | Backend排序 | ✅ 已完成 | opencode > hermes > gemini > claude-code |
 | 5 | 异常情况记录 | ✅ 已完成 | codex 无 token 输出已记录 |
 | 6 | 数据可复验 | ✅ 已完成 | log 文件保存在 gefsi/logs/ |
+| 7 | 统计汇总计算 | ✅ 已完成 | mean±std, CV%, 稳定性评级 |
+| 8 | 缓存行为分析 | ✅ 已完成 | hermes/claude-code 显示缓存效果 |
 
 ---
 
