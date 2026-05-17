@@ -455,11 +455,11 @@ impl MemoryStore {
             match self.search_fts(trimmed, limit) {
                 Ok(records) => return Ok(records),
                 Err(err) => {
-                    tracing::debug!(
+                    tracing::warn!(
                         error = %err,
                         query = trimmed,
                         limit,
-                        "memory FTS search failed; falling back to LIKE search"
+                        "memory.fts.fallback"
                     );
                 }
             }
