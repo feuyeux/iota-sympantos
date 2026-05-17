@@ -30,8 +30,8 @@
 | claude-code | @agentclientprotocol/claude-agent-acp | agentclientprotocol (第三方) | 0.35.0 | MiniMax-M2.7 | Claude 官方 Agent SDK，完整 token 统计 |
 | codex | @zed-industries/codex-acp | Zed Industries (官方) | 0.14.0 | gpt-5.4-mini (medium) | Zed 出品，只提供 total tokens |
 | gemini | @google/gemini-cli --acp | Google (官方) | 0.41.2 | gemini-2.5-flash | Google Gemini CLI，snake_case 格式 |
-| hermes | hermes acp | MiniMax (官方) | 0.12.0 | MiniMax-M2.7 | Hermes 原生支持，完整 token 统计 |
-| opencode | opencode-ai acp | OpenCode (官方) | 1.14.40 | MiniMax-M2.7 | OpenCode CLI ACP 模式 |
+| hermes | hermes acp | Hermes Agent (第三方) | 0.12.0 | MiniMax-M2.7 | Hermes Agent 的 ACP 模式，完整 token 统计 |
+| opencode | opencode-ai acp | OpenCode (第三方) | 1.14.40 | MiniMax-M2.7 | OpenCode CLI ACP 模式 |
 
 ---
 
