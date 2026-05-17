@@ -49,6 +49,15 @@ pub struct TokenUsageSummary {
     pub normalized_total_mean: Option<f64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenPercentiles {
+    pub backend: String,
+    pub count: usize,
+    pub p50: Option<u64>,
+    pub p95: Option<u64>,
+    pub p99: Option<u64>,
+}
+
 impl ObservabilityStore {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path
@@ -188,6 +197,39 @@ impl ObservabilityStore {
             .into_iter()
             .map(|(backend, acc)| acc.finish(backend))
             .collect());
+    }
+
+    pub fn token_usage_between(&self, from_ts: i64, to_ts: i64) -> Result<Vec<StoredTokenUsage>> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, execution_id, session_id, backend, model, provider, source,
+                    input_tokens, cache_read_input_tokens, cache_creation_input_tokens,
+                    output_tokens, thinking_tokens, tool_use_prompt_tokens,
+                    provider_reported_total_tokens, normalized_total_tokens, raw_payload_json
+             FROM token_usage_events
+             WHERE ts >= ?1 AND ts <= ?2
+             ORDER BY ts DESC, id DESC",
+        )?;
+        let rows = stmt.query_map(params![from_ts, to_ts], row_to_token_usage)?;
+        collect_rows(rows)
+    }
+
+    pub fn token_percentiles(&self, backend: &str) -> Result<TokenPercentiles> {
+        let events = self.recent_token_usage(1000)?;
+        let mut totals: Vec<u64> = events
+            .iter()
+            .filter(|e| e.backend == backend)
+            .filter_map(|e| e.normalized_total_tokens)
+            .collect();
+        totals.sort_unstable();
+
+        Ok(TokenPercentiles {
+            backend: backend.to_string(),
+            count: totals.len(),
+            p50: percentile(&totals, 50),
+            p95: percentile(&totals, 95),
+            p99: percentile(&totals, 99),
+        })
     }
 
     fn token_usage_since(&self, since_ts: i64) -> Result<Vec<StoredTokenUsage>> {
@@ -374,4 +416,13 @@ fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Ve
         items.push(row?);
     }
     Ok(items)
+}
+
+fn percentile(sorted_values: &[u64], p: usize) -> Option<u64> {
+    if sorted_values.is_empty() || p == 0 || p > 100 {
+        return None;
+    }
+    let index = ((sorted_values.len() as f64) * (p as f64 / 100.0)).ceil() as usize;
+    let index = index.saturating_sub(1).min(sorted_values.len() - 1);
+    Some(sorted_values[index])
 }

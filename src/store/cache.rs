@@ -162,6 +162,30 @@ impl CacheStore {
         Ok(())
     }
 
+    pub fn get_execution_statuses(
+        &self,
+        execution_ids: &[&str],
+    ) -> Result<Vec<(String, ExecutionStatus)>> {
+        if execution_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.lock_conn();
+        let mut results = Vec::new();
+        for id in execution_ids {
+            let status = conn
+                .query_row(
+                    "SELECT status FROM cache_executions WHERE execution_id = ?1",
+                    params![id],
+                    |row| Ok(ExecutionStatus::from(row.get::<_, String>(0)?.as_str())),
+                )
+                .optional()?;
+            if let Some(st) = status {
+                results.push((id.to_string(), st));
+            }
+        }
+        Ok(results)
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
