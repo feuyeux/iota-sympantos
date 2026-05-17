@@ -44,7 +44,8 @@ Right-side extensions (attached to Engine zone):
 
 Bottom tier (one unified band):
 9. SQLite Stores — four labeled blocks:
-   cache (~/.i6/context/events.sqlite) · memory (memory.sqlite) · approvals (approvals.sqlite) · ledger (sessions.sqlite)
+   cache (~/.i6/context/events.sqlite) · observability (events.sqlite, shared) · memory (memory.sqlite) · approvals (approvals.sqlite) · ledger (sessions.sqlite)
+   Config: StoreConfig in nimia.yaml — cache_retention_days · cache_running_ttl_secs · observability_retention_days · approvals_max_pending_age_secs
 10. Local Telemetry — stderr tracing · daily files at ~/.i6/logs/
 11. OpenTelemetry — OTel Collector :4317 → Loki :3100 · Jaeger :16686 · Prometheus :9090 · Grafana :3000
 
@@ -69,6 +70,6 @@ Key flows (arrows only, no prose inside boxes):
 Keep all text large and readable. No tiny labels. Show arrows without overlapping text. Module labels use bold short names; key facts shown as compact bullet lines inside each zone box.
 
 Negative prompt:
-Tiny unreadable labels, random fake files, excessive columns (>8), detailed env var mappings inside diagram, 3D render, dark background, neon glow, stock icons, blurry text, old command names (bench-cold, bench-warm, context-mcp, fun-mcp, logs as top-level), obsolete modules (telemetry/console.rs, context/server.rs, skill/sandbox_executor.rs), Korean text.
+Tiny unreadable labels, random fake files, excessive columns (>8), detailed env var mappings inside diagram, 3D render, dark background, neon glow, stock icons, blurry text, old command names (bench-cold, bench-warm, context-mcp, fun-mcp, logs as top-level), obsolete modules (telemetry/console.rs, context/server.rs, skill/sandbox_executor.rs), Korean text, missing ObservabilityStore block.
 ```
 
