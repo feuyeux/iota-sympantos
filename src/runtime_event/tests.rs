@@ -112,6 +112,154 @@ fn session_update_usage_emits_token_usage() {
 }
 
 #[test]
+fn normalizes_anthropic_cache_read_and_creation_tokens() {
+    let usage = token_usage_from_value(&json!({
+        "model": "claude-test",
+        "usage": {
+            "input_tokens": 277,
+            "cache_read_input_tokens": 24154,
+            "cache_creation_input_tokens": 3215,
+            "output_tokens": 85
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("anthropic"));
+    assert_eq!(usage.model.as_deref(), Some("claude-test"));
+    assert_eq!(usage.source.as_deref(), Some("usage"));
+    assert_eq!(usage.input_tokens, Some(277));
+    assert_eq!(usage.cache_read_input_tokens, Some(24154));
+    assert_eq!(usage.cache_creation_input_tokens, Some(3215));
+    assert_eq!(usage.output_tokens, Some(85));
+    assert_eq!(usage.normalized_total_tokens, Some(277 + 24154 + 3215 + 85));
+    assert_eq!(usage.provider_reported_total_tokens, None);
+    assert_eq!(usage.raw_payload["cache_creation_input_tokens"], 3215);
+}
+
+#[test]
+fn normalizes_openai_responses_cached_and_reasoning_tokens() {
+    let usage = token_usage_from_value(&json!({
+        "model": "gpt-test",
+        "usage": {
+            "input_tokens": 100,
+            "input_tokens_details": {
+                "cached_tokens": 40
+            },
+            "output_tokens": 30,
+            "output_tokens_details": {
+                "reasoning_tokens": 9
+            },
+            "total_tokens": 130
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("openai"));
+    assert_eq!(usage.input_tokens, Some(100));
+    assert_eq!(usage.cache_read_input_tokens, Some(40));
+    assert_eq!(usage.output_tokens, Some(30));
+    assert_eq!(usage.thinking_tokens, Some(9));
+    assert_eq!(usage.provider_reported_total_tokens, Some(130));
+    assert_eq!(usage.normalized_total_tokens, Some(130));
+}
+
+#[test]
+fn normalizes_standard_gemini_usage_metadata_without_double_counting_cache() {
+    let usage = token_usage_from_value(&json!({
+        "model": "gemini-test",
+        "usageMetadata": {
+            "promptTokenCount": 1000,
+            "cachedContentTokenCount": 400,
+            "candidatesTokenCount": 50,
+            "thoughtsTokenCount": 20,
+            "toolUsePromptTokenCount": 7,
+            "totalTokenCount": 1077
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("gemini"));
+    assert_eq!(usage.input_tokens, Some(1000));
+    assert_eq!(usage.cache_read_input_tokens, Some(400));
+    assert_eq!(usage.output_tokens, Some(50));
+    assert_eq!(usage.thinking_tokens, Some(20));
+    assert_eq!(usage.tool_use_prompt_tokens, Some(7));
+    assert_eq!(usage.provider_reported_total_tokens, Some(1077));
+    assert_eq!(usage.normalized_total_tokens, Some(1077));
+}
+
+#[test]
+fn normalizes_gemini_acp_quota_token_count() {
+    let usage = token_usage_from_value(&json!({
+        "_meta": {
+            "quota": {
+                "token_count": {
+                    "input_tokens": 14993,
+                    "output_tokens": 36
+                }
+            }
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("gemini"));
+    assert_eq!(usage.source.as_deref(), Some("_meta.quota.token_count"));
+    assert_eq!(usage.input_tokens, Some(14993));
+    assert_eq!(usage.output_tokens, Some(36));
+    assert_eq!(usage.normalized_total_tokens, Some(15029));
+}
+
+#[test]
+fn normalizes_adapter_thought_tokens_from_camel_case_usage() {
+    let usage = token_usage_from_value(&json!({
+        "usage": {
+            "inputTokens": 19081,
+            "outputTokens": 32,
+            "thoughtTokens": 32,
+            "totalTokens": 19145
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("adapter"));
+    assert_eq!(usage.input_tokens, Some(19081));
+    assert_eq!(usage.output_tokens, Some(32));
+    assert_eq!(usage.thinking_tokens, Some(32));
+    assert_eq!(usage.provider_reported_total_tokens, Some(19145));
+    assert_eq!(usage.normalized_total_tokens, Some(19145));
+}
+
+#[test]
+fn normalizes_codex_usage_update_used_as_adapter_total_only() {
+    let events = map_acp_events(
+        "session/update",
+        Some(&json!({
+            "sessionId": "s1",
+            "update": {
+                "sessionUpdate": "usage_update",
+                "used": 23045,
+                "size": 258400
+            }
+        })),
+    );
+
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            RuntimeEvent::TokenUsage(usage) => Some(usage),
+            _ => None,
+        })
+        .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("adapter"));
+    assert_eq!(usage.source.as_deref(), Some("session_update.usage_update"));
+    assert_eq!(usage.provider_reported_total_tokens, Some(23045));
+    assert_eq!(usage.normalized_total_tokens, None);
+    assert_eq!(usage.input_tokens, None);
+    assert_eq!(usage.output_tokens, None);
+}
+
+#[test]
 fn tool_call_event_is_mapped() {
     let event = map_acp_event(
         "session/update",

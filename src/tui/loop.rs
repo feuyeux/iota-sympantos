@@ -221,8 +221,15 @@ fn observability_from_output(output: &AcpPromptOutput) -> ObservabilityMeta {
         prompt_ms: Some(output.timing.prompt_ms),
         input_tokens: token_usage.and_then(|usage| usage.input_tokens),
         cache_tokens: token_usage.and_then(|usage| usage.cache_tokens),
+        cache_read_input_tokens: token_usage.and_then(|usage| usage.cache_read_input_tokens),
+        cache_creation_input_tokens: token_usage
+            .and_then(|usage| usage.cache_creation_input_tokens),
         output_tokens: token_usage.and_then(|usage| usage.output_tokens),
+        thinking_tokens: token_usage.and_then(|usage| usage.thinking_tokens),
         total_tokens: token_usage.and_then(|usage| usage.total_tokens),
+        provider_reported_total_tokens: token_usage
+            .and_then(|usage| usage.provider_reported_total_tokens),
+        normalized_total_tokens: token_usage.and_then(|usage| usage.normalized_total_tokens),
     }
 }
 

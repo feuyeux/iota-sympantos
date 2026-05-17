@@ -99,6 +99,7 @@ impl IotaEngine {
         }
         self.record_runtime_event(
             &execution_id,
+            backend,
             RuntimeEvent::State(StateEvent {
                 state: "started".to_string(),
                 detail: None,
@@ -121,7 +122,7 @@ impl IotaEngine {
                     memory_id: Some(memory_id.clone()),
                     payload: serde_json::json!({"source":"engine-extract"}),
                 });
-                self.record_runtime_event(&execution_id, event.clone());
+                self.record_runtime_event(&execution_id, backend, event.clone());
                 events.push(event);
             }
             let text = format!("已记录 {} 条记忆。", extracted_memories.len());
@@ -129,7 +130,7 @@ impl IotaEngine {
                 text: text.clone(),
                 role: Some("engine".to_string()),
             });
-            self.record_runtime_event(&execution_id, output_event.clone());
+            self.record_runtime_event(&execution_id, backend, output_event.clone());
             events.push(output_event);
             return Ok(self.finalize_local_turn(
                 backend,
@@ -149,14 +150,14 @@ impl IotaEngine {
             {
                 let mut events = Vec::new();
                 for event in skill_output.events {
-                    self.record_runtime_event(&execution_id, event.clone());
+                    self.record_runtime_event(&execution_id, backend, event.clone());
                     events.push(event);
                 }
                 let output_event = RuntimeEvent::Output(OutputEvent {
                     text: skill_output.text.clone(),
                     role: Some("engine".to_string()),
                 });
-                self.record_runtime_event(&execution_id, output_event.clone());
+                self.record_runtime_event(&execution_id, backend, output_event.clone());
                 events.push(output_event);
                 self.persist_turn_as_episodic_memory(
                     backend,
@@ -259,7 +260,7 @@ impl IotaEngine {
                 payload = %event_payload(&event),
                 "memory.inject"
             );
-            self.record_runtime_event(&execution_id, event);
+            self.record_runtime_event(&execution_id, backend, event);
         }
         if let Some((buckets, text)) = memory.as_ref().and_then(|buckets| {
             deterministic_memory_answer(prompt, buckets).map(|text| (buckets, text))
@@ -273,7 +274,7 @@ impl IotaEngine {
                 text: text.clone(),
                 role: Some("engine".to_string()),
             });
-            self.record_runtime_event(&execution_id, output_event.clone());
+            self.record_runtime_event(&execution_id, backend, output_event.clone());
             events.push(output_event);
             let _ = buckets;
             return Ok(self.finalize_local_turn(
@@ -344,7 +345,7 @@ impl IotaEngine {
                     .iter()
                     .any(|event| matches!(event, RuntimeEvent::Output(_)));
                 for event in output.events.iter().cloned() {
-                    self.record_runtime_event(&execution_id, event);
+                    self.record_runtime_event(&execution_id, backend, event);
                 }
                 if !has_output_event {
                     // Some backends only return final text. Synthesize an Output event so
@@ -357,6 +358,7 @@ impl IotaEngine {
                     );
                     self.record_runtime_event(
                         &execution_id,
+                        backend,
                         RuntimeEvent::Output(OutputEvent {
                             text: output_text.clone(),
                             role: Some("assistant".to_string()),
@@ -400,6 +402,7 @@ impl IotaEngine {
             Err(err) => {
                 self.record_runtime_event(
                     &execution_id,
+                    backend,
                     RuntimeEvent::Error(ErrorEvent {
                         message: err.to_string(),
                         code: None,

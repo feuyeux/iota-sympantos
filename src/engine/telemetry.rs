@@ -7,9 +7,20 @@ use super::IotaEngine;
 
 impl IotaEngine {
     /// Persist or count the runtime side effects represented by one engine event.
-    pub(super) fn record_runtime_event(&self, _execution_id: &Option<String>, event: RuntimeEvent) {
-        // Token usage is metric-only here; the raw event remains in the ACP output event list.
-        if let RuntimeEvent::TokenUsage(ref tu) = event {
+    pub(super) fn record_runtime_event(
+        &self,
+        execution_id: &Option<String>,
+        backend: AcpBackend,
+        event: RuntimeEvent,
+    ) {
+        if let RuntimeEvent::TokenUsage(mut tu) = event {
+            tu.backend = Some(backend.to_string());
+            if tu.execution_id.is_none() {
+                tu.execution_id.clone_from(execution_id);
+            }
+            if tu.session_id.is_none() {
+                tu.session_id = Some(self.engine_session_id.clone());
+            }
             let m = metrics::get();
             m.token_usage_count.add(1, &[]);
             if let Some(input) = tu.input_tokens {
@@ -21,10 +32,22 @@ impl IotaEngine {
             if let Some(total) = tu.total_tokens {
                 m.token_total.add(total, &[]);
             }
+            if let Some(store) = &self.observability_store {
+                let _ = store.record_token_usage(
+                    execution_id.as_deref(),
+                    tu.session_id.as_deref(),
+                    &backend.to_string(),
+                    &tu,
+                );
+            }
             tracing::info!(
                 input_tokens = tu.input_tokens,
+                cache_read_input_tokens = tu.cache_read_input_tokens,
+                cache_creation_input_tokens = tu.cache_creation_input_tokens,
                 output_tokens = tu.output_tokens,
-                total_tokens = tu.total_tokens,
+                thinking_tokens = tu.thinking_tokens,
+                provider_reported_total_tokens = tu.provider_reported_total_tokens,
+                normalized_total_tokens = tu.normalized_total_tokens,
                 "token.usage"
             );
         }

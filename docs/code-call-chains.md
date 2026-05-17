@@ -22,6 +22,7 @@ cli::run()
        "context-mcp"        -> mcp::server::run_stdio()
        "fun-mcp"            -> skill::fun_server::run_stdio()
        "native-materialize" -> run_native_materialize()
+       "observability"      -> run_observability_command()
        "logs"                -> run_logs_command()
        "trace"               -> run_trace_command()
        "skill"              -> run_skill_command()
@@ -100,6 +101,8 @@ IotaEngine::run()
   -> ensure_acp_client()
   -> AcpClient::execute()
   -> record RuntimeEvent list
+       -> RuntimeEvent::TokenUsage
+       -> ObservabilityStore::record_token_usage()
   -> CacheStore::finish_execution()
   -> SessionLedger::record_turn()
   -> WorkingMemoryBuffer::push_turn()
@@ -737,7 +740,29 @@ mcp::router::try_intercept_tool_call(method, params)
        external unknown -> denied by iota policy
 ```
 
-## 链路 12：Logs/trace、check、benchmark、native、skill pull
+## 链路 12：Observability、logs/trace、check、benchmark、native、skill pull
+
+Observability：
+
+```text
+iota observability tokens recent --limit N [--json]
+  -> cli::observability_cmd::run_observability_command()
+  -> ObservabilityStore::open(default events.sqlite)
+  -> recent_token_executions()
+  -> table or JSON stdout
+
+iota observability tokens summary --since 1h [--json]
+  -> token_summary_since()
+  -> backend summary mean/std/count
+
+iota observability logging events <execution_id>
+  -> token_usage_for_execution()
+  -> raw token usage events JSON
+
+iota observability metrics --prometheus
+  -> token_summary_since(None)
+  -> Prometheus text format
+```
 
 Logs / trace：
 
@@ -748,7 +773,6 @@ iota logs <execution_id>
 iota trace <trace_id>
   -> query Jaeger HTTP API
   -> print span name and duration
-```
 ```
 
 Check：

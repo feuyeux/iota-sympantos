@@ -1,326 +1,284 @@
 ---
 name: exp04-token-stats-design
-description: 实验4设计文档：5个backend的token统计实验，验证多次执行相同prompt时token消耗的稳定性和backend间的差异
+description: 实验4设计文档：统一 token observability 链路，并用 5 个 backend 的 token 统计实验验证采集、查询和 TUI 展示
 metadata:
   type: spec
   experiment: exp04-token-stats
   date: 2026-05-17
 ---
 
-# iota-sympantos 实验4：Backend Token 统计实验设计
+# iota-sympantos 实验4：Token Observability 链路设计
 
 | 字段 | 值 |
 |------|-----|
 | 实验代号 | exp04-token-stats |
 | 设计日期 | 2026-05-17 |
-| 实验对象 | 5个backend的token消耗统计与稳定性分析 |
+| 终极目标 | 统一从 `iota observability` 获取 token 消耗数据 |
+| 验证对象 | claude-code、codex、gemini、hermes、opencode |
 | 参考实验 | exp01-memory, exp03-acp-runtime |
 
 ---
 
-## 一、实验目标
+## 1. 设计目标
 
-验证 5 个 backend 在多次执行相同 prompt 时的 token 消耗稳定性，并对比不同 backend 的 token 消耗差异。
+exp04 不应停留在 `--show-native` 日志解析。最终链路必须满足：
 
-**核心问题：**
-1. 同一 backend 多次执行时，token 消耗是否稳定？
-2. 哪个 backend 消耗的 token 最多/最少？
-3. 缓存机制（cache_read_input_tokens, cache_creation_input_tokens）在各 backend 的表现如何？
-
----
-
-## 二、实验环境
-
-| 项目 | 值 |
-|------|-----|
-| OS | macOS (Darwin 25.4.0) |
-| 工作目录 | `/Users/han/coding/creative/iota-sympantos` |
-| Binary | `target/release/iota` |
-| 配置来源 | `~/.i6/nimia.yaml` |
-| 数据采集 | observability metrics + EventStore |
-| 备用数据源 | backend 原生输出（`--show-native`） |
-
-**测试 backend：**
-- claude-code
-- codex
-- gemini
-- hermes
-- opencode
+1. 所有 ACP backend 上报的 usage 信息都进入统一的 `RuntimeEvent::TokenUsage`。
+2. token usage 被持久化到本地 observability store，可按 `execution_id` 回溯。
+3. CLI 通过 `iota observability ...` 查询 token 明细、汇总和 metrics。
+4. TUI 使用同一份归一化结构展示本轮耗时、token、缓存和 execution id。
+5. `--show-native` 只作为 parser 调试和 fallback 验证，不作为实验的长期数据源。
 
 ---
 
-## 三、测量指标
+## 2. 当前问题
 
-| 指标 | 字段名 | 说明 |
-|------|--------|------|
-| 输入 tokens | `input_tokens` | 每次请求发送给模型的 token 数量 |
-| 缓存读取 tokens | `cache_read_input_tokens` | 从缓存中读取的 token 数量 |
-| 缓存写入 tokens | `cache_creation_input_tokens` | 写入缓存的 token 数量 |
-| 输出 tokens | `output_tokens` | 模型生成的 token 数量 |
+当前实现和旧实验设计之间存在偏差：
 
-**派生指标：**
-- 总输入 tokens = `input_tokens + cache_creation_input_tokens`
-- 缓存命中率 = `cache_read_input_tokens / (input_tokens + cache_read_input_tokens)` （如适用）
-- 总 tokens = `input_tokens + cache_creation_input_tokens + cache_read_input_tokens + output_tokens`
+| 问题 | 影响 |
+|------|------|
+| 当前 CLI 没有 `iota observability` 子命令 | 旧计划中的优先数据源不可执行 |
+| `~/.i6/context/events.sqlite` 当前只保存 execution lifecycle | 无法从本地 store 查询 token usage 事件 |
+| `TokenUsageEvent` 只有 `input/cache/output/total` | 无法区分 cache read、cache write、thinking、provider total |
+| 不同平台 usage 字段语义不同 | 直接排序 `total_tokens` 会混淆 OpenAI、Anthropic、Gemini 口径 |
+| TUI 只显示 `input|cache|output` | 无法展示 cache write、thinking token 和 total 口径 |
+| exp04 结果使用 `--show-native` 手工抽取 | 可复验性弱，容易产生抄录错误 |
 
 ---
 
-## 四、测试 prompt
+## 3. Token 字段语义
 
-使用一个简单但足够触发完整 ACP 流程的 prompt：
+### 3.1 平台字段对比
 
+| 语义 | OpenAI Responses API | OpenAI Chat / Completions | Anthropic Messages API | Gemini / Google GenAI |
+|------|----------------------|---------------------------|------------------------|-----------------------|
+| 输入 token | `usage.input_tokens` | `usage.prompt_tokens` | `usage.input_tokens` | `usageMetadata.promptTokenCount` |
+| 输出 token | `usage.output_tokens` | `usage.completion_tokens` | `usage.output_tokens` | `usageMetadata.candidatesTokenCount` |
+| 总 token | `usage.total_tokens` | `usage.total_tokens` | 无直接字段，需计算 | `usageMetadata.totalTokenCount` |
+| 缓存命中输入 token | `usage.input_tokens_details.cached_tokens` | `usage.prompt_tokens_details.cached_tokens` | `usage.cache_read_input_tokens` | `usageMetadata.cachedContentTokenCount` |
+| 缓存写入输入 token | 无常规同名字段 | 无常规同名字段 | `usage.cache_creation_input_tokens` | 无常规同名字段 |
+| 推理 / thinking token | `usage.output_tokens_details.reasoning_tokens` | `usage.completion_tokens_details.reasoning_tokens` | 通常无单独 usage 字段 | `usageMetadata.thoughtsTokenCount` |
+| 工具结果回灌 token | 工具/事件口径不统一 | 工具/事件口径不统一 | `usage.server_tool_use.web_search_requests` 等 | `usageMetadata.toolUsePromptTokenCount` |
+| 流式 usage | final usage / usage event，视接口 | 需 `stream_options.include_usage` | stream 事件中有 usage | 最后一个 chunk 才有 `usageMetadata` |
+
+### 3.2 归一化原则
+
+| 字段 | 含义 | 说明 |
+|------|------|------|
+| `input_tokens` | provider 报告的输入 token 主字段 | Gemini 中已包含 cached content；Anthropic 中不含 cache read/write |
+| `cache_read_input_tokens` | 缓存命中的输入 token | OpenAI 从 details 提取，Anthropic 从 `cache_read_input_tokens` 提取，Gemini 从 `cachedContentTokenCount` 提取 |
+| `cache_creation_input_tokens` | 缓存写入 token | Anthropic 支持；其他平台通常为空 |
+| `output_tokens` | 模型输出 token | 不包含 thinking，除非 provider 自身把它合入输出 |
+| `thinking_tokens` | reasoning/thinking token | OpenAI/Gemini/opencode adapter 可提供，缺失时为空 |
+| `tool_use_prompt_tokens` | 工具结果回灌 token | 只在 provider 明确上报时填写 |
+| `provider_reported_total_tokens` | provider 或 adapter 报告的总数 | 例如 OpenAI `total_tokens`、Gemini `totalTokenCount`、ACP `usage_update.used` |
+| `normalized_total_tokens` | iota 统一计算口径 | 用于跨 backend 排序，必须记录计算策略 |
+| `raw_payload` | 原始 usage JSON | 用于排查字段映射和后续扩展 |
+
+`normalized_total_tokens` 的初始计算规则：
+
+1. Anthropic 口径：`input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens + thinking_tokens`。
+2. Gemini 口径：优先使用 `provider_reported_total_tokens`；否则用 `input_tokens + output_tokens + thinking_tokens + tool_use_prompt_tokens`，不重复加 cached content。
+3. OpenAI 口径：优先使用 `provider_reported_total_tokens`；cache read 仅作为输入拆分，不重复加总。
+4. Adapter-only 口径：如果只有 `usage_update.used`，只填 `provider_reported_total_tokens`，`normalized_total_tokens` 为空或标记为 adapter total。
+
+---
+
+## 4. 目标架构
+
+```text
+ACP stdout/stderr JSON-RPC
+  -> AcpWireMessage
+  -> runtime_event::map_acp_events()
+  -> TokenUsageNormalizer
+  -> RuntimeEvent::TokenUsage
+  -> ObservabilityStore.persist_runtime_event()
+  -> AcpPromptOutput.events
+  -> CLI observability queries
+  -> TUI ObservabilityMeta
 ```
+
+### 4.1 采集层
+
+采集层负责从 ACP 消息中提取 usage：
+
+| ACP 来源 | 示例 | 处理方式 |
+|----------|------|----------|
+| `prompt:<id>.result.usage` | claude-code、hermes、opencode | 解析 `usage` 对象 |
+| `prompt:<id>.result._meta.quota.token_count` | gemini | 解析 Gemini quota，并保留 `_meta` |
+| `session/update usage_update` | codex、opencode、hermes | 作为 adapter-level total 或 context window usage |
+| `session/complete` | 部分 adapter | 同样走 normalizer |
+
+采集必须同时记录 `backend`、`execution_id`、`session_id`、`model` 和 source path，例如 `prompt_result.usage` 或 `session_update.usage_update`。
+
+### 4.2 归一化层
+
+新增 `TokenUsageNormalizer`，职责：
+
+1. 识别 provider / adapter 字段形态。
+2. 映射标准字段。
+3. 计算 `normalized_total_tokens`。
+4. 保留 `provider_reported_total_tokens` 和 `raw_payload`。
+5. 不因字段缺失丢弃事件，缺失字段保持 `None`。
+
+### 4.3 持久化层
+
+新增或扩展本地 observability store，建议表：
+
+```text
+token_usage_events(
+  id TEXT PRIMARY KEY,
+  ts INTEGER NOT NULL,
+  execution_id TEXT,
+  session_id TEXT,
+  backend TEXT NOT NULL,
+  model TEXT,
+  provider TEXT,
+  source TEXT NOT NULL,
+  input_tokens INTEGER,
+  cache_read_input_tokens INTEGER,
+  cache_creation_input_tokens INTEGER,
+  output_tokens INTEGER,
+  thinking_tokens INTEGER,
+  tool_use_prompt_tokens INTEGER,
+  provider_reported_total_tokens INTEGER,
+  normalized_total_tokens INTEGER,
+  raw_payload_json TEXT NOT NULL
+)
+```
+
+可选汇总表：
+
+```text
+execution_token_summaries(
+  execution_id TEXT PRIMARY KEY,
+  backend TEXT NOT NULL,
+  model TEXT,
+  input_tokens INTEGER,
+  cache_read_input_tokens INTEGER,
+  cache_creation_input_tokens INTEGER,
+  output_tokens INTEGER,
+  thinking_tokens INTEGER,
+  provider_reported_total_tokens INTEGER,
+  normalized_total_tokens INTEGER,
+  updated_at INTEGER NOT NULL
+)
+```
+
+### 4.4 CLI 查询层
+
+新增统一命令：
+
+```bash
+iota observability logging recent --limit 20
+iota observability logging events <execution_id>
+iota observability tokens recent --limit 20
+iota observability tokens summary --since 1h
+iota observability tokens export --format json
+iota observability metrics
+iota observability metrics --prometheus
+```
+
+`tokens recent` 输出每轮 execution 的 token 明细；`tokens summary` 输出 backend 维度 mean/std/CV；`metrics` 输出进程或本地 store 聚合指标。
+
+### 4.5 TUI 展示层
+
+TUI 不直接解析 backend 原始字段，只消费 `RuntimeEvent::TokenUsage` 或 execution summary。
+
+建议状态栏格式：
+
+```text
+1234ms · in 277 · cache r24154/w3215 · out 85 · think 32 · total 27731 · exec abc12345
+```
+
+字段缺失时降级：
+
+```text
+1234ms · total 23045 · exec abc12345
+```
+
+scrollback / pager 可展示更长的明细：
+
+```text
+tokens: input=277 cache_read=24154 cache_write=3215 output=85 normalized_total=27731 source=prompt_result.usage
+```
+
+---
+
+## 5. exp04 验证方法
+
+### 5.1 实验 prompt
+
+```text
 请用一句话介绍 Rust 语言的主要特点。
 ```
 
-**选择理由：**
-- 足够简单，输出稳定
-- 不涉及工具调用，避免额外的 token 消耗变量
-- 中文 prompt，与 exp01/exp03 保持一致
-
----
-
-## 五、测量方法
-
-### 5.1 环境准备
+### 5.2 执行流程
 
 ```bash
-# 构建 release 版本
-cargo build --release
-
-# 验证 backend 配置
-./target/release/iota check
-
-# 清理旧的测试数据（可选）
-# 如果需要干净的 EventStore 环境，可以备份并清空
-```
-
-### 5.2 数据采集流程
-
-**每个 backend 执行 3 轮测试：**
-
-```bash
-# 定义固定 prompt
-PROMPT="请用一句话介绍 Rust 语言的主要特点。"
-
-# 对每个 backend 执行 3 轮
-for backend in claude-code codex gemini hermes opencode; do
-  echo "=== Testing backend: $backend ==="
-  
-  for run in 1 2 3; do
-    echo "--- Run $run ---"
-    ./target/release/iota run --backend $backend "$PROMPT"
-    
-    # 记录 execution_id 用于后续数据提取
-    # execution_id 会在 observability 命令中使用
-    
-    sleep 2  # 避免请求过快
-  done
-  
-  echo ""
-done
-```
-
-### 5.3 Token 数据提取
-
-**方法 1：通过 observability metrics（优先）**
-
-```bash
-# 查看最近的执行记录
-./target/release/iota observability logging recent --limit 20
-
-# 查看 metrics 汇总
-./target/release/iota observability metrics
-
-# 如果 metrics 包含 token usage 统计，直接使用
-./target/release/iota observability metrics --prometheus | grep token
-```
-
-**方法 2：通过 EventStore 查询特定 execution**
-
-```bash
-# 获取特定 execution 的详细事件
-./target/release/iota observability logging events <execution-id>
-
-# 从事件流中提取 token_usage 事件
-# 查找 event_type 为 token_usage 或包含 token 相关字段的事件
-```
-
-**方法 3：直接查询 EventStore SQLite（备用）**
-
-```bash
-# 如果 observability 命令不够用，直接查询数据库
-sqlite3 ~/.i6/context/events.sqlite "
-  SELECT execution_id, backend, 
-         json_extract(payload, '$.input_tokens') as input_tokens,
-         json_extract(payload, '$.cache_read_input_tokens') as cache_read,
-         json_extract(payload, '$.cache_creation_input_tokens') as cache_write,
-         json_extract(payload, '$.output_tokens') as output_tokens
-  FROM events
-  WHERE event_type = 'token_usage'
-    AND created_at > datetime('now', '-1 hour')
-  ORDER BY created_at DESC
-  LIMIT 15;
-"
-```
-
-**方法 4：从 backend 原生输出解析（fallback）**
-
-如果 observability 系统没有采集到 token 数据：
-
-```bash
-# 重新运行并捕获完整输出
-./target/release/iota run --backend claude-code --show-native "$PROMPT" 2>&1 | tee output.log
-
-# 从 output.log 中手动提取 token 统计
-# 不同 backend 的格式可能不同，需要针对性解析
-```
-
----
-
-## 六、数据记录格式
-
-采集到的数据记录在 `gefsi/exp04-token-stats.md` 中，使用以下表格格式：
-
-### 6.1 原始数据表
-
-| Backend | Run | execution_id | input_tokens | cache_read | cache_write | output_tokens | total_tokens | 备注 |
-|---------|-----|--------------|--------------|------------|-------------|---------------|--------------|------|
-| claude-code | 1 | `abc123...` | 150 | 0 | 50 | 25 | 225 | |
-| claude-code | 2 | `def456...` | 150 | 50 | 0 | 25 | 225 | 缓存命中 |
-| claude-code | 3 | `ghi789...` | 150 | 50 | 0 | 26 | 226 | |
-| ... | ... | ... | ... | ... | ... | ... | ... | |
-
-### 6.2 统计汇总表
-
-| Backend | input_tokens (avg±std) | cache_read (avg±std) | cache_write (avg±std) | output_tokens (avg±std) | total_tokens (avg±std) |
-|---------|------------------------|----------------------|----------------------|-------------------------|------------------------|
-| claude-code | 150.0±0.0 | 33.3±23.6 | 16.7±23.6 | 25.3±0.5 | 225.3±0.5 |
-| codex | ... | ... | ... | ... | ... |
-| gemini | ... | ... | ... | ... | ... |
-| hermes | ... | ... | ... | ... | ... |
-| opencode | ... | ... | ... | ... | ... |
-
----
-
-## 七、分析方法
-
-### 7.1 稳定性分析
-
-**目标：** 评估同一 backend 多次运行时 token 消耗的波动程度。
-
-**指标：**
-- 标准差（std）：越小表示越稳定
-- 变异系数（CV）：`std / mean`，归一化的波动指标
-- 极差：`max - min`
-
-**判定标准：**
-- `CV < 5%`：非常稳定
-- `5% ≤ CV < 10%`：较稳定
-- `CV ≥ 10%`：波动较大
-
-### 7.2 Backend 对比分析
-
-**目标：** 识别哪个 backend 消耗 token 最多/最少。
-
-**对比维度：**
-1. **总 token 消耗排序**：从高到低排列
-2. **输入 token 对比**：不同 backend 对相同 prompt 的 tokenization 差异
-3. **输出 token 对比**：生成内容的长度差异
-4. **缓存效率对比**：`cache_read_input_tokens` 占比
-
-### 7.3 缓存行为分析
-
-**目标：** 观察各 backend 的缓存机制表现。
-
-**观察点：**
-- Run 1（冷启动）：是否有 `cache_creation_input_tokens`
-- Run 2/3（热路径）：是否有 `cache_read_input_tokens`
-- 缓存命中率：`cache_read / (input + cache_read)`
-
-**预期行为：**
-- 支持 prompt caching 的 backend（如 Claude）应在 Run 2/3 显示缓存命中
-- 不支持缓存的 backend 所有 run 的 `cache_*` 字段应为 0 或 null
-
----
-
-## 八、验收标准
-
-| # | 验收项 | 判定标准 |
-|---|--------|----------|
-| 1 | 数据完整性 | 5 个 backend × 3 轮 = 15 条记录全部采集成功 |
-| 2 | Token 字段齐全 | 每条记录至少包含 `input_tokens` 和 `output_tokens` |
-| 3 | 稳定性可量化 | 每个 backend 计算出 mean、std、CV |
-| 4 | Backend 排序清晰 | 按总 token 消耗从高到低排序 |
-| 5 | 缓存行为可观测 | 支持缓存的 backend 显示 cache_read/cache_write 数据 |
-| 6 | 数据可复验 | 记录 execution_id，可通过 observability 命令回溯 |
-| 7 | 异常情况记录 | 如果某个 backend 失败或数据缺失，在备注中说明 |
-
----
-
-## 九、预期结果
-
-基于 exp01/exp03 的经验，预期：
-
-1. **Claude Code** 可能有较完整的 token 统计和缓存数据
-2. **Gemini** 可能有完整的 token 统计
-3. **其他 backend** 的 token 数据完整性取决于其 ACP adapter 实现
-
-**如果遇到数据缺失：**
-- 优先尝试从 `--show-native` 输出解析
-- 如果仍然缺失，在备注中标注 "N/A - backend 未上报 token usage"
-- 不强求所有 backend 都有完整的 4 个 token 指标，但至少要有 input + output
-
----
-
-## 十、复验命令
-
-```bash
-# 环境检查
 cargo build --release
 ./target/release/iota check
 
-# 执行测试（完整脚本）
 PROMPT="请用一句话介绍 Rust 语言的主要特点。"
 for backend in claude-code codex gemini hermes opencode; do
-  echo "=== $backend ==="
   for run in 1 2 3; do
-    echo "Run $run"
-    ./target/release/iota run --backend $backend "$PROMPT"
+    ./target/release/iota run --no-daemon --backend "$backend" "$PROMPT"
     sleep 2
   done
 done
+```
 
-# 数据提取
-./target/release/iota observability logging recent --limit 20
-./target/release/iota observability metrics
+### 5.3 数据提取流程
 
-# 如果需要查询特定 execution
+终态只从 observability 获取：
+
+```bash
+./target/release/iota observability tokens recent --limit 20
+./target/release/iota observability tokens summary --since 1h
 ./target/release/iota observability logging events <execution-id>
+```
 
-# 直接查询 EventStore（备用）
-sqlite3 ~/.i6/context/events.sqlite "
-  SELECT execution_id, backend, payload
-  FROM events
-  WHERE event_type = 'token_usage'
-    AND created_at > datetime('now', '-1 hour')
-  ORDER BY created_at DESC;
-"
+`--show-native` 仅用于 parser 对照：
+
+```bash
+./target/release/iota run --no-daemon --backend claude-code --show-native "$PROMPT"
 ```
 
 ---
 
-## 十一、实现计划
+## 6. 验收标准
 
-实现步骤将在独立的 implementation plan 中详细说明，主要包括：
-
-1. 环境准备与验证
-2. 执行 15 轮测试（5 backend × 3 runs）
-3. 从 observability 系统提取 token 数据
-4. 数据清洗与统计分析
-5. 生成实验报告文档
-6. 提交到 git
+| # | 验收项 | 判定标准 |
+|---|--------|----------|
+| 1 | 采集完整 | 5 个 backend 的 usage 或 adapter total 均能生成 `RuntimeEvent::TokenUsage` |
+| 2 | 持久化可查 | 每条 token usage 可通过 `iota observability logging events <execution_id>` 回溯 |
+| 3 | token 明细可查 | `iota observability tokens recent` 能输出 15 条 exp04 记录 |
+| 4 | 汇总可量化 | `iota observability tokens summary` 能按 backend 输出 mean、std、CV |
+| 5 | 口径明确 | 报告同时展示 provider reported total 和 normalized total |
+| 6 | TUI 展示 | TUI 状态栏显示耗时、token、cache、execution id，字段缺失时可降级 |
+| 7 | fallback 定位清晰 | `--show-native` 只用于 parser 验证，不作为最终实验数据源 |
+| 8 | 异常可解释 | Codex 等只提供 total 的 backend 在 CLI/TUI/报告中明确标注字段缺失 |
 
 ---
 
-*设计完成时间：2026-05-17*
+## 7. 预期结果
+
+1. claude-code 和 hermes 可上报 input/output/cache read，claude-code 还可能上报 cache write。
+2. gemini 可上报 prompt/output，后续应扩展到 `usageMetadata` 全字段。
+3. opencode 可上报 input/output/thinking/provider total。
+4. codex ACP 当前可能只上报 `usage_update.used`，因此只能进入 adapter total。
+5. exp04 的最终报告应以 observability 查询结果为准，现有 `gefsi/logs/exp04-*.log` 只作为基线样本。
+
+---
+
+## 8. 实现计划入口
+
+详细任务见：
+
+```text
+docs/superpowers/plans/2026-05-17-exp04-token-stats.md
+```
+
+---
+
+*设计更新时间：2026-05-17*

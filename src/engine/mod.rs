@@ -12,6 +12,7 @@ use crate::memory::MemoryStore;
 use crate::skill::SkillCache;
 use crate::store::cache::CacheStore;
 use crate::store::ledger::SessionLedger;
+use crate::store::observability::ObservabilityStore;
 
 mod telemetry;
 mod session_ledger;
@@ -48,6 +49,8 @@ pub struct IotaEngine {
     memory_store: Option<MemoryStore>,
     /// Optional execution store used for turn lifecycle persistence.
     cache_store: Option<CacheStore>,
+    /// Optional observability store used for runtime token usage events.
+    observability_store: Option<ObservabilityStore>,
     /// Recent prompt/output turns used to compose context and backend handoff summaries.
     working_memory: WorkingMemoryBuffer,
     /// Stable logical session id shared across backend turns in this cwd.
@@ -83,6 +86,9 @@ impl IotaEngine {
         let cache_store = CacheStore::default_path()
             .ok()
             .and_then(|path| CacheStore::open(&path).ok());
+        let observability_store = ObservabilityStore::default_path()
+            .ok()
+            .and_then(|path| ObservabilityStore::open(&path).ok());
         let session_ledger_store = SessionLedger::default_path()
             .ok()
             .and_then(|path| SessionLedger::open(&path).ok());
@@ -103,6 +109,7 @@ impl IotaEngine {
             context_engine,
             memory_store,
             cache_store,
+            observability_store,
             working_memory: WorkingMemoryBuffer::new(20),
             engine_session_id,
             session_ledger_store,

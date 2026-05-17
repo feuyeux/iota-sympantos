@@ -9,8 +9,13 @@ pub struct ObservabilityMeta {
     pub prompt_ms: Option<u64>,
     pub input_tokens: Option<u64>,
     pub cache_tokens: Option<u64>,
+    pub cache_read_input_tokens: Option<u64>,
+    pub cache_creation_input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub thinking_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub provider_reported_total_tokens: Option<u64>,
+    pub normalized_total_tokens: Option<u64>,
 }
 
 /// A single entry in the conversation history.

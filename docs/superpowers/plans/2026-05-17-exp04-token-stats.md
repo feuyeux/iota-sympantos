@@ -1,319 +1,313 @@
-# exp04 Token 统计实验实现计划
+# exp04 Token Observability 实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** 对5个backend执行3轮测试，采集input_tokens、cache_read_input_tokens、cache_creation_input_tokens、output_tokens，分析token消耗稳定性和backend间差异。
+**Goal:** 建立从 ACP usage 采集、token 字段归一化、本地 observability 持久化、`iota observability` 查询到 TUI 展示的完整链路，并用 5 个 backend × 3 轮 exp04 实验验证。
 
-**Architecture:** 使用 iota observability 系统采集 token 数据，通过 EventStore 和 metrics 命令提取统计数据，结果记录到 gefsi/exp04-token-stats.md。
+**Architecture:** `ACP message -> RuntimeEvent::TokenUsage -> ObservabilityStore -> iota observability -> TUI ObservabilityMeta -> exp04 report`
 
-**Tech Stack:** iota CLI, observability system, EventStore SQLite, bash scripts
-
----
-
-## 概述
-
-本实验执行 5 个 backend × 3 轮 = 15 次测试，每次使用固定 prompt：
-```
-请用一句话介绍 Rust 语言的主要特点。
-```
-
-数据采集优先级：
-1. `iota observability metrics` 中的 token usage 统计
-2. `iota observability logging events <execution_id>` 中的 token_usage 事件
-3. 直接查询 EventStore SQLite
-4. `--show-native` 输出解析（fallback）
+**Tech Stack:** Rust, SQLite, ratatui, ACP JSON-RPC, OpenTelemetry metrics
 
 ---
 
-## 环境准备
+## 1. 实施原则
 
-### Task 1: 环境检查与构建
+1. `--show-native` 只作为 parser 对照和临时 fallback，不作为最终数据源。
+2. 所有实验数据最终必须从 `iota observability` 获取。
+3. 归一化字段必须保留 raw payload，避免丢失 provider 特有字段。
+4. provider reported total 和 normalized total 必须分开记录。
+5. 字段缺失要显式表示为 `None` / `N/A`，不能用 `0` 伪装。
+
+---
+
+## 2. Task 1: 扩展 TokenUsage 数据模型
 
 **Files:**
-- Modify: `gefsi/exp04-token-stats.md` (实验结果文档)
+- Modify: `src/runtime_event/mod.rs`
+- Modify: `src/runtime_event/tests.rs`
+- Modify: `src/tui/state.rs`
 
-- [ ] **Step 1: 构建 release 版本**
+- [x] **Step 1: 扩展 `TokenUsageEvent`**
+
+新增字段：
+
+```rust
+pub provider: Option<String>,
+pub backend: Option<String>,
+pub execution_id: Option<String>,
+pub session_id: Option<String>,
+pub source: Option<String>,
+pub input_tokens: Option<u64>,
+pub cache_read_input_tokens: Option<u64>,
+pub cache_creation_input_tokens: Option<u64>,
+pub output_tokens: Option<u64>,
+pub thinking_tokens: Option<u64>,
+pub tool_use_prompt_tokens: Option<u64>,
+pub provider_reported_total_tokens: Option<u64>,
+pub normalized_total_tokens: Option<u64>,
+pub raw_payload: Value,
+```
+
+- [x] **Step 2: 保持兼容字段**
+
+当前 TUI 使用的 `cache_tokens` / `total_tokens` 要么保留兼容访问，要么一次性迁移所有调用点。
+
+- [x] **Step 3: 添加单元测试**
+
+覆盖：
+- OpenAI Responses
+- OpenAI Chat / Completions
+- Anthropic Messages
+- Gemini `usageMetadata`
+- Gemini ACP `_meta.quota.token_count`
+- opencode `thoughtTokens`
+- codex `usage_update.used`
+
+---
+
+## 3. Task 2: 实现 TokenUsageNormalizer
+
+**Files:**
+- Modify/Add: `src/runtime_event/mod.rs` 或 `src/runtime_event/token_usage.rs`
+- Modify: `src/acp/stream_reader.rs`
+
+- [x] **Step 1: 提取 usage source**
+
+识别以下来源：
+
+| Source | 路径 |
+|--------|------|
+| `prompt_result.usage` | `result.usage` |
+| `prompt_result.gemini_quota` | `result._meta.quota.token_count` |
+| `session_update.usage_update` | `params.update.sessionUpdate == "usage_update"` |
+| `session_complete.usage` | `session/complete` params |
+
+- [x] **Step 2: 实现 provider 字段映射**
+
+按 spec 中的 OpenAI / Anthropic / Gemini / adapter-only 口径映射。
+
+- [x] **Step 3: 实现 normalized total 计算**
+
+规则：
+- Anthropic: `input + cache_read + cache_creation + output + thinking`
+- Gemini: 优先 provider total；否则不重复加 cached content
+- OpenAI: 优先 provider total；details 只作为拆分
+- Adapter-only: 只有 `provider_reported_total_tokens`，`normalized_total_tokens` 可为空
+
+- [x] **Step 4: 不丢 raw payload**
+
+所有 token event 必须包含原始 usage JSON。
+
+---
+
+## 4. Task 3: 增加 ObservabilityStore
+
+**Files:**
+- Add/Modify: `src/store/observability.rs`
+- Modify: `src/store/mod.rs`
+- Modify: `src/engine/telemetry.rs`
+- Modify: `src/engine/prompt.rs`
+
+- [x] **Step 1: 新增 SQLite 表**
+
+创建 `token_usage_events` 表：
+
+```sql
+CREATE TABLE IF NOT EXISTS token_usage_events (
+  id TEXT PRIMARY KEY,
+  ts INTEGER NOT NULL,
+  execution_id TEXT,
+  session_id TEXT,
+  backend TEXT NOT NULL,
+  model TEXT,
+  provider TEXT,
+  source TEXT NOT NULL,
+  input_tokens INTEGER,
+  cache_read_input_tokens INTEGER,
+  cache_creation_input_tokens INTEGER,
+  output_tokens INTEGER,
+  thinking_tokens INTEGER,
+  tool_use_prompt_tokens INTEGER,
+  provider_reported_total_tokens INTEGER,
+  normalized_total_tokens INTEGER,
+  raw_payload_json TEXT NOT NULL
+);
+```
+
+- [x] **Step 2: 写入 token usage event**
+
+在 engine 收到 `RuntimeEvent::TokenUsage` 后持久化，必须附带 execution/backend/session 信息。
+
+- [x] **Step 3: 提供查询 API**
+
+实现：
+- recent token events
+- events by execution id
+- backend summary
+- JSON export
+
+- [x] **Step 4: 测试持久化**
+
+使用临时 SQLite 文件验证 insert/query/summary。
+
+---
+
+## 5. Task 4: 实现 `iota observability` CLI
+
+**Files:**
+- Modify: `src/cli/mod.rs`
+- Modify/Add: `src/cli/observability_cmd.rs`
+
+- [x] **Step 1: 增加命令入口**
+
+```bash
+iota observability logging recent --limit 20
+iota observability logging events <execution_id>
+iota observability tokens recent --limit 20
+iota observability tokens summary --since 1h
+iota observability tokens export --format json
+iota observability metrics
+iota observability metrics --prometheus
+```
+
+- [x] **Step 2: 保持旧入口兼容**
+
+`iota logs <execution_id>` 和 `iota trace <trace_id>` 保持现有语义，不混入本地 token store。
+
+- [x] **Step 3: 输出格式**
+
+`tokens recent` 默认表格输出，`--json` 输出结构化 JSON。
+
+- [x] **Step 4: metrics 输出**
+
+`metrics --prometheus` 至少包含：
+
+```text
+iota_token_usage_count
+iota_token_input_total
+iota_token_cache_read_total
+iota_token_cache_creation_total
+iota_token_output_total
+iota_token_thinking_total
+iota_token_provider_reported_total
+iota_token_normalized_total
+```
+
+---
+
+## 6. Task 5: 接入 TUI 展示
+
+**Files:**
+- Modify: `src/tui/state.rs`
+- Modify: `src/tui/loop.rs`
+- Modify: `src/tui/status_bar.rs`
+- Modify: `src/tui/render.rs`
+- Modify: `src/tui/scrollback.rs`
+
+- [x] **Step 1: 扩展 `ObservabilityMeta`**
+
+新增：
+
+```rust
+pub cache_read_input_tokens: Option<u64>,
+pub cache_creation_input_tokens: Option<u64>,
+pub thinking_tokens: Option<u64>,
+pub provider_reported_total_tokens: Option<u64>,
+pub normalized_total_tokens: Option<u64>,
+```
+
+- [x] **Step 2: 从 TokenUsageEvent 填充 TUI 状态**
+
+TUI 不解析 raw payload，只使用 normalizer 输出。
+
+- [x] **Step 3: 更新状态栏**
+
+完整格式：
+
+```text
+1234ms · in 277 · cache r24154/w3215 · out 85 · think 32 · total 27731 · exec abc12345
+```
+
+降级格式：
+
+```text
+1234ms · total 23045 · exec abc12345
+```
+
+- [x] **Step 4: 更新测试**
+
+覆盖完整 token、只有 total、缺失 execution id 三种场景。
+
+---
+
+## 7. Task 6: 用 exp04 复验链路
+
+**Files:**
+- Modify: `gefsi/exp04-token-stats.md`
+- Create/Update: `gefsi/logs/exp04-*.log` only when parser fallback is needed
+
+- [x] **Step 1: 构建**
 
 ```bash
 cargo build --release
 ```
 
-预期：构建成功，无错误
-
-- [ ] **Step 2: 验证 backend 配置**
-
-```bash
-./target/release/iota check
-```
-
-预期：5 个 backend (claude-code, codex, gemini, hermes, opencode) 均 configured
-
-- [ ] **Step 3: 查看当前 metrics 状态（基准）**
-
-```bash
-./target/release/iota observability metrics
-```
-
-预期：显示当前 metrics 统计（用于后续对比）
-
-- [ ] **Step 4: 创建实验结果文档框架**
-
-创建 `gefsi/exp04-token-stats.md`，包含：
-- 实验信息表（实验代号、日期、环境）
-- 原始数据表（15行 × backend/run/execution_id/token指标）
-- 统计汇总表
-
-- [ ] **Step 5: Commit 环境准备**
-
-```bash
-git add gefsi/exp04-token-stats.md
-git commit -m "feat(exp04): initial token stats experiment document"
-```
-
----
-
-## 执行测试
-
-### Task 2: 执行 15 轮测试
-
-**Files:**
-- Modify: `gefsi/exp04-token-stats.md` (更新 execution_id 和原始数据)
-
-- [ ] **Step 1: 定义测试脚本**
+- [x] **Step 2: 执行 15 轮**
 
 ```bash
 PROMPT="请用一句话介绍 Rust 语言的主要特点。"
-BACKENDS="claude-code codex gemini hermes opencode"
-
-for backend in $BACKENDS; do
-  echo "=== Testing backend: $backend ==="
+for backend in claude-code codex gemini hermes opencode; do
   for run in 1 2 3; do
-    echo "--- Run $run ---"
-    ./target/release/iota run --backend $backend "$PROMPT"
-    sleep 3
+    ./target/release/iota run --no-daemon --backend "$backend" "$PROMPT"
+    sleep 2
   done
-  echo ""
 done
 ```
 
-预期：每个 backend 执行 3 次，共 15 次执行
-
-- [ ] **Step 2: 记录所有 execution_id**
-
-每次执行后从输出中提取 execution_id，记录到实验文档的原始数据表中
-
-- [ ] **Step 3: Commit 中间结果**
+- [x] **Step 3: 从 observability 查询**
 
 ```bash
-git add gefsi/exp04-token-stats.md
-git commit -m "feat(exp04): execute 15 test runs and record execution IDs"
+./target/release/iota observability tokens recent --limit 20 --json
+./target/release/iota observability tokens summary --since 1h --json
+```
+
+- [x] **Step 4: 更新实验报告**
+
+报告必须包含：
+- 原始 observability 数据表
+- provider reported total 排序
+- normalized total 排序
+- 字段缺失说明
+- TUI 展示截图或文本记录
+
+---
+
+## 8. 验证命令
+
+```bash
+cargo test runtime_event
+cargo test observability
+cargo test tui
+cargo build --release
+./target/release/iota observability tokens recent --limit 5
+./target/release/iota observability metrics --prometheus
 ```
 
 ---
 
-## 数据提取
-
-### Task 3: 从 observability 系统提取 token 数据
-
-**Files:**
-- Modify: `gefsi/exp04-token-stats.md`
-
-- [ ] **Step 1: 提取 metrics 中的 token 统计**
-
-```bash
-./target/release/iota observability metrics
-```
-
-从输出中查找 token_usage 相关指标
-
-- [ ] **Step 2: 尝试 prometheus 格式输出**
-
-```bash
-./target/release/iota observability metrics --prometheus | grep -i token
-```
-
-- [ ] **Step 3: 查询特定 execution 的详细事件**
-
-对每个 execution_id 执行：
-```bash
-./target/release/iota observability logging events <execution_id>
-```
-
-从事件流中查找 `event_type: token_usage` 或包含 token 字段的事件
-
-- [ ] **Step 4: 填充原始数据表**
-
-将每个 backend/run 的 token 数据填入表格：
-- input_tokens
-- cache_read_input_tokens
-- cache_creation_input_tokens
-- output_tokens
-
-- [ ] **Step 5: Commit 数据提取结果**
-
-```bash
-git add gefsi/exp04-token-stats.md
-git commit -m "feat(exp04): extract token data from observability system"
-```
-
----
-
-## 数据补充（备用）
-
-### Task 4: 使用 EventStore SQLite 直接查询（备用方案）
-
-**Files:**
-- Modify: `gefsi/exp04-token-stats.md`
-
-- [ ] **Step 1: 直接查询 EventStore**
-
-```bash
-sqlite3 ~/.i6/context/events.sqlite "
-  SELECT execution_id, backend, 
-         json_extract(payload, '\$.input_tokens') as input_tokens,
-         json_extract(payload, '\$.cache_read_input_tokens') as cache_read,
-         json_extract(payload, '\$.cache_creation_input_tokens') as cache_write,
-         json_extract(payload, '\$.output_tokens') as output_tokens
-  FROM events
-  WHERE event_type = 'token_usage'
-    AND created_at > datetime('now', '-24 hours')
-  ORDER BY created_at DESC
-  LIMIT 20;
-"
-```
-
-- [ ] **Step 2: 如果 observability 数据不完整，使用 fallback**
-
-对缺失数据的 backend 执行：
-```bash
-./target/release/iota run --backend <backend> --show-native "$PROMPT" 2>&1 | tee gefsi/logs/exp04-<backend>-<run>.log
-```
-
-- [ ] **Step 3: 从原生输出解析 token 数据**
-
-根据不同 backend 的输出格式，提取 token 统计信息
-
-- [ ] **Step 4: 更新原始数据表**
-
-- [ ] **Step 5: Commit 补充数据**
-
-```bash
-git add gefsi/exp04-token-stats.md gefsi/logs/
-git commit -m "feat(exp04): supplement token data from EventStore fallback"
-```
-
----
-
-## 数据分析
-
-### Task 5: 统计分析与结论
-
-**Files:**
-- Modify: `gefsi/exp04-token-stats.md`
-
-- [ ] **Step 1: 计算统计汇总表**
-
-对每个 backend 计算：
-- mean, std, CV (变异系数)
-- 稳定性判定 (CV < 5%: 非常稳定, 5-10%: 较稳定, >10%: 波动大)
-
-```python
-# 示例计算
-import statistics
-
-data = {
-    'claude-code': {'input_tokens': [x, y, z], 'output_tokens': [a, b, c], ...},
-    ...
-}
-
-for backend, metrics in data.items():
-    for metric_name, values in metrics.items():
-        mean = statistics.mean(values)
-        std = statistics.stdev(values) if len(values) > 1 else 0
-        cv = (std / mean * 100) if mean > 0 else 0
-```
-
-- [ ] **Step 2: Backend 对比分析**
-
-- 按总 token 消耗排序
-- 分析 input_tokens 差异（tokenization 差异）
-- 分析 output_tokens 差异（生成内容长度）
-- 分析缓存效率
-
-- [ ] **Step 3: 缓存行为分析**
-
-- Run 1 vs Run 2/3 的 cache_read_input_tokens 对比
-- 计算缓存命中率
-
-- [ ] **Step 4: 填写结论**
-
-根据分析结果填写：
-- 哪个 backend 最稳定
-- 哪个 backend 总消耗最高/最低
-- 缓存机制表现
-
-- [ ] **Step 5: Commit 分析结果**
-
-```bash
-git add gefsi/exp04-token-stats.md
-git commit -m "feat(exp04): complete statistical analysis and conclusions"
-```
-
----
-
-## 最终验收
-
-### Task 6: 验收标准检查
-
-- [ ] **检查 1: 数据完整性**
-
-5 个 backend × 3 轮 = 15 条记录全部采集成功
-
-- [ ] **检查 2: Token 字段齐全**
-
-每条记录至少包含 input_tokens 和 output_tokens
-
-- [ ] **检查 3: 稳定性可量化**
-
-每个 backend 有 mean、std、CV
-
-- [ ] **检查 4: Backend 排序清晰**
-
-按总 token 消耗从高到低排序
-
-- [ ] **检查 5: 异常情况记录**
-
-失败的 backend 或缺失的数据已在备注中说明
-
-- [ ] **最终 Commit**
-
-```bash
-git add gefsi/exp04-token-stats.md
-git commit -m "feat(exp04): complete token statistics experiment"
-```
-
----
-
-## 文件清单
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `gefsi/exp04-token-stats.md` | 创建/修改 | 实验结果文档 |
-| `gefsi/logs/exp04-*.log` | 创建 | Fallback 模式下的原始输出日志 |
-
----
-
-## 验收矩阵
+## 9. 验收矩阵
 
 | # | 验收项 | 判定标准 |
 |---|--------|----------|
-| 1 | 数据完整性 | 15 条记录全部采集 |
-| 2 | Token 字段齐全 | 至少 input_tokens + output_tokens |
-| 3 | 稳定性可量化 | mean, std, CV |
-| 4 | Backend 排序 | 总消耗排序 |
-| 5 | 异常记录 | 失败/缺失有备注 |
-| 6 | 数据可复验 | execution_id 记录 |
+| 1 | Token parser | OpenAI / Anthropic / Gemini / adapter-only fixtures 全部通过 |
+| 2 | 持久化 | token usage events 可按 execution id 查询 |
+| 3 | CLI 查询 | `iota observability tokens recent/summary/export` 可用 |
+| 4 | Metrics | `metrics --prometheus` 输出 token 聚合指标 |
+| 5 | TUI 展示 | 状态栏显示 token/cache/thinking/total/execution id |
+| 6 | exp04 数据 | 15 条记录全部来自 `iota observability` |
+| 7 | 口径清晰 | 报告区分 provider reported total 和 normalized total |
+| 8 | fallback 边界 | `--show-native` 只用于 parser 对照 |
 
 ---
 
-*计划创建时间：2026-05-17*
+*计划更新时间：2026-05-17*

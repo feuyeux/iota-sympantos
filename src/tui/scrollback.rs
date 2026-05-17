@@ -153,7 +153,36 @@ fn observability_line(meta: &ObservabilityMeta) -> Option<String> {
     if let Some(prompt_ms) = meta.prompt_ms {
         parts.push(format!("prompt {}ms", prompt_ms));
     }
-    if let Some(tokens) = meta.total_tokens {
+    if meta.cache_read_input_tokens.is_some()
+        || meta.cache_creation_input_tokens.is_some()
+        || meta.thinking_tokens.is_some()
+        || meta.normalized_total_tokens.is_some()
+        || meta.provider_reported_total_tokens.is_some()
+    {
+        if let Some(input) = meta.input_tokens {
+            parts.push(format!("in {}", input));
+        }
+        if meta.cache_read_input_tokens.is_some() || meta.cache_creation_input_tokens.is_some() {
+            parts.push(format!(
+                "cache r{}/w{}",
+                meta.cache_read_input_tokens.unwrap_or(0),
+                meta.cache_creation_input_tokens.unwrap_or(0)
+            ));
+        }
+        if let Some(output) = meta.output_tokens {
+            parts.push(format!("out {}", output));
+        }
+        if let Some(thinking) = meta.thinking_tokens {
+            parts.push(format!("think {}", thinking));
+        }
+        if let Some(total) = meta
+            .normalized_total_tokens
+            .or(meta.provider_reported_total_tokens)
+            .or(meta.total_tokens)
+        {
+            parts.push(format!("{} tokens", total));
+        }
+    } else if let Some(tokens) = meta.total_tokens {
         parts.push(format!("{} tokens", tokens));
     } else if meta.input_tokens.is_some() || meta.output_tokens.is_some() {
         parts.push(format!(
@@ -236,6 +265,27 @@ mod tests {
         .unwrap();
 
         assert_eq!(line, "2255c021: total 4634ms · prompt 4199ms · 28624 tokens");
+    }
+
+    #[test]
+    fn observability_line_shows_full_token_breakdown() {
+        let line = observability_line(&ObservabilityMeta {
+            execution_id: Some("2255c021-eb0c-494e-b538-25b4499a2b85".into()),
+            total_ms: Some(4634),
+            input_tokens: Some(277),
+            cache_read_input_tokens: Some(24154),
+            cache_creation_input_tokens: Some(3215),
+            output_tokens: Some(85),
+            thinking_tokens: Some(32),
+            normalized_total_tokens: Some(27763),
+            ..ObservabilityMeta::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            line,
+            "2255c021: total 4634ms · in 277 · cache r24154/w3215 · out 85 · think 32 · 27763 tokens"
+        );
     }
 }
 

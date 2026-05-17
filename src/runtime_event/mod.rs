@@ -118,17 +118,41 @@ pub struct ExtensionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsageEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_prompt_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_reported_total_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_total_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default)]
     pub payload: Value,
+    #[serde(default)]
+    pub raw_payload: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,29 +246,41 @@ pub fn map_acp_events(method: &str, params: Option<&Value>) -> Vec<RuntimeEvent>
 }
 
 pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
-    let usage = find_usage_object(value)?;
-    let prompt_tokens = first_u64(
+    let found = find_usage_object(value)?;
+    let usage = found.usage;
+    let provider = found
+        .provider
+        .or_else(|| infer_provider(usage, found.source))
+        .map(str::to_string);
+    let input_main = first_u64(
         usage,
-        &[
-            "input_tokens",
-            "inputTokens",
-            "prompt_tokens",
-            "promptTokens",
-        ],
+        &["input_tokens", "inputTokens", "promptTokenCount"],
     );
-    let cache_tokens = first_u64(
+    let prompt_tokens = first_u64(usage, &["prompt_tokens", "promptTokens"]);
+    let cache_read_input_tokens = first_u64(
         usage,
         &[
+            "cache_read_input_tokens",
+            "cacheReadInputTokens",
+            "cachedReadTokens",
             "cache_tokens",
             "cacheTokens",
             "cached_tokens",
             "cachedTokens",
-            "cache_read_input_tokens",
-            "cacheReadInputTokens",
+            "cachedContentTokenCount",
         ],
     )
+    .or_else(|| first_nested_u64(usage, "input_tokens_details", &["cached_tokens"]))
     .or_else(|| first_nested_u64(usage, "prompt_tokens_details", &["cached_tokens"]))
     .or_else(|| first_nested_u64(usage, "promptTokensDetails", &["cachedTokens"]));
+    let cache_creation_input_tokens = first_u64(
+        usage,
+        &[
+            "cache_creation_input_tokens",
+            "cacheCreationInputTokens",
+            "cachedWriteTokens",
+        ],
+    );
     let input_tokens = first_u64(
         usage,
         &[
@@ -254,10 +290,10 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
             "uncachedInputTokens",
         ],
     )
-    .or_else(|| match (prompt_tokens, cache_tokens) {
+    .or_else(|| match (prompt_tokens, cache_read_input_tokens) {
         (Some(prompt), Some(cache)) => Some(prompt.saturating_sub(cache)),
         (Some(prompt), None) => Some(prompt),
-        (None, _) => None,
+        (None, _) => input_main,
     });
     let output_tokens = first_u64(
         usage,
@@ -267,28 +303,74 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
             "completion_tokens",
             "completionTokens",
             "generated_tokens",
+            "candidatesTokenCount",
         ],
     );
-    let total_tokens = first_u64(usage, &["total_tokens", "totalTokens"]).or_else(|| {
+    let thinking_tokens = first_u64(
+        usage,
+        &[
+            "thinking_tokens",
+            "thinkingTokens",
+            "thought_tokens",
+            "thoughtTokens",
+            "thoughtsTokenCount",
+            "reasoning_tokens",
+            "reasoningTokens",
+        ],
+    )
+    .or_else(|| first_nested_u64(usage, "output_tokens_details", &["reasoning_tokens"]))
+    .or_else(|| first_nested_u64(usage, "completion_tokens_details", &["reasoning_tokens"]));
+    let tool_use_prompt_tokens =
+        first_u64(usage, &["tool_use_prompt_tokens", "toolUsePromptTokenCount"]);
+    let provider_reported_total_tokens =
+        first_u64(usage, &["total_tokens", "totalTokens", "totalTokenCount", "used"]);
+    let normalized_total_tokens = normalized_total_tokens(
+        provider.as_deref(),
+        found.source,
+        input_tokens,
+        cache_read_input_tokens,
+        cache_creation_input_tokens,
+        output_tokens,
+        thinking_tokens,
+        tool_use_prompt_tokens,
+        provider_reported_total_tokens,
+    );
+    let total_tokens = provider_reported_total_tokens.or_else(|| {
         input_tokens
             .zip(output_tokens)
-            .map(|(input, output)| input + output)
+            .map(|(input, output)| input + output + thinking_tokens.unwrap_or(0))
     });
     if input_tokens.is_none()
-        && cache_tokens.is_none()
+        && cache_read_input_tokens.is_none()
+        && cache_creation_input_tokens.is_none()
         && output_tokens.is_none()
+        && thinking_tokens.is_none()
         && total_tokens.is_none()
+        && provider_reported_total_tokens.is_none()
+        && normalized_total_tokens.is_none()
     {
         return None;
     }
     Some(TokenUsageEvent {
+        provider,
+        backend: None,
+        execution_id: None,
+        session_id: first_string(value, &["sessionId", "session_id"]),
+        source: Some(found.source.to_string()),
         input_tokens,
-        cache_tokens,
+        cache_tokens: cache_read_input_tokens,
+        cache_read_input_tokens,
+        cache_creation_input_tokens,
         output_tokens,
+        thinking_tokens,
+        tool_use_prompt_tokens,
         total_tokens,
+        provider_reported_total_tokens,
+        normalized_total_tokens,
         model: first_string(value, &["model", "modelName"])
             .or_else(|| first_string(usage, &["model", "modelName"])),
         payload: usage.clone(),
+        raw_payload: usage.clone(),
     })
 }
 
@@ -300,14 +382,63 @@ pub fn map_acp_error(message: String, code: Option<i64>, data: Option<Value>) ->
     })
 }
 
-fn find_usage_object(value: &Value) -> Option<&Value> {
+struct FoundUsage<'a> {
+    usage: &'a Value,
+    source: &'static str,
+    provider: Option<&'static str>,
+}
+
+fn find_usage_object(value: &Value) -> Option<FoundUsage<'_>> {
     for key in ["usage", "tokenUsage", "token_usage", "tokens"] {
         if let Some(candidate) = value.get(key).filter(|candidate| candidate.is_object()) {
-            return Some(candidate);
+            return Some(FoundUsage {
+                usage: candidate,
+                source: key,
+                provider: None,
+            });
         }
     }
+    if let Some(candidate) = value
+        .get("usageMetadata")
+        .filter(|candidate| candidate.is_object())
+    {
+        return Some(FoundUsage {
+            usage: candidate,
+            source: "usageMetadata",
+            provider: Some("gemini"),
+        });
+    }
+    if let Some(candidate) = value
+        .get("_meta")
+        .and_then(|meta| meta.get("quota"))
+        .and_then(|quota| quota.get("token_count"))
+        .filter(|candidate| candidate.is_object())
+    {
+        return Some(FoundUsage {
+            usage: candidate,
+            source: "_meta.quota.token_count",
+            provider: Some("gemini"),
+        });
+    }
+    if value
+        .get("sessionUpdate")
+        .or_else(|| value.get("type"))
+        .and_then(Value::as_str)
+        == Some("usage_update")
+        && value.get("used").is_some()
+    {
+        return Some(FoundUsage {
+            usage: value,
+            source: "session_update.usage_update",
+            provider: Some("adapter"),
+        });
+    }
     if has_any_token_key(value) {
-        return Some(value);
+        return Some(FoundUsage {
+            usage: value,
+            source: "value",
+            provider: None,
+        });
     }
     None
 }
@@ -330,6 +461,9 @@ fn has_any_token_key(value: &Value) -> bool {
         "completionTokens",
         "total_tokens",
         "totalTokens",
+        "totalTokenCount",
+        "used",
+        "usageMetadata",
     ]
     .iter()
     .any(|key| value.get(*key).is_some())
@@ -357,6 +491,72 @@ fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(Value::as_str))
         .map(str::to_string)
+}
+
+fn infer_provider(usage: &Value, source: &str) -> Option<&'static str> {
+    if source == "usageMetadata" || source == "_meta.quota.token_count" {
+        return Some("gemini");
+    }
+    if usage.get("cache_read_input_tokens").is_some()
+        || usage.get("cache_creation_input_tokens").is_some()
+    {
+        return Some("anthropic");
+    }
+    if usage.get("input_tokens_details").is_some()
+        || usage.get("prompt_tokens_details").is_some()
+        || usage.get("output_tokens_details").is_some()
+        || usage.get("completion_tokens_details").is_some()
+        || usage.get("prompt_tokens").is_some()
+        || usage.get("completion_tokens").is_some()
+    {
+        return Some("openai");
+    }
+    if usage.get("inputTokens").is_some()
+        || usage.get("outputTokens").is_some()
+        || usage.get("totalTokens").is_some()
+        || usage.get("thoughtTokens").is_some()
+        || usage.get("used").is_some()
+    {
+        return Some("adapter");
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn normalized_total_tokens(
+    provider: Option<&str>,
+    source: &str,
+    input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    thinking_tokens: Option<u64>,
+    tool_use_prompt_tokens: Option<u64>,
+    provider_reported_total_tokens: Option<u64>,
+) -> Option<u64> {
+    if source == "session_update.usage_update" {
+        return None;
+    }
+    match provider {
+        Some("anthropic") => Some(
+            input_tokens?
+                + cache_read_input_tokens.unwrap_or(0)
+                + cache_creation_input_tokens.unwrap_or(0)
+                + output_tokens.unwrap_or(0)
+                + thinking_tokens.unwrap_or(0),
+        ),
+        Some("openai" | "gemini" | "adapter") => provider_reported_total_tokens.or_else(|| {
+            input_tokens.map(|input| {
+                input
+                    + output_tokens.unwrap_or(0)
+                    + thinking_tokens.unwrap_or(0)
+                    + tool_use_prompt_tokens.unwrap_or(0)
+            })
+        }),
+        _ => provider_reported_total_tokens.or_else(|| {
+            input_tokens.map(|input| input + output_tokens.unwrap_or(0) + thinking_tokens.unwrap_or(0))
+        }),
+    }
 }
 
 fn map_session_update_events(params: &Value) -> Vec<RuntimeEvent> {

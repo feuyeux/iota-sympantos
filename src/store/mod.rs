@@ -6,5 +6,9 @@
 
 pub mod approvals;
 pub mod cache;
+pub mod observability;
 
 pub mod ledger;
+
+#[cfg(test)]
+mod observability_tests;
