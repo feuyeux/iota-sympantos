@@ -12,7 +12,7 @@
 
 ---
 
-## 一、实验目标
+## 1. 实验目标
 
 验证 5 个 backend 在多次执行相同 prompt 时的 token 消耗稳定性，并对比不同 backend 的 token 消耗差异。
 
@@ -23,43 +23,29 @@
 
 ---
 
-## 二、Backend ACP 配置信息
+## 2. Backend ACP
 
-### 2.1 ACP Adapter 与 Backend 对应关系
-
-| Backend | ACP Adapter | 版本 | 模型 | 说明 |
-|---------|-------------|------|------|------|
-| claude-code | @agentclientprotocol/claude-agent-acp | 0.35.0 | MiniMax-M2.7 | Claude 官方 Agent SDK，完整 token 统计 |
-| codex | @zed-industries/codex-acp | 0.14.0 | gpt-5.4-mini (medium) | Zed 出品，只提供 total tokens |
-| gemini | @google/gemini-cli --acp | 0.41.2 | gemini-2.5-flash | Google Gemini CLI，snake_case 格式 |
-| hermes | hermes acp | 0.12.0 | MiniMax-M2.7 | Hermes 原生支持，完整 token 统计 |
-| opencode | opencode-ai acp | 1.14.40 | MiniMax-M2.7 | OpenCode CLI ACP 模式 |
-
-**注意：** ACP adapter 与 backend CLI 是配套关系，不可交叉使用。每个 adapter 只负责启动对应的 CLI 工具。
-
-### 2.2 ACP Adapter 出品方
-
-| Adapter | 出品方 | 维护者 |
-|---------|--------|--------|
-| @agentclientprotocol/claude-agent-acp | agentclientprotocol (第三方) | cirwin, benbrandt, aguzubiaga |
-| @zed-industries/codex-acp | Zed Industries (官方) | cirwin, maxdeviant, maxbrunsfeld, benbrandt |
-| @google/gemini-cli | Google (官方) | Google |
-| hermes | MiniMax (官方) | MiniMax |
-| opencode-ai | OpenCode (官方) | OpenCode |
+| Backend | ACP Adapter | 出品方 | 版本 | 模型 | 说明 |
+|---------|-------------|--------|------|------|------|
+| claude-code | @agentclientprotocol/claude-agent-acp | agentclientprotocol (第三方) | 0.35.0 | MiniMax-M2.7 | Claude 官方 Agent SDK，完整 token 统计 |
+| codex | @zed-industries/codex-acp | Zed Industries (官方) | 0.14.0 | gpt-5.4-mini (medium) | Zed 出品，只提供 total tokens |
+| gemini | @google/gemini-cli --acp | Google (官方) | 0.41.2 | gemini-2.5-flash | Google Gemini CLI，snake_case 格式 |
+| hermes | hermes acp | MiniMax (官方) | 0.12.0 | MiniMax-M2.7 | Hermes 原生支持，完整 token 统计 |
+| opencode | opencode-ai acp | OpenCode (官方) | 1.14.40 | MiniMax-M2.7 | OpenCode CLI ACP 模式 |
 
 ---
 
-## 三、数据采集详情
+## 3. 数据采集详情
 
 ### 3.1 数据获取渠道
 
-| 数据项 | 获取渠道 | 命令/方法 | 写入位置 |
-|--------|----------|-----------|----------|
-| execution_id | iota run 输出 | `./target/release/iota run --backend <backend> "<prompt>"` | 本文档"原始数据表" |
-| input_tokens | --show-native 输出 | `./target/release/iota run --no-daemon --backend <backend> --show-native "<prompt>"` | 本文档"原始数据表" |
-| cache_read_input_tokens | --show-native 输出 | 同上 | 本文档"原始数据表" |
-| cache_creation_input_tokens | --show-native 输出 (仅部分backend) | 同上 | 本文档"原始数据表" |
-| output_tokens | --show-native 输出 | 同上 | 本文档"原始数据表" |
+| 数据项 | 获取渠道 | 命令/方法 |
+|--------|----------|-----------|
+| execution_id | iota run 输出 | `./target/release/iota run --backend <backend> "<prompt>"` |
+| input_tokens | --show-native 输出 | `./target/release/iota run --no-daemon --backend <backend> --show-native "<prompt>"` |
+| cache_read_input_tokens | --show-native 输出 | 同上 |
+| cache_creation_input_tokens | --show-native 输出 (仅部分backend) | 同上 |
+| output_tokens | --show-native 输出 | 同上 |
 
 **注意：** `--show-native` 不能与 `--daemon` 一起使用
 
@@ -105,52 +91,7 @@ mkdir -p gefsi/logs
 
 ---
 
-## 四、已执行的测试运行
-
-### 4.1 执行记录
-
-| Backend | Run | execution_id | 获取渠道 | 执行时间 | 备注 |
-|---------|-----|--------------|----------|----------|------|
-| claude-code | 1 | ccd5ec56-3f1c-4044-a707-e96be9d1c895 | iota run 输出 | 2026-05-17 | |
-| claude-code | 2 | 3bffe027-49df-4243-809d-bd4b5fbfd87d | iota run 输出 | 2026-05-17 | |
-| claude-code | 3 | 00805a18-7c47-446d-8f25-c5b1d79388c1 | iota run 输出 | 2026-05-17 | |
-| codex | 1 | 019fc1b8-0380-4e8e-9b41-fcb50ea87c51 | iota run 输出 | 2026-05-17 | 初始测试 (gpt-5.5) |
-| codex | 2 | 23b348b1-24ba-47ac-a84d-8accf31293a5 | iota run 输出 | 2026-05-17 | |
-| codex | 3 | 8be826c8-34b7-4888-901d-da2c986b8bd3 | iota run 输出 | 2026-05-17 | |
-| gemini | 1 | 103322f8-ab52-4488-9fb6-ff3264faa152 | iota run 输出 | 2026-05-17 | 输出最稳定 |
-| gemini | 2 | e60a515b-ed74-48a3-914e-a5a8d0ba8cc5 | iota run 输出 | 2026-05-17 | |
-| gemini | 3 | 0a60a1cf-b01e-4b53-9c30-131032567472 | iota run 输出 | 2026-05-17 | |
-| hermes | 1 | 71734a9a-43fd-4571-a696-bc06c2d4d3c6 | iota run 输出 | 2026-05-17 | |
-| hermes | 2 | f5b15398-da6f-4376-9cc9-06ca8fbac56e | iota run 输出 | 2026-05-17 | |
-| hermes | 3 | 87eb4475-741a-45ed-9621-e271e059fff2 | iota run 输出 | 2026-05-17 | |
-| opencode | 1 | f6044810-3ac0-45d6-b156-6dca23166922 | iota run 输出 | 2026-05-17 | |
-| opencode | 2 | d119104e-b4af-454f-8ea1-34a4a85db6dd | iota run 输出 | 2026-05-17 | |
-| opencode | 3 | 8aa0fb3f-7343-463e-9940-ef58d920e836 | iota run 输出 | 2026-05-17 | |
-
-**codex 重试测试（gpt-5.4-mini）：**
-
-| Backend | Run | 时间 | total_tokens | 备注 |
-|---------|-----|------|--------------|------|
-| codex | 1 | 2026-05-17 | 23045 | used=23045, size=258400 |
-| codex | 2 | 2026-05-17 | 23053 | used=23053, size=258400 |
-| codex | 3 | 2026-05-17 | 23020 | used=23020, size=258400 |
-
-### 4.2 Log 文件位置
-
-Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
-
-| Backend | Log 文件 | 模型 |
-|---------|----------|------|
-| claude-code | `exp04-claude-code-run1.log` ~ `exp04-claude-code-run3.log` | MiniMax-M2.7 |
-| codex | `exp04-codex-run1.log` ~ `exp04-codex-run3.log` | gh/gpt-5.5 (初始) |
-| codex | `exp04-codex-retry-run1.log` ~ `exp04-codex-retry-run3.log` | gpt-5.4-mini |
-| gemini | `exp04-gemini-run1.log` ~ `exp04-gemini-run3.log` | gemini-2.5-flash |
-| hermes | `exp04-hermes-run1.log` ~ `exp04-hermes-run3.log` | MiniMax-M2.7 |
-| opencode | `exp04-opencode-run1.log` ~ `exp04-opencode-run3.log` | MiniMax-M2.7 |
-
----
-
-## 五、原始数据表（--show-native 3次运行结果）
+## 4. 原始数据表（--show-native 3次运行结果）
 
 > **注意**：codex 只提供 `used`（总消耗），无法分解为 input/output/cache 细分字段。
 
@@ -174,7 +115,7 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 
 ---
 
-## 六、统计汇总表
+## 5. 统计汇总表
 
 > **注意**：CV (Coefficient of Variation) = (std/mean)×100%
 > - CV < 5% = 非常稳定
@@ -193,11 +134,11 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 
 | 排名 | Backend | total_tokens (avg) | 说明 |
 |------|---------|-------------------|------|
-| 1 | opencode | 19152 | |
-| 2 | hermes | 18961 | |
-| 3 | codex | 23039 | 仅 total，无细分 |
-| 4 | gemini | 15029 | |
-| 5 | claude-code | 27727 | 含 ~10K cache_write |
+| 1 | claude-code | 27727 | 含 ~10K cache_write |
+| 2 | codex | 23039 | 仅 total，无细分 |
+| 3 | opencode | 19152 | |
+| 4 | hermes | 18961 | |
+| 5 | gemini | 15029 | |
 
 **实际 input_tokens 排序（不含 cache_write）：**
 
@@ -211,19 +152,19 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 
 ---
 
-## 七、缓存行为分析
+## 6. 缓存行为分析
 
-### 7.1 各 Backend 缓存支持情况
+### 6.1 各 Backend 缓存支持情况
 
 | Backend | cache_write | cache_read | 说明 |
 |---------|-------------|------------|------|
-| claude-code | ✅ 3207-3215 | ✅ 24154 (Run 2/3) | 首次写缓存，后续读缓存 |
-| codex | ❌ 无 | ❌ 无 | 不支持细分 |
-| gemini | ❌ 无 | ❌ 无 | 无缓存字段 |
-| hermes | ❌ 无 | ✅ Run 2/3 98% | Run 1 只有 58% |
-| opencode | ❌ 无 | ❌ 无 | 无缓存字段 |
+| claude-code | 有 3207-3215 | 有 24154 (Run 2/3) | 首次写缓存，后续读缓存 |
+| codex | 无 | 无 | 不支持细分 |
+| gemini | 无 | 无 | 无缓存字段 |
+| hermes | 无 | 有 Run 2/3 98% | Run 1 只有 58% |
+| opencode | 无 | 无 | 无缓存字段 |
 
-### 7.2 缓存效果详情
+### 6.2 缓存效果详情
 
 **claude-code:**
 - Run 1: `cachedWriteTokens=3215` (首次写入)
@@ -236,16 +177,16 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 
 ---
 
-## 八、分析与结论
+## 7. 分析与结论
 
-### 8.1 稳定性分析
+### 7.1 稳定性分析
 
 **发现：**
 - 所有 backend 的 input_tokens 极端稳定（CV < 0.1%），表明 tokenization 确定性高
 - output_tokens 波动：claude-code (7.2%), gemini (9.1%), hermes (12.7%), opencode (24.7%)
 - 波动原因：短回答的长度变化（32-89 tokens）导致 output_tokens 变化
 
-### 8.2 Backend 对比分析
+### 7.2 Backend 对比分析
 
 **观察：**
 - claude-code 的 input_tokens (277) 远低于其他 backend，因为只含用户 prompt
@@ -253,7 +194,7 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 - opencode 和 hermes 的 input_tokens 接近（~19k）
 - output_tokens 都很低（32-89），与短回答一致
 
-### 8.3 结论
+### 7.3 结论
 
 **成功项：**
 - 通过 `--show-native` 成功从 5/5 个 backend 获取 token 数据
@@ -266,7 +207,7 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 - gemini/opencode 未报告 cache 相关字段
 - output_tokens 波动较大，但这是正常的（短回答的随机性）
 
-### 8.4 建议
+### 7.4 建议
 
 1. **缓存优化**：hermes 第二次运行 cache 达到 98%，建议研究 claude-code 的缓存机制
 2. **进一步测试**：使用更长的 prompt 来观察 output_tokens 稳定性是否提升
@@ -274,22 +215,22 @@ Log 文件保存在 `gefsi/logs/` 目录（已 gitignore）：
 
 ---
 
-## 九、验收矩阵
+## 8. 验收矩阵
 
 | # | 验收项 | 状态 | 说明 |
 |---|--------|------|------|
-| 1 | 数据完整性（15条记录） | ✅ | 5 backends × 3 runs = 15 条 |
-| 2 | Token字段齐全 | ⚠️ | 4/5 有完整数据，codex 只有 total |
-| 3 | 稳定性可量化 | ✅ | CV 计算完成 |
-| 4 | Backend排序 | ✅ | 按 total_tokens 排序 |
-| 5 | 异常情况记录 | ✅ | codex 无细分已记录 |
-| 6 | 数据可复验 | ✅ | log 文件在 gefsi/logs/ |
-| 7 | 缓存行为分析 | ✅ | hermes/claude-code 缓存效果 |
-| 8 | ACP 配置信息 | ✅ | 各 backend ACP adapter 信息 |
+| 1 | 数据完整性（15条记录） | 通过 | 5 backends x 3 runs = 15 条 |
+| 2 | Token字段齐全 | 部分通过 | 4/5 有完整数据，codex 只有 total |
+| 3 | 稳定性可量化 | 通过 | CV 计算完成 |
+| 4 | Backend排序 | 通过 | 按 total_tokens 排序 |
+| 5 | 异常情况记录 | 通过 | codex 无细分已记录 |
+| 6 | 数据可复验 | 通过 | log 文件在 gefsi/logs/ |
+| 7 | 缓存行为分析 | 通过 | hermes/claude-code 缓存效果 |
+| 8 | ACP 配置信息 | 通过 | 各 backend ACP adapter 信息 |
 
 ---
 
-## 十、复验命令
+## 9. 复验命令
 
 ```bash
 # 1. 环境检查
