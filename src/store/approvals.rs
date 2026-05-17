@@ -79,6 +79,77 @@ impl ApprovalStore {
         Ok(())
     }
 
+    pub fn get_pending_requests(&self) -> Result<Vec<(String, String, String)>> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT r.request_id, r.backend, r.tool_name FROM approval_requests r
+             LEFT JOIN approval_decisions d ON r.request_id = d.request_id
+             WHERE d.request_id IS NULL
+             ORDER BY r.created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    pub fn get_decision_history(
+        &self,
+        execution_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<(String, String, bool)>> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+
+        let mut all_rows: Vec<(String, String, bool)> = Vec::new();
+
+        if let Some(exec_id) = execution_id {
+            let mut stmt = conn.prepare(
+                "SELECT r.request_id, r.tool_name, d.approved FROM approval_requests r
+                 JOIN approval_decisions d ON r.request_id = d.request_id
+                 WHERE r.execution_id = ?1
+                 ORDER BY d.created_at DESC
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![exec_id, limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i32>(2)? != 0,
+                ))
+            })?;
+            for row in rows {
+                all_rows.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT r.request_id, r.tool_name, d.approved FROM approval_requests r
+                 JOIN approval_decisions d ON r.request_id = d.request_id
+                 ORDER BY d.created_at DESC
+                 LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit as i64], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i32>(2)? != 0,
+                ))
+            })?;
+            for row in rows {
+                all_rows.push(row?);
+            }
+        }
+
+        Ok(all_rows)
+    }
+
     fn init(&self) -> Result<()> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute_batch(

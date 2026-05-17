@@ -296,19 +296,44 @@ impl MeanAccumulator {
 
 fn token_event_score(event: &StoredTokenUsage) -> u8 {
     let mut score = 0;
-    if event.source != "session_update.usage_update" {
-        score += 3;
+    // Prefer official backend-reported totals over computed
+    if event.provider_reported_total_tokens.is_some() {
+        score += 5;
     }
+    // Normalized/computed totals are more authoritative
     if event.normalized_total_tokens.is_some() {
-        score += 3;
+        score += 4;
     }
-    if event.input_tokens.is_some() || event.output_tokens.is_some() {
+    // Prefer sources other than partial session updates
+    if event.source != "session_update.usage_update" {
         score += 2;
     }
-    if event.provider_reported_total_tokens.is_some() {
+    // Individual token counts
+    if event.input_tokens.is_some() {
+        score += 1;
+    }
+    if event.output_tokens.is_some() {
         score += 1;
     }
     score
+}
+
+/// Validate token counts: provider total should be >= (input + output + thinking).
+/// Returns error reason if validation fails.
+fn validate_token_counts(event: &StoredTokenUsage) -> Option<String> {
+    let provider_total = event.provider_reported_total_tokens.unwrap_or(0);
+    let computed = event
+        .input_tokens
+        .unwrap_or(0)
+        .saturating_add(event.output_tokens.unwrap_or(0))
+        .saturating_add(event.thinking_tokens.unwrap_or(0));
+    if provider_total > 0 && computed > 0 && computed > provider_total {
+        return Some(format!(
+            "computed tokens ({}) exceed provider total ({})",
+            computed, provider_total
+        ));
+    }
+    None
 }
 
 fn opt_i64(value: Option<u64>) -> Option<i64> {

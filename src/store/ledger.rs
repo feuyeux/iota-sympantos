@@ -152,6 +152,41 @@ impl SessionLedger {
             }),
         ).optional().context("Failed to read session summary")
     }
+
+    pub fn session_stats(&self, session_id: &str) -> Result<Option<(i64, Option<i64>, i64)>> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        conn.query_row(
+            "SELECT s.turn_count, 
+                    (SELECT COUNT(*) FROM turns t WHERE t.iota_session_id = s.iota_session_id),
+                    (SELECT COUNT(DISTINCT backend) FROM turns t WHERE t.iota_session_id = s.iota_session_id)
+             FROM sessions s WHERE s.iota_session_id = ?1",
+            params![session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .context("Failed to read session stats")
+    }
+
+    pub fn get_handoff_history(&self, session_id: &str) -> Result<Vec<(String, String, String)>> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT from_backend, to_backend, summary FROM handoffs 
+             WHERE iota_session_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]

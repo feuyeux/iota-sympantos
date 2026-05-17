@@ -108,7 +108,7 @@ impl CacheStore {
             .map(str::to_string)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now = now_ts();
-        let mut conn = crate::utils::lock_or_recover(&self.conn);
+        let mut conn = self.lock_conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let stale_before = now - RUNNING_EXECUTION_TTL_SECS;
         tx.execute(
@@ -148,7 +148,7 @@ impl CacheStore {
     }
 
     pub fn finish_execution(&self, execution_id: &str, status: ExecutionStatus) -> Result<()> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = self.lock_conn();
         conn.execute(
             "UPDATE cache_executions SET status = ?2, finished_at = ?3 WHERE execution_id = ?1",
             params![execution_id, status.as_str(), now_ts()],
@@ -160,8 +160,15 @@ impl CacheStore {
     // Private helpers
     // -----------------------------------------------------------------------
 
+    fn lock_conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|poisoned| {
+            tracing::error!("cache store connection mutex poisoned, recovering");
+            poisoned.into_inner()
+        })
+    }
+
     fn init(&self) -> Result<()> {
-        let conn = crate::utils::lock_or_recover(&self.conn);
+        let conn = self.lock_conn();
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cache_executions (
@@ -212,4 +219,18 @@ fn purge_old_records(conn: &Connection) {
          AND finished_at < ?1",
         params![cutoff],
     );
+}
+
+// Add deduplication query helper for observability
+pub fn get_execution_status(
+    conn: &Connection,
+    execution_id: &str,
+) -> Result<Option<ExecutionStatus>> {
+    conn.query_row(
+        "SELECT status FROM cache_executions WHERE execution_id = ?1",
+        params![execution_id],
+        |row| Ok(ExecutionStatus::from(row.get::<_, String>(0)?.as_str())),
+    )
+    .optional()
+    .context("Failed to query execution status")
 }
