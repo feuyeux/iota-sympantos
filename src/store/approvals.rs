@@ -79,6 +79,7 @@ impl ApprovalStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_pending_requests(&self) -> Result<Vec<(String, String, String)>> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
@@ -101,6 +102,7 @@ impl ApprovalStore {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     pub fn get_decision_history(
         &self,
         execution_id: Option<&str>,

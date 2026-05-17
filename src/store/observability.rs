@@ -89,6 +89,22 @@ impl ObservabilityStore {
     ) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let raw_payload_json = serde_json::to_string(&usage.raw_payload)?;
+        // Validate token count consistency before persisting.
+        let provider_total = usage.provider_reported_total_tokens.unwrap_or(0);
+        let computed = usage
+            .input_tokens
+            .unwrap_or(0)
+            .saturating_add(usage.output_tokens.unwrap_or(0))
+            .saturating_add(usage.thinking_tokens.unwrap_or(0));
+        if provider_total > 0 && computed > 0 && computed > provider_total {
+            tracing::warn!(
+                execution_id = execution_id.unwrap_or("none"),
+                backend,
+                computed,
+                provider_total,
+                "token count inconsistency: computed > provider_total"
+            );
+        }
         let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute(
             "INSERT INTO token_usage_events (
@@ -199,6 +215,7 @@ impl ObservabilityStore {
             .collect());
     }
 
+    #[allow(dead_code)]
     pub fn token_usage_between(&self, from_ts: i64, to_ts: i64) -> Result<Vec<StoredTokenUsage>> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
@@ -214,15 +231,20 @@ impl ObservabilityStore {
         collect_rows(rows)
     }
 
+    #[allow(dead_code)]
     pub fn token_percentiles(&self, backend: &str) -> Result<TokenPercentiles> {
-        let events = self.recent_token_usage(1000)?;
-        let mut totals: Vec<u64> = events
-            .iter()
-            .filter(|e| e.backend == backend)
-            .filter_map(|e| e.normalized_total_tokens)
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT normalized_total_tokens
+             FROM token_usage_events
+             WHERE backend = ?1 AND normalized_total_tokens IS NOT NULL
+             ORDER BY normalized_total_tokens ASC",
+        )?;
+        let totals: Vec<u64> = stmt
+            .query_map(params![backend], |row| row.get::<_, i64>(0))?
+            .filter_map(|r| r.ok())
+            .filter_map(|v| u64::try_from(v).ok())
             .collect();
-        totals.sort_unstable();
-
         Ok(TokenPercentiles {
             backend: backend.to_string(),
             count: totals.len(),
@@ -360,8 +382,8 @@ fn token_event_score(event: &StoredTokenUsage) -> u8 {
     score
 }
 
-/// Validate token counts: provider total should be >= (input + output + thinking).
-/// Returns error reason if validation fails.
+/// Validates that computed token sum does not exceed provider-reported total.
+#[allow(dead_code)]
 fn validate_token_counts(event: &StoredTokenUsage) -> Option<String> {
     let provider_total = event.provider_reported_total_tokens.unwrap_or(0);
     let computed = event

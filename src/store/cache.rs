@@ -12,14 +12,6 @@ use uuid::Uuid;
 
 use crate::utils::now_ts;
 
-fn running_execution_ttl_secs() -> i64 {
-    crate::config::store_config().cache_running_ttl_secs
-}
-
-fn retention_days() -> i64 {
-    crate::config::store_config().cache_retention_days
-}
-
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -27,6 +19,8 @@ fn retention_days() -> i64 {
 #[derive(Clone)]
 pub struct CacheStore {
     conn: Arc<Mutex<Connection>>,
+    running_ttl_secs: i64,
+    retention_days: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,8 +86,11 @@ impl CacheStore {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open cache store {}", path.display()))?;
+        let cfg = crate::config::store_config();
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
+            running_ttl_secs: cfg.cache_running_ttl_secs,
+            retention_days: cfg.cache_retention_days,
         };
         store.init()?;
         Ok(store)
@@ -116,7 +113,7 @@ impl CacheStore {
         let now = now_ts();
         let mut conn = self.lock_conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stale_before = now - running_execution_ttl_secs();
+        let stale_before = now - self.running_ttl_secs;
         tx.execute(
             "UPDATE cache_executions SET status = 'failed', finished_at = ?3
              WHERE backend = ?1 AND request_hash = ?2 AND status = 'running' AND started_at < ?4",
@@ -162,6 +159,7 @@ impl CacheStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_execution_statuses(
         &self,
         execution_ids: &[&str],
@@ -170,18 +168,27 @@ impl CacheStore {
             return Ok(Vec::new());
         }
         let conn = self.lock_conn();
+        let placeholders = (1..=execution_ids.len())
+            .map(|i| format!("?{}", i))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query = format!(
+            "SELECT execution_id, status FROM cache_executions WHERE execution_id IN ({})",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&query)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(execution_ids.iter().copied()),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    ExecutionStatus::from(row.get::<_, String>(1)?.as_str()),
+                ))
+            },
+        )?;
         let mut results = Vec::new();
-        for id in execution_ids {
-            let status = conn
-                .query_row(
-                    "SELECT status FROM cache_executions WHERE execution_id = ?1",
-                    params![id],
-                    |row| Ok(ExecutionStatus::from(row.get::<_, String>(0)?.as_str())),
-                )
-                .optional()?;
-            if let Some(st) = status {
-                results.push((id.to_string(), st));
-            }
+        for row in rows {
+            results.push(row?);
         }
         Ok(results)
     }
@@ -214,8 +221,8 @@ impl CacheStore {
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_running_lock
     ON cache_executions(backend, request_hash) WHERE status = 'running';",
         )?;
-        // Purge records older than 30 days to bound database growth.
-        purge_old_records(&conn);
+        // Purge records older than retention_days to bound database growth.
+        purge_old_records(&conn, self.retention_days);
         Ok(())
     }
 }
@@ -239,8 +246,8 @@ pub fn request_hash(backend: &str, cwd: &Path, prompt: &str) -> String {
 // Private helpers
 // ---------------------------------------------------------------------------
 
-fn purge_old_records(conn: &Connection) {
-    let cutoff = now_ts() - retention_days() * 86_400;
+fn purge_old_records(conn: &Connection, retention_days: i64) {
+    let cutoff = now_ts() - retention_days * 86_400;
     let _ = conn.execute(
         "DELETE FROM cache_executions
          WHERE status IN ('completed', 'failed')
@@ -250,7 +257,8 @@ fn purge_old_records(conn: &Connection) {
     );
 }
 
-// Add deduplication query helper for observability
+/// Standalone deduplication query helper (e.g. for observability cross-checks).
+#[allow(dead_code)]
 pub fn get_execution_status(
     conn: &Connection,
     execution_id: &str,

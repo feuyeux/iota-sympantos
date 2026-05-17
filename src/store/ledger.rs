@@ -153,6 +153,7 @@ impl SessionLedger {
         ).optional().context("Failed to read session summary")
     }
 
+    #[allow(dead_code)]
     pub fn session_stats(&self, session_id: &str) -> Result<Option<(i64, Option<i64>, i64)>> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         conn.query_row(
@@ -167,6 +168,7 @@ impl SessionLedger {
         .context("Failed to read session stats")
     }
 
+    #[allow(dead_code)]
     pub fn get_handoff_history(&self, session_id: &str) -> Result<Vec<(String, String, String)>> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
