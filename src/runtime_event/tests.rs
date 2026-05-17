@@ -210,6 +210,39 @@ fn normalizes_gemini_acp_quota_token_count() {
 }
 
 #[test]
+fn normalizes_gemini_acp_model_usage_as_provider_total() {
+    let usage = token_usage_from_value(&json!({
+        "stopReason": "end_turn",
+        "_meta": {
+            "quota": {
+                "token_count": {
+                    "input_tokens": 14983,
+                    "output_tokens": 30
+                },
+                "model_usage": [
+                    {
+                        "model": "gemini-2.5-flash",
+                        "token_count": {
+                            "input_tokens": 14983,
+                            "output_tokens": 30
+                        }
+                    }
+                ]
+            }
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(usage.provider.as_deref(), Some("gemini"));
+    assert_eq!(usage.source.as_deref(), Some("_meta.quota.token_count"));
+    assert_eq!(usage.model.as_deref(), Some("gemini-2.5-flash"));
+    assert_eq!(usage.input_tokens, Some(14983));
+    assert_eq!(usage.output_tokens, Some(30));
+    assert_eq!(usage.provider_reported_total_tokens, Some(15013));
+    assert_eq!(usage.normalized_total_tokens, Some(15013));
+}
+
+#[test]
 fn normalizes_adapter_thought_tokens_from_camel_case_usage() {
     let usage = token_usage_from_value(&json!({
         "usage": {

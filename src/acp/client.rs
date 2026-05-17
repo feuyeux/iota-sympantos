@@ -7,8 +7,8 @@ use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tokio::time::{Duration, timeout};
 
 use super::message::{JsonRpcRequest, JsonRpcResponse};
-use super::stream_reader::read_prompt_events_for_id;
 use super::session::session_new_params_with_options;
+use super::stream_reader::read_prompt_events_for_id;
 use super::types::{AcpClientStartOptions, AcpSessionResolution};
 use super::util::{elapsed_ms, should_forward_backend_stderr};
 use super::wire::{format_acp_error, is_response_id, parse_message_line, read_next_line};

@@ -238,11 +238,11 @@ pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<Acp
 
     let mut servers = Vec::new();
     if let Some(server) =
-        command_to_mcp_server("iota-context", engine.mcp.as_ref(), &["context-mcp"])
+        command_to_mcp_server("iota-context", engine.mcp.as_ref(), &["mcp", "context"])
     {
         servers.push(server);
     }
-    if let Some(server) = command_to_mcp_server("iota-fun", engine.fun.as_ref(), &["fun-mcp"]) {
+    if let Some(server) = command_to_mcp_server("iota-fun", engine.fun.as_ref(), &["mcp", "fun"]) {
         servers.push(server);
     }
     if servers.is_empty() {
@@ -374,8 +374,8 @@ fn command_to_mcp_server(
 
 fn default_context_mcp_servers() -> Vec<AcpMcpServer> {
     [
-        command_to_mcp_server("iota-context", None, &["context-mcp"]),
-        command_to_mcp_server("iota-fun", None, &["fun-mcp"]),
+        command_to_mcp_server("iota-context", None, &["mcp", "context"]),
+        command_to_mcp_server("iota-fun", None, &["mcp", "fun"]),
     ]
     .into_iter()
     .flatten()

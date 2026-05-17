@@ -252,10 +252,7 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
         .provider
         .or_else(|| infer_provider(usage, found.source))
         .map(str::to_string);
-    let input_main = first_u64(
-        usage,
-        &["input_tokens", "inputTokens", "promptTokenCount"],
-    );
+    let input_main = first_u64(usage, &["input_tokens", "inputTokens", "promptTokenCount"]);
     let prompt_tokens = first_u64(usage, &["prompt_tokens", "promptTokens"]);
     let cache_read_input_tokens = first_u64(
         usage,
@@ -320,10 +317,15 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
     )
     .or_else(|| first_nested_u64(usage, "output_tokens_details", &["reasoning_tokens"]))
     .or_else(|| first_nested_u64(usage, "completion_tokens_details", &["reasoning_tokens"]));
-    let tool_use_prompt_tokens =
-        first_u64(usage, &["tool_use_prompt_tokens", "toolUsePromptTokenCount"]);
-    let provider_reported_total_tokens =
-        first_u64(usage, &["total_tokens", "totalTokens", "totalTokenCount", "used"]);
+    let tool_use_prompt_tokens = first_u64(
+        usage,
+        &["tool_use_prompt_tokens", "toolUsePromptTokenCount"],
+    );
+    let provider_reported_total_tokens = first_u64(
+        usage,
+        &["total_tokens", "totalTokens", "totalTokenCount", "used"],
+    )
+    .or_else(|| gemini_acp_model_usage_total(value, found.source));
     let normalized_total_tokens = normalized_total_tokens(
         provider.as_deref(),
         found.source,
@@ -368,7 +370,8 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
         provider_reported_total_tokens,
         normalized_total_tokens,
         model: first_string(value, &["model", "modelName"])
-            .or_else(|| first_string(usage, &["model", "modelName"])),
+            .or_else(|| first_string(usage, &["model", "modelName"]))
+            .or_else(|| gemini_acp_model_usage_model(value, found.source)),
         payload: usage.clone(),
         raw_payload: usage.clone(),
     })
@@ -493,6 +496,69 @@ fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
+fn gemini_acp_model_usage_total(value: &Value, source: &str) -> Option<u64> {
+    if source != "_meta.quota.token_count" {
+        return None;
+    }
+    let model_usage = value
+        .get("_meta")
+        .and_then(|meta| meta.get("quota"))
+        .and_then(|quota| quota.get("model_usage"))
+        .and_then(Value::as_array)?;
+
+    let mut total = 0_u64;
+    let mut found = false;
+    for entry in model_usage {
+        let Some(token_count) = entry
+            .get("token_count")
+            .filter(|token_count| token_count.is_object())
+        else {
+            continue;
+        };
+        let entry_total = first_u64(
+            token_count,
+            &["total_tokens", "totalTokens", "totalTokenCount"],
+        )
+        .or_else(|| {
+            let input = first_u64(token_count, &["input_tokens", "inputTokens"])?;
+            Some(
+                input
+                    + first_u64(token_count, &["output_tokens", "outputTokens"]).unwrap_or(0)
+                    + first_u64(
+                        token_count,
+                        &[
+                            "thinking_tokens",
+                            "thinkingTokens",
+                            "thought_tokens",
+                            "thoughtTokens",
+                            "thoughtsTokenCount",
+                        ],
+                    )
+                    .unwrap_or(0),
+            )
+        });
+        if let Some(entry_total) = entry_total {
+            total += entry_total;
+            found = true;
+        }
+    }
+    found.then_some(total)
+}
+
+fn gemini_acp_model_usage_model(value: &Value, source: &str) -> Option<String> {
+    if source != "_meta.quota.token_count" {
+        return None;
+    }
+    value
+        .get("_meta")
+        .and_then(|meta| meta.get("quota"))
+        .and_then(|quota| quota.get("model_usage"))
+        .and_then(Value::as_array)?
+        .iter()
+        .find_map(|entry| entry.get("model").and_then(Value::as_str))
+        .map(str::to_string)
+}
+
 fn infer_provider(usage: &Value, source: &str) -> Option<&'static str> {
     if source == "usageMetadata" || source == "_meta.quota.token_count" {
         return Some("gemini");
@@ -554,7 +620,8 @@ fn normalized_total_tokens(
             })
         }),
         _ => provider_reported_total_tokens.or_else(|| {
-            input_tokens.map(|input| input + output_tokens.unwrap_or(0) + thinking_tokens.unwrap_or(0))
+            input_tokens
+                .map(|input| input + output_tokens.unwrap_or(0) + thinking_tokens.unwrap_or(0))
         }),
     }
 }

@@ -1,5 +1,5 @@
-pub mod stderr;
 pub mod metrics;
+pub mod stderr;
 
 use anyhow::Result;
 use opentelemetry::KeyValue;

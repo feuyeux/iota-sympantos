@@ -38,16 +38,14 @@ pub async fn run() -> Result<()> {
                     run_cmd::run_direct(&options).await
                 };
             }
-            "mcp" => {
-                match args.get(1).map(String::as_str) {
-                    Some("context") => return mcp_server::run_stdio(),
-                    Some("fun") => return fun::run_stdio(),
-                    _ => {
-                        eprintln!("Usage: iota mcp <context|fun>");
-                        std::process::exit(2);
-                    }
+            "mcp" => match args.get(1).map(String::as_str) {
+                Some("context") => return mcp_server::run_stdio(),
+                Some("fun") => return fun::run_stdio(),
+                _ => {
+                    eprintln!("Usage: iota mcp <context|fun>");
+                    std::process::exit(2);
                 }
-            }
+            },
             "context-mcp" => {
                 return mcp_server::run_stdio();
             }

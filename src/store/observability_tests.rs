@@ -32,7 +32,10 @@ fn records_and_queries_token_usage_by_execution_id() {
     assert_eq!(record.cache_read_input_tokens, Some(24154));
     assert_eq!(record.cache_creation_input_tokens, Some(3215));
     assert_eq!(record.output_tokens, Some(85));
-    assert_eq!(record.normalized_total_tokens, Some(277 + 24154 + 3215 + 85));
+    assert_eq!(
+        record.normalized_total_tokens,
+        Some(277 + 24154 + 3215 + 85)
+    );
     assert_eq!(record.raw_payload["cache_creation_input_tokens"], 3215);
 }
 

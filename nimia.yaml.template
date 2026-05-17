@@ -114,10 +114,10 @@ context_engine:
   episodic_compaction_keep: 40
   mcp:
     command: iota
-    args: ["context-mcp"]
+    args: ["mcp", "context"]
   fun:
     command: iota
-    args: ["fun-mcp"]
+    args: ["mcp", "fun"]
   embedding:
     base_url: http://localhost:11434    # Ollama default
     model: nomic-embed-text

@@ -199,7 +199,9 @@ fn observability_line(meta: &ObservabilityMeta) -> Option<String> {
         .as_deref()
         .map(|execution_id| execution_id.chars().take(8).collect::<String>())
         .filter(|short| !short.is_empty())
-        .map_or(Some(line.clone()), |short| Some(format!("{}: {}", short, line)))
+        .map_or(Some(line.clone()), |short| {
+            Some(format!("{}: {}", short, line))
+        })
 }
 
 #[cfg(test)]
@@ -264,7 +266,10 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(line, "2255c021: total 4634ms · prompt 4199ms · 28624 tokens");
+        assert_eq!(
+            line,
+            "2255c021: total 4634ms · prompt 4199ms · 28624 tokens"
+        );
     }
 
     #[test]

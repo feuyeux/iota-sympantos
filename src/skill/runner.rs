@@ -92,13 +92,13 @@ fn server_command(server: &str) -> (String, Vec<String>) {
             .ok()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "iota".to_string());
-        (command, vec!["fun-mcp".to_string()])
+        (command, vec!["mcp".to_string(), "fun".to_string()])
     } else if server == "iota-context" {
         let command = std::env::current_exe()
             .ok()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "iota".to_string());
-        (command, vec!["context-mcp".to_string()])
+        (command, vec!["mcp".to_string(), "context".to_string()])
     } else {
         (server.to_string(), Vec::new())
     }

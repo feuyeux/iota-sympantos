@@ -1,7 +1,7 @@
 pub mod backend;
-pub mod helpers;
 pub mod context;
 pub mod effective;
+pub mod helpers;
 pub mod loader;
 pub mod model;
 pub mod paths;
@@ -13,7 +13,6 @@ pub use backend::{
     BackendConfig, CommandConfig, backend_config, backend_process_env_with_context, command_label,
     configured_model, normalized_acp_command,
 };
-pub use helpers::{expand_home_path, normalize_command};
 #[allow(unused_imports)]
 pub use context::context_mcp_session_enabled;
 pub use context::{
@@ -28,6 +27,7 @@ pub use context::{
     context_session_options, context_skill_roots, context_tool_whitelist,
 };
 pub use effective::EffectiveConfig;
+pub use helpers::{expand_home_path, normalize_command};
 pub use loader::{config_path, read_config};
 #[allow(unused_imports)]
 pub use model::ModelConfig;

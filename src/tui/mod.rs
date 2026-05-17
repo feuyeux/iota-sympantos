@@ -6,12 +6,12 @@
 //!   composer  3 rows — single-line input with history recall
 //!   status    1 row  — bottom-left: backend · model  /  right: key hints
 
-mod input;
 mod events;
-mod scrollback;
+mod input;
 mod r#loop;
 mod markdown;
 mod render;
+mod scrollback;
 mod state;
 mod status_bar;
 mod terminal_lifecycle;

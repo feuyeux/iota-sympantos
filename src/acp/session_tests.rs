@@ -7,7 +7,7 @@ fn server() -> AcpMcpServer {
     AcpMcpServer {
         name: "iota-context".to_string(),
         command: "iota".to_string(),
-        args: vec!["context-mcp".to_string()],
+        args: vec!["mcp".to_string(), "context".to_string()],
         env,
     }
 }

@@ -103,7 +103,9 @@ pub(super) async fn run_observability_command(args: &[String]) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&records)?);
             Ok(())
         }
-        ObservabilityCommand::TokensRecent { limit, json } => print_token_recent(&store, limit, json),
+        ObservabilityCommand::TokensRecent { limit, json } => {
+            print_token_recent(&store, limit, json)
+        }
         ObservabilityCommand::TokensSummary { since_secs, json } => {
             let since_ts = crate::utils::now_ts() - since_secs;
             let summaries = store.token_summary_since(since_ts)?;
@@ -131,12 +133,8 @@ pub(super) async fn run_observability_command(args: &[String]) -> Result<()> {
             }
             Ok(())
         }
-        ObservabilityCommand::Logs { execution_id } => {
-            run_logs_command_inner(&execution_id).await
-        }
-        ObservabilityCommand::Trace { trace_id } => {
-            run_trace_command_inner(&trace_id).await
-        }
+        ObservabilityCommand::Logs { execution_id } => run_logs_command_inner(&execution_id).await,
+        ObservabilityCommand::Trace { trace_id } => run_trace_command_inner(&trace_id).await,
     }
 }
 
@@ -224,7 +222,9 @@ fn parse_since(args: &[String], default_secs: i64) -> Result<i64> {
         Some('d') => (&value[..value.len() - 1], 86_400),
         _ => (value.as_str(), 1),
     };
-    let amount: i64 = number.parse().context("--since must be like 60s, 15m, 2h, or 1d")?;
+    let amount: i64 = number
+        .parse()
+        .context("--since must be like 60s, 15m, 2h, or 1d")?;
     Ok(amount * multiplier)
 }
 
@@ -237,7 +237,8 @@ fn parse_format(args: &[String]) -> String {
 }
 
 fn has_json_flag(args: &[String]) -> bool {
-    args.iter().any(|arg| arg == "--json" || arg == "--format=json")
+    args.iter()
+        .any(|arg| arg == "--json" || arg == "--format=json")
 }
 
 fn print_token_recent(store: &ObservabilityStore, limit: usize, json: bool) -> Result<()> {
@@ -298,7 +299,11 @@ fn print_prometheus_metrics(summaries: &[TokenUsageSummary]) {
         let labels = format!("{{backend=\"{}\"}}", summary.backend);
         println!("iota_token_usage_count{} {}", labels, summary.count);
         if let Some(mean) = summary.input_tokens_mean {
-            println!("iota_token_input_total{} {}", labels, mean * summary.count as f64);
+            println!(
+                "iota_token_input_total{} {}",
+                labels,
+                mean * summary.count as f64
+            );
         }
         if let Some(mean) = summary.cache_read_input_tokens_mean {
             println!(
@@ -315,7 +320,11 @@ fn print_prometheus_metrics(summaries: &[TokenUsageSummary]) {
             );
         }
         if let Some(mean) = summary.output_tokens_mean {
-            println!("iota_token_output_total{} {}", labels, mean * summary.count as f64);
+            println!(
+                "iota_token_output_total{} {}",
+                labels,
+                mean * summary.count as f64
+            );
         }
         if let Some(mean) = summary.thinking_tokens_mean {
             println!(
@@ -363,14 +372,16 @@ mod tests {
 
     #[test]
     fn parses_tokens_recent_json_limit() {
-        let command = parse_observability_args(&args(&[
-            "tokens", "recent", "--limit", "7", "--json",
-        ]))
-        .unwrap();
+        let command =
+            parse_observability_args(&args(&["tokens", "recent", "--limit", "7", "--json"]))
+                .unwrap();
 
         assert!(matches!(
             command,
-            ObservabilityCommand::TokensRecent { limit: 7, json: true }
+            ObservabilityCommand::TokensRecent {
+                limit: 7,
+                json: true
+            }
         ));
     }
 

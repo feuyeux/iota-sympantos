@@ -14,10 +14,10 @@ use crate::store::cache::CacheStore;
 use crate::store::ledger::SessionLedger;
 use crate::store::observability::ObservabilityStore;
 
-mod telemetry;
-mod session_ledger;
 mod memory_ops;
 mod prompt;
+mod session_ledger;
+mod telemetry;
 
 #[cfg(test)]
 use crate::memory::RecallBuckets;

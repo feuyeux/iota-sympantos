@@ -51,7 +51,10 @@ pub struct TokenUsageSummary {
 
 impl ObservabilityStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
@@ -127,7 +130,10 @@ impl ObservabilityStore {
         let events = self.recent_token_usage(limit.saturating_mul(20).max(limit))?;
         let mut best_by_execution: BTreeMap<String, StoredTokenUsage> = BTreeMap::new();
         for event in events {
-            let key = event.execution_id.clone().unwrap_or_else(|| event.id.clone());
+            let key = event
+                .execution_id
+                .clone()
+                .unwrap_or_else(|| event.id.clone());
             match best_by_execution.get(&key) {
                 Some(existing) if token_event_score(existing) >= token_event_score(&event) => {}
                 _ => {
@@ -160,7 +166,10 @@ impl ObservabilityStore {
         let events = self.token_usage_since(since_ts)?;
         let mut best_by_execution: BTreeMap<String, StoredTokenUsage> = BTreeMap::new();
         for event in events {
-            let key = event.execution_id.clone().unwrap_or_else(|| event.id.clone());
+            let key = event
+                .execution_id
+                .clone()
+                .unwrap_or_else(|| event.id.clone());
             match best_by_execution.get(&key) {
                 Some(existing) if token_event_score(existing) >= token_event_score(&event) => {}
                 _ => {
@@ -246,7 +255,8 @@ impl SummaryAccumulator {
         self.cache_creation.add(event.cache_creation_input_tokens);
         self.output.add(event.output_tokens);
         self.thinking.add(event.thinking_tokens);
-        self.provider_total.add(event.provider_reported_total_tokens);
+        self.provider_total
+            .add(event.provider_reported_total_tokens);
         self.normalized_total.add(event.normalized_total_tokens);
     }
 

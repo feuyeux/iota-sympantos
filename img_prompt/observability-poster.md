@@ -1,19 +1,17 @@
 # docs/observability.md poster prompt
 
-Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `observatory control room`, `signal routing diagram`, `fine cross-hatching`, `hand-drawn infrastructure map`, `warm paper texture`.
+Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `observatory control room`, `signal routing diagram`, `fine cross-hatching`, `warm paper texture`.
 
 Create a vertical poster for the document `iota observability`.
 
-Scene: show iota as a small command desk sending three kinds of signals into an old-fashioned observatory: logs, traces, and metrics. The signals travel through brass-labeled tubes into an OpenTelemetry Collector at the center. From there, three paths branch to Loki as a log archive library, Jaeger as a trace telescope charting spans across the sky, and Prometheus as a metric gauge wall with moving needles. Grafana appears as a large wall screen that combines the three views. A separate lower-left corner shows local operation without Docker: stderr, daily files under `~/.i6/logs/`, and SQLite stores under `~/.i6/context/` (events.sqlite, memory.sqlite, approvals.sqlite, sessions.sqlite).
+Scene: iota sits at a simple signal desk with two operating modes side by side. Left side (local): stderr tracing, daily files under `~/.i6/logs/`, and four SQLite stores under `~/.i6/context/` (events · memory · approvals · sessions). Right side (Docker stack): signals flow through an OTel Collector into three destinations — Loki (logs), Jaeger (traces), Prometheus (metrics) — combined on a Grafana wall screen. A small label panel shows key addresses: `OTLP :4317`, `Loki :3100`, `Jaeger :16686`, `Prometheus :9090`, `Grafana :3000`. Below the desk, six RuntimeEvent packet types float as labeled envelopes: Output · ToolCall · TokenUsage · Memory · ApprovalRequest · Error.
 
-RuntimeEvent signals shown as small labeled packets: Output, State, Log, ToolCall, ToolResult, Error, Extension, TokenUsage, Memory, ApprovalRequest, ApprovalDecision. Log events carry structured fields: ts, level, target, event, tool_name, latency_ms.
+Three CLI commands shown as buttons: `iota observability logs <id>`, `iota observability trace <id>`, `iota observability tokens summary`.
 
-Local telemetry modules: telemetry/stderr.rs (tracing layer), telemetry/metrics.rs (OTel meter), store/cache.rs (execution lifecycle), store/approvals.rs (approval audit), store/ledger.rs (session/turn/handoff).
+Composition: portrait poster, 2:3 aspect ratio. Left half = local fallback, right half = Docker stack, OTel Collector as the bridge. Title `iota Observability` at top.
 
-Composition: portrait poster, 2:3 aspect ratio. Central hub-and-spoke layout with the OTel Collector as the main switching lens. Put Docker observability stack on the right side and local fallback behavior on the left side. Include readable short labels: `OTLP :4317`, `Loki :3100`, `Jaeger :16686`, `Prometheus :9090`, `Grafana :3000`, `OTEL_ENABLED=false`, `iota run --log-events / --timing`, and `iota logs / iota trace`. Add the title `iota Observability` at the top.
+Style: meticulous black-and-white pen drawing, precise arrows, minimal magenta accent on live telemetry pulses. Clean and readable, not cluttered.
 
-Style: meticulous black-and-white pen drawing, Victorian scientific instrument meets modern infrastructure diagram, cross-hatching, stippled shadows, precise arrows, minimal magenta accent on live telemetry pulses. Avoid making it look like a generic cloud architecture slide.
+Mood: transparent, investigative — every runtime signal traceable from source to storage.
 
-Mood: investigative, transparent, a control room where every runtime signal can be followed from source to storage.
-
-Negative prompt: blurry dashboards, unreadable labels, stock cloud icons, overbright neon, colorful SaaS illustration, 3D render, abstract blobs, random graphs without meaning, fake brand logos, old module names (telemetry/console.rs, store/approval.rs), Prometheus metrics pipeline (Promtail deprecated).
+Negative prompt: blurry dashboards, stock cloud icons, overbright neon, fake brand logos, random graphs, 3D render, old command names (iota logs, iota trace as top-level), obsolete modules (telemetry/console.rs, store/approval.rs, Promtail).
