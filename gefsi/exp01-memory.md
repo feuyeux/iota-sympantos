@@ -8,8 +8,34 @@
 | 参考规范 | iota-guides/08-memory.md v2.1 |
 | 存储层 | SQLite `~/.i6/context/memory.sqlite`（Rust `memory.rs`） |
 | 结果日志 | `gefsi/logs/exp01-final-*`、`gefsi/logs/exp01-full-log-*-fixed.*` |
+| git branch | `work` |
+| git commit | `c9d4ec62f148` |
+| Rust toolchain | `rustc 1.95.0 (59807616e 2026-04-14)` |
+| binary sha256 | Linux release binary `47f38006e9fb4155fe1a0243ac59f5ac1a18cc246927acb23e9af9b6cb1bd3e9`；Windows `iota.exe` 本轮实验原始哈希未记录 |
+| cargo test | Step 10.10 验证：`107 passed` |
 
 ---
+
+## 执行摘要
+
+本次 exp01-memory 验证 iota-sympantos Memory 系统在 `claude-code`、`codex`、`gemini`、`hermes`、`opencode` 五个后端之间切换时，是否能保持 Engine 层记忆写入、召回、注入和审计一致性。
+
+结论：**通过，但部分 observability 与 schema 语义为条件通过 / 需复核**。
+
+关键结果：
+
+- 6 类记忆桶 `identity` / `preference` / `strategic` / `domain` / `procedural` / `episodic` 均成功写入，并在后端切换后召回。
+- `contentHash` 去重有效：重复写入保持同一 `id` / `hash`，仅更新 `updated_at`。
+- `confidence` 过滤有效：低置信度记录保留在 DB，但不进入注入上下文。
+- `memory_chars=2000` budget 截断可观测，trace 显示 `truncated=true` 和 `excluded_count=7`。
+- EventStore、console trace、MCP sidecar route、backend tool call/result 均形成可审计链路。
+- 本轮修复后，ACP 泛化 `tool` 事件可归一化为真实 `iota_memory_write` / `iota_memory_search` 工具事件。
+
+已知限制：
+
+- `token usage events` 本轮为 `0`，metrics 中 token 维度未被有效验证。
+- Step 10 中 backend tool write probe 的 prompt 指定 `confidence=0.91`，但实际 DB confidence 为 `1.00`，说明后端省略参数的行为仍需单独跟踪。
+- Memory API route 主进程日志依赖后端是否回传 sidecar stderr；直连 sidecar 已验证，但跨所有后端的主日志捕获仍不是强保证。
 
 ## 一、实验目标
 
@@ -86,6 +112,20 @@
 | domain | 0.80 |
 | procedural | 0.75 |
 | episodic | 0.70 |
+
+### 2.5 confidence 行为说明
+
+本实验观察到两类路径，需避免把它们混为同一种约束：
+
+1. 直连 `context-mcp` JSON-RPC 路径
+   - schema/runtime 要求 `confidence`。
+   - 缺少 `confidence` 会返回 `isError=true` 和 `confidence is required`。
+2. backend 经 ACP/MCP tool call 路径
+   - 某些后端可能没有按 prompt 保留 `confidence` 参数。
+   - 当 tool call payload 实际缺少 `confidence` 时，当前存储层会使用默认 `1.00`。
+   - 这解释了 Step 1-E 和 Step 10.2 中 `confidence=-` / DB `1.00` 的现象。
+
+风险：如果业务语义要求 backend tool write 必须显式携带 `confidence`，则当前行为仍需修复；如果默认 `1.00` 是设计行为，则应将该默认值策略写入 Memory API 规范。
 
 ---
 
@@ -442,6 +482,8 @@ trace 中 budget：
 | cache.hit_rate | 0.07258064516129033 |
 | token usage events | 0 |
 
+说明：本实验验证了 metrics 命令可运行、基础执行统计可查询、Prometheus 格式可导出；但 `token usage events = 0`，因此本轮没有验证 token usage 采集链路的正确性。token usage 应作为后续独立实验或 exp01 的补充项。
+
 本轮 Step 1 到 Step 8 覆盖 fencing token `89..102`，包含 `claude-code`、`codex`、`gemini`、`hermes`、`opencode`。
 
 Step 7 low identity breakdown：
@@ -469,7 +511,7 @@ EventStore 事件流检查：
 
 后续补充：`observability logging tools --limit 3 --tool iota_memory_write --mode pairs` 已支持按真实工具名过滤，并输出 `tool_call` / `tool_result` 成对审计视图。
 
-判定：通过。修复后工具调用和工具结果都可在 EventStore 中以真实工具名审计。
+判定：条件通过。修复后工具调用和工具结果都可在 EventStore 中以真实工具名审计；metrics 查询和 Prometheus 导出可用，但 token usage 采集未覆盖。
 
 ---
 
@@ -482,6 +524,16 @@ EventStore 事件流检查：
 ```text
 exp01-full-log-probe-20260507-fixed
 ```
+
+#### Step 10 总览：完整记忆日志链路
+
+| 链路 | backend | execution_id | 关键事件 | 结果 |
+|------|---------|--------------|----------|------|
+| backend tool write | claude-code | `5f0914d7-8a4b-43d2-86d7-07ad1efe668f` | `tool_call iota_memory_write` + `tool_result iota_memory_write` | 通过 |
+| backend tool search | claude-code | `7445ea10-52cf-4fee-a82e-0ab8c5a5235a` | `tool_call iota_memory_search` + `tool_result iota_memory_search` | 通过 |
+| engine episodic write | gemini | `ab4afaad-946a-408a-b1e6-8b6cb8504306` | `engine episodic memory write completed` | 通过 |
+| route direct probe | context-mcp | - | `memory search received/completed` | 通过 |
+| EventStore persistence | mixed | 多个 | `state` / `memory` / `tool_call` / `tool_result` / `output` | 通过 |
 
 #### 10.1 日志捕获准备
 
@@ -703,9 +755,18 @@ EventStore 结论：
 
 判定：通过。
 
-#### 10.9 清理状态
+#### 10.9 数据保留与清理策略
 
-本次没有在文档更新前删除 probe 记录，原因是 Step 10 的 DB 侧证据需要保留到文档完成。可在需要时执行：
+本次没有在文档更新前删除 probe 记录，原因是 Step 10 的 DB 侧证据需要保留到文档完成。实验数据分为以下几类：
+
+| 类型 | 例子 | 默认策略 |
+|------|------|----------|
+| 验证用固定记忆 | Step 1 六类 memory | 实验结束后可清理 |
+| 审计 probe | `exp01-full-log-probe-*` | 文档完成前保留，归档后清理 |
+| padding 数据 | `domain-padding-*` | budget 验证后应清理 |
+| 低置信度数据 | `低置信度测试*` | confidence 验证后应清理 |
+
+归档报告时建议执行最终清理 SQL，并在报告中记录清理前后的 count。可在需要时执行：
 
 ```powershell
 & "$env:USERPROFILE\Tools\sqlite\sqlite3.exe" "$env:USERPROFILE\.i6\context\memory.sqlite" `
@@ -754,29 +815,103 @@ cargo build --release
 
 ## 五、验收矩阵
 
-| # | 验收项 | 步骤 | 本次结果 |
-|---|--------|------|----------|
-| 1 | identity 跨后端延续 | Step 2 | 通过 |
-| 2 | preference 跨后端延续 | Step 3 | 通过 |
-| 3 | strategic + domain 跨后端延续 | Step 4 | 通过 |
-| 4 | procedural + episodic 延续 | Step 5 | 通过 |
-| 5 | contentHash 去重 | Step 6 | 通过 |
-| 6 | confidence 过滤（identity） | Step 7 | 通过 |
-| 7 | confidence 过滤（procedural） | Step 7 | 通过 |
-| 8 | token budget 截断 | Step 8 | 通过，`truncated=true`, `excluded_count=7` |
-| 9 | SQLite schema 合规 | Step 1 | 通过 |
-| 10 | trace 事件完整性 | Step 2-5 | 通过 |
-| 11 | EventStore 持久化 | Step 9 | 通过 |
-| 12 | Logging 多后端覆盖 | Step 9 | 通过 |
-| 13 | Tracing 延迟分解 | Step 9 | 通过 |
-| 14 | Metrics 指标可查 | Step 9 | 通过 |
-| 15 | Prometheus 导出 | Step 9 | 通过 |
-| 16 | Step 10 Engine recall/inject 日志 | Step 10 | 通过 |
-| 17 | Step 10 backend MCP tool call 审计 | Step 10 | 通过，真实 `iota_memory_*` 工具名已归一化 |
-| 18 | Step 10 Memory API route 日志 | Step 10 | 通过，直连 `context-mcp` 可见 received/completed/record_count |
-| 19 | Step 10 Engine 自动 episodic | Step 10 | 通过 |
-| 20 | 控制台 memory read/write 日志 | Step 6/7/10 | 通过，新增 `[memory:read/write]` 和结果日志 |
+| 验收项 | 结果 | 证据 | 备注 |
+|--------|------|------|------|
+| 跨后端 memory recall/inject | 强通过 | Step 2-5 | 五个 backend 均覆盖 |
+| 六类记忆桶写入与注入 | 强通过 | Step 1-5 | `identity` / `preference` / `strategic` / `domain` / `procedural` / `episodic` 均覆盖 |
+| contentHash 去重 | 强通过 | Step 6 | id/hash 不变，`updated_at` 更新 |
+| confidence 过滤 | 强通过 | Step 7 | DB 存在但不注入 |
+| scope 过滤 | 强通过 | Step 2-7 | user/project/session 范围按约定召回 |
+| token budget 截断 | 强通过 | Step 8 | `truncated=true`，`excluded_count=7` |
+| EventStore 持久化 | 强通过 | Step 9-10 | `state` / `memory` / `tool_call` / `tool_result` / `output` 可查 |
+| backend MCP tool call 审计 | 强通过 | Step 10 | 真实 `iota_memory_*` 工具名已归一化 |
+| 控制台 memory read/write 日志 | 强通过 | Step 6/7/10 | 新增 `[memory:read/write]` 和结果日志 |
+| observability metrics | 条件通过 | Step 9 | metrics 可查且 Prometheus 可导出，但 `token usage events = 0` |
+| Memory API route 主日志 | 条件通过 | Step 10.5 | 直连 sidecar 已验证；主进程侧依赖 backend stderr 传回 |
+| backend schema 强制 confidence | 需复核 | Step 1-E / Step 10.2 | schema/runtime 对直连路径要求 `confidence`，但 backend 省略 payload 时仍默认 `1.00` 入库 |
 
-结论：核心 memory 延续、去重、过滤、budget、observability 和完整日志链路均通过。本轮已修复上一轮暴露的 RuntimeEvent 工具名/结果归一化问题，并新增控制台 memory read/write 结构化日志。
+---
+
+## 六、失败判定标准
+
+- Step 2：backend 回复未包含 identity 内容，或 trace 中 `identity` 桶未包含 `a68ec01a`，判定失败。
+- Step 3：backend 回复未包含 preference 内容，或 trace 中 `preference` 桶未包含 `84ec24a4`，判定失败。
+- Step 4：backend 回复未包含 strategic/domain 内容，或 trace 中对应桶未包含 `3b0e6dad` / `680aeb70`，判定失败。
+- Step 5：backend 回复未包含 procedural/episodic 内容，或 trace 中对应桶未包含 `ac413811` / `d75d5464`，判定失败。
+- Step 6：重复写入后同 content 行数大于 1，或 id/hash 发生变化，判定失败。
+- Step 7：低置信度记录进入 `[memory:inject]`，判定失败。
+- Step 8：`eligible_chars > memory_chars` 但 trace 未显示 `truncated=true`，判定失败。
+- Step 9：EventStore 中缺少真实工具名 `iota_memory_write` / `iota_memory_search`，判定失败。
+- Step 10：`tool_call` 和 `tool_result` 无法成对出现，或 execution `status != completed`，判定失败。
+
+---
+
+## 七、最小复现流程
+
+当前文档保留了完整人工执行日志。为了升级为可重复回归，建议将下列入口脚本化：
+
+```powershell
+# 1. Build
+cargo build --release
+
+# 2. Check backend config
+.\target\release\iota.exe check
+
+# 3. Clean experiment data
+$sqlite = "$env:USERPROFILE\Tools\sqlite\sqlite3.exe"
+$memoryDb = "$env:USERPROFILE\.i6\context\memory.sqlite"
+& $sqlite $memoryDb "DELETE FROM memory
+  WHERE scope_id IN ('user-sympantos','iota-sympantos','local-user')
+     OR scope_id LIKE '%iota-sympantos'
+     OR content LIKE '%exp01-full-log-probe-%'
+     OR content LIKE '%domain-padding-%'
+     OR content LIKE '%低置信度测试%';"
+
+# 4. Run Step 1 writes
+# TODO: call scripts/exp01-memory/02-write-six-buckets.ps1
+
+# 5. Run cross-backend recall checks
+# TODO: call scripts/exp01-memory/03-verify-cross-backend.ps1
+
+# 6. Run dedupe / confidence / budget checks
+# TODO: call scripts/exp01-memory/04-verify-dedup-confidence-budget.ps1
+
+# 7. Run observability checks
+# TODO: call scripts/exp01-memory/05-verify-observability.ps1
+```
+
+建议后续新增脚本目录：
+
+```text
+scripts/exp01-memory/
+  00-build-and-check.ps1
+  01-clean.ps1
+  02-write-six-buckets.ps1
+  03-verify-cross-backend.ps1
+  04-verify-dedup-confidence-budget.ps1
+  05-verify-observability.ps1
+```
+
+---
+
+## 八、最终结论
+
+本次 exp01-memory 在指定环境下通过。
+
+已强验证：
+
+- Engine 层 memory 写入、召回、注入与后端解耦。
+- `claude-code` 写入的 6 类记忆可被 `codex` / `gemini` / `hermes` / `opencode` 召回。
+- `contentHash` 去重、`confidence` 过滤、scope 过滤、memory budget 截断均有 DB 与 trace 证据。
+- `RuntimeEvent` / EventStore 已能审计真实 `iota_memory_write` / `iota_memory_search` tool call/result。
+- 控制台 trace、EventStore、MCP sidecar route、Engine episodic write 形成完整可观测链路。
+
+条件通过 / 后续跟踪：
+
+- `token usage events` 本轮为 `0`，token 采集未被覆盖。
+- backend tool call 中 `confidence` 被省略时仍可能落库为默认 `1.00`，需要明确为设计行为或继续修复。
+- Memory API route 在主进程日志中的可见性依赖 backend stderr 转发行为；直连 sidecar 已验证，跨后端一致性建议另设回归测试。
+
+建议将本实验纳入回归集，并将核心流程脚本化为 `scripts/exp01-memory/*.ps1`。
 
 ---
