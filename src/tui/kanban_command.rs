@@ -272,3 +272,7 @@ fn cmd_help() -> Vec<String> {
         "Aliases: /kb, /k".to_string(),
     ]
 }
+
+#[cfg(test)]
+#[path = "kanban_command_tests.rs"]
+mod tests;
