@@ -752,7 +752,7 @@ iota observability tokens recent --limit N [--json]
 
 iota observability tokens summary --since 1h [--json]
   -> token_summary_since()
-  -> backend summary mean/std/count
+  -> backend summary mean/std/CV/count
 
 iota observability logging events <execution_id>
   -> token_usage_for_execution()

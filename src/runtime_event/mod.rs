@@ -373,7 +373,7 @@ pub fn token_usage_from_value(value: &Value) -> Option<TokenUsageEvent> {
             .or_else(|| first_string(usage, &["model", "modelName"]))
             .or_else(|| gemini_acp_model_usage_model(value, found.source)),
         payload: usage.clone(),
-        raw_payload: usage.clone(),
+        raw_payload: value.clone(),
     })
 }
 

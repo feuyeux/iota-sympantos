@@ -11,11 +11,13 @@
 | `iota observability logging recent --limit N` | `ObservabilityStore` | 输出最近 execution-level token 记录 |
 | `iota observability logging events <execution_id>` | `ObservabilityStore` | 输出某个 execution 的 raw token usage events |
 | `iota observability tokens recent --limit N [--json]` | `ObservabilityStore` | 输出最近 token usage 明细 |
-| `iota observability tokens summary --since 1h [--json]` | `ObservabilityStore` | 按 backend 输出 token 均值、标准差和计数 |
+| `iota observability tokens summary --since 1h [--json]` | `ObservabilityStore` | 按 backend 输出 token 均值、标准差、CV 和计数 |
 | `iota observability tokens export --format json` | `ObservabilityStore` | 导出 token usage 明细 JSON |
 | `iota observability metrics --prometheus` | `ObservabilityStore` | 输出本地 token 聚合指标 |
-| `iota logs <execution_id>` | Loki HTTP API | 按 `iota_execution_id` 查询远端日志 |
-| `iota trace <trace_id>` | Jaeger HTTP API | 查询 trace span 并打印简要瀑布 |
+| `iota observability logs <execution_id>` | Loki HTTP API | 按 `iota_execution_id` 查询远端日志 |
+| `iota observability trace <trace_id>` | Jaeger HTTP API | 查询 trace span 并打印简要瀑布 |
+| `iota logs <execution_id>` | Loki HTTP API | `iota observability logs` 的顶层别名，等效 |
+| `iota trace <trace_id>` | Jaeger HTTP API | `iota observability trace` 的顶层别名，等效 |
 
 环境变量：
 
@@ -78,7 +80,7 @@ RuntimeEvent::TokenUsage
   -> token_usage_events
 ```
 
-`tokens recent`、`tokens summary` 和 `metrics --prometheus` 使用 execution-level 去重视图：同一 execution 中如果同时存在 `usage_update` 和 final `usage`，优先选择字段更完整的 final usage。
+`tokens recent`、`tokens summary` 和 `metrics --prometheus` 使用 execution-level 去重视图：同一 execution 中如果同时存在 `usage_update` 和 final `usage`，优先选择字段更完整的 final usage。`tokens summary` 对每个 token 字段输出 mean/stddev/CV；字段缺失不按 0 计入。
 
 ## 日志边界
 

@@ -3,6 +3,15 @@ use crate::runtime_event::token_usage_from_value;
 use serde_json::json;
 use std::path::Path;
 
+fn assert_float_close(actual: Option<f64>, expected: f64) {
+    let actual = actual.unwrap();
+    let rel_err = (actual - expected).abs() / expected.abs();
+    assert!(
+        rel_err < 1e-9,
+        "expected {expected}, got {actual} (relative error {rel_err:.2e})"
+    );
+}
+
 #[test]
 fn records_and_queries_token_usage_by_execution_id() {
     let store = ObservabilityStore::open(Path::new(":memory:")).unwrap();
@@ -36,7 +45,10 @@ fn records_and_queries_token_usage_by_execution_id() {
         record.normalized_total_tokens,
         Some(277 + 24154 + 3215 + 85)
     );
-    assert_eq!(record.raw_payload["cache_creation_input_tokens"], 3215);
+    assert_eq!(
+        record.raw_payload["usage"]["cache_creation_input_tokens"],
+        3215
+    );
 }
 
 #[test]
@@ -67,6 +79,13 @@ fn summarizes_recent_token_usage_by_backend() {
     assert_eq!(summaries[0].count, 3);
     assert_eq!(summaries[0].provider_reported_total_mean, Some(400.0 / 3.0));
     assert_eq!(summaries[0].normalized_total_mean, Some(400.0 / 3.0));
+    assert_float_close(
+        summaries[0].provider_reported_total_stddev,
+        30.550504633038933,
+    );
+    assert_float_close(summaries[0].normalized_total_stddev, 30.550504633038933);
+    assert_float_close(summaries[0].provider_reported_total_cv, 0.229128784747792);
+    assert_float_close(summaries[0].normalized_total_cv, 0.229128784747792);
 }
 
 #[test]

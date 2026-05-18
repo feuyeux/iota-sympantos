@@ -54,6 +54,9 @@ pub async fn run() -> Result<()> {
             "observability" => {
                 return observability_cmd::run_observability_command(&args[1..]).await;
             }
+            "logs" | "trace" => {
+                return observability_cmd::run_observability_command(&args).await;
+            }
             "skill" => {
                 return skill_cmd::run_skill_command(&args[1..]).await;
             }
@@ -116,7 +119,7 @@ pub(super) fn print_route_timing(
 
 fn print_help() {
     println!(
-        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench <cold|warm> [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota observability <logging|tokens|metrics|logs|trace> ...\n  iota mcp <context|fun>\n  iota context-mcp\n  iota fun-mcp\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nObservability subcommands:\n  iota observability logging <recent|events> ...\n  iota observability tokens <recent|summary|export> ...\n  iota observability metrics [--prometheus]\n  iota observability logs <execution_id>   (Loki)\n  iota observability trace <trace_id>      (Jaeger)\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
+        "Usage:\n  iota\n  iota check [--daemon|-d]\n  iota bench <cold|warm> [rounds] [--daemon|-d]\n  iota run [backend] [options] <prompt>\n  iota observability <logging|tokens|metrics|logs|trace> ...\n  iota logs <execution_id>\n  iota trace <trace_id>\n  iota mcp <context|fun>\n  iota context-mcp\n  iota fun-mcp\n  iota skill pull <source> [name]\n\nNotes:\n  No arguments enters the TUI.\n  check prints one combined JSON structure.\n  Add --daemon or -d to route supported commands through the local daemon; it starts silently if needed.\n\nObservability subcommands:\n  iota observability logging <recent|events> ...\n  iota observability tokens <recent|summary|export> ...\n  iota observability metrics [--prometheus]\n  iota observability logs <execution_id>   (Loki)\n  iota observability trace <trace_id>      (Jaeger)\n\nConfiguration:\n  All backend config is read from ~/.i6/nimia.yaml.\n  No external project config, network overlay, or auto-discovery is used.\n\nRun `iota run --help` for run options."
     );
 }
 

@@ -41,12 +41,26 @@ pub struct TokenUsageSummary {
     pub backend: String,
     pub count: u64,
     pub input_tokens_mean: Option<f64>,
+    pub input_tokens_stddev: Option<f64>,
+    pub input_tokens_cv: Option<f64>,
     pub cache_read_input_tokens_mean: Option<f64>,
+    pub cache_read_input_tokens_stddev: Option<f64>,
+    pub cache_read_input_tokens_cv: Option<f64>,
     pub cache_creation_input_tokens_mean: Option<f64>,
+    pub cache_creation_input_tokens_stddev: Option<f64>,
+    pub cache_creation_input_tokens_cv: Option<f64>,
     pub output_tokens_mean: Option<f64>,
+    pub output_tokens_stddev: Option<f64>,
+    pub output_tokens_cv: Option<f64>,
     pub thinking_tokens_mean: Option<f64>,
+    pub thinking_tokens_stddev: Option<f64>,
+    pub thinking_tokens_cv: Option<f64>,
     pub provider_reported_total_mean: Option<f64>,
+    pub provider_reported_total_stddev: Option<f64>,
+    pub provider_reported_total_cv: Option<f64>,
     pub normalized_total_mean: Option<f64>,
+    pub normalized_total_stddev: Option<f64>,
+    pub normalized_total_cv: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,12 +343,26 @@ impl SummaryAccumulator {
             backend,
             count: self.count,
             input_tokens_mean: self.input.mean(),
+            input_tokens_stddev: self.input.stddev(),
+            input_tokens_cv: self.input.cv(),
             cache_read_input_tokens_mean: self.cache_read.mean(),
+            cache_read_input_tokens_stddev: self.cache_read.stddev(),
+            cache_read_input_tokens_cv: self.cache_read.cv(),
             cache_creation_input_tokens_mean: self.cache_creation.mean(),
+            cache_creation_input_tokens_stddev: self.cache_creation.stddev(),
+            cache_creation_input_tokens_cv: self.cache_creation.cv(),
             output_tokens_mean: self.output.mean(),
+            output_tokens_stddev: self.output.stddev(),
+            output_tokens_cv: self.output.cv(),
             thinking_tokens_mean: self.thinking.mean(),
+            thinking_tokens_stddev: self.thinking.stddev(),
+            thinking_tokens_cv: self.thinking.cv(),
             provider_reported_total_mean: self.provider_total.mean(),
+            provider_reported_total_stddev: self.provider_total.stddev(),
+            provider_reported_total_cv: self.provider_total.cv(),
             normalized_total_mean: self.normalized_total.mean(),
+            normalized_total_stddev: self.normalized_total.stddev(),
+            normalized_total_cv: self.normalized_total.cv(),
         }
     }
 }
@@ -342,6 +370,7 @@ impl SummaryAccumulator {
 #[derive(Default)]
 struct MeanAccumulator {
     sum: u64,
+    sum_squares: f64,
     count: u64,
 }
 
@@ -349,12 +378,31 @@ impl MeanAccumulator {
     fn add(&mut self, value: Option<u64>) {
         if let Some(value) = value {
             self.sum += value;
+            self.sum_squares += (value as f64) * (value as f64);
             self.count += 1;
         }
     }
 
     fn mean(&self) -> Option<f64> {
         (self.count > 0).then(|| self.sum as f64 / self.count as f64)
+    }
+
+    fn stddev(&self) -> Option<f64> {
+        if self.count < 2 {
+            return None;
+        }
+        let count = self.count as f64;
+        let sum = self.sum as f64;
+        let variance = (self.sum_squares - (sum * sum / count)) / (count - 1.0);
+        Some(variance.max(0.0).sqrt())
+    }
+
+    fn cv(&self) -> Option<f64> {
+        let mean = self.mean()?;
+        if mean == 0.0 {
+            return None;
+        }
+        Some(self.stddev()? / mean)
     }
 }
 

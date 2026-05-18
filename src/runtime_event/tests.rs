@@ -133,7 +133,10 @@ fn normalizes_anthropic_cache_read_and_creation_tokens() {
     assert_eq!(usage.output_tokens, Some(85));
     assert_eq!(usage.normalized_total_tokens, Some(277 + 24154 + 3215 + 85));
     assert_eq!(usage.provider_reported_total_tokens, None);
-    assert_eq!(usage.raw_payload["cache_creation_input_tokens"], 3215);
+    assert_eq!(
+        usage.raw_payload["usage"]["cache_creation_input_tokens"],
+        3215
+    );
 }
 
 #[test]
@@ -240,6 +243,10 @@ fn normalizes_gemini_acp_model_usage_as_provider_total() {
     assert_eq!(usage.output_tokens, Some(30));
     assert_eq!(usage.provider_reported_total_tokens, Some(15013));
     assert_eq!(usage.normalized_total_tokens, Some(15013));
+    assert_eq!(
+        usage.raw_payload["_meta"]["quota"]["model_usage"][0]["model"],
+        "gemini-2.5-flash"
+    );
 }
 
 #[test]

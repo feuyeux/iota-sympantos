@@ -274,20 +274,48 @@ fn print_recent_table(records: &[StoredTokenUsage]) {
 
 fn print_summary_table(summaries: &[TokenUsageSummary]) {
     println!(
-        "backend\tcount\tinput_avg\tcache_read_avg\tcache_creation_avg\toutput_avg\tthinking_avg\tprovider_total_avg\tnormalized_total_avg"
+        "backend\tcount\tinput\tcache_read\tcache_creation\toutput\tthinking\tprovider_total\tnormalized_total"
     );
     for summary in summaries {
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             summary.backend,
             summary.count,
-            fmt_float(summary.input_tokens_mean),
-            fmt_float(summary.cache_read_input_tokens_mean),
-            fmt_float(summary.cache_creation_input_tokens_mean),
-            fmt_float(summary.output_tokens_mean),
-            fmt_float(summary.thinking_tokens_mean),
-            fmt_float(summary.provider_reported_total_mean),
-            fmt_float(summary.normalized_total_mean)
+            fmt_mean_std_cv(
+                summary.input_tokens_mean,
+                summary.input_tokens_stddev,
+                summary.input_tokens_cv
+            ),
+            fmt_mean_std_cv(
+                summary.cache_read_input_tokens_mean,
+                summary.cache_read_input_tokens_stddev,
+                summary.cache_read_input_tokens_cv
+            ),
+            fmt_mean_std_cv(
+                summary.cache_creation_input_tokens_mean,
+                summary.cache_creation_input_tokens_stddev,
+                summary.cache_creation_input_tokens_cv
+            ),
+            fmt_mean_std_cv(
+                summary.output_tokens_mean,
+                summary.output_tokens_stddev,
+                summary.output_tokens_cv
+            ),
+            fmt_mean_std_cv(
+                summary.thinking_tokens_mean,
+                summary.thinking_tokens_stddev,
+                summary.thinking_tokens_cv
+            ),
+            fmt_mean_std_cv(
+                summary.provider_reported_total_mean,
+                summary.provider_reported_total_stddev,
+                summary.provider_reported_total_cv
+            ),
+            fmt_mean_std_cv(
+                summary.normalized_total_mean,
+                summary.normalized_total_stddev,
+                summary.normalized_total_cv
+            ),
         );
     }
 }
@@ -362,6 +390,18 @@ fn fmt_float(value: Option<f64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+/// Format as "mean±std(CV=x%)" when stddev is available, or just "mean" when not.
+fn fmt_mean_std_cv(mean: Option<f64>, stddev: Option<f64>, cv: Option<f64>) -> String {
+    let Some(mean) = mean else {
+        return "-".to_string();
+    };
+    match (stddev, cv) {
+        (Some(std), Some(cv)) => format!("{mean:.1}±{std:.1}(CV={:.0}%)", cv * 100.0),
+        (Some(std), None) => format!("{mean:.1}±{std:.1}"),
+        _ => format!("{mean:.1}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,6 +446,26 @@ mod tests {
         assert!(matches!(
             command,
             ObservabilityCommand::Metrics { prometheus: true }
+        ));
+    }
+
+    #[test]
+    fn parses_logs_alias() {
+        let command = parse_observability_args(&args(&["logs", "exec-1"])).unwrap();
+
+        assert!(matches!(
+            command,
+            ObservabilityCommand::Logs { execution_id } if execution_id == "exec-1"
+        ));
+    }
+
+    #[test]
+    fn parses_trace_alias() {
+        let command = parse_observability_args(&args(&["trace", "trace-1"])).unwrap();
+
+        assert!(matches!(
+            command,
+            ObservabilityCommand::Trace { trace_id } if trace_id == "trace-1"
         ));
     }
 }
