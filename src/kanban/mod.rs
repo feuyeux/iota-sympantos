@@ -2,6 +2,7 @@ pub mod state_machine;
 pub mod types;
 pub mod store;
 pub mod sqlite_store;
+pub mod shadow;
 
 #[cfg(test)]
 mod sqlite_store_tests;
