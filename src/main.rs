@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod daemon;
 mod engine;
+mod kanban;
 mod mcp;
 mod memory;
 mod runtime_event;
