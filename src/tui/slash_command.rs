@@ -19,6 +19,7 @@ pub(super) enum SlashAction {
     Export,
     Quit,
     SubmitToBackend,
+    Kanban,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,7 @@ const COMMAND_SPECS: &[SlashCommandSpec] = &[
         SlashAction::Status,
     ),
     local("export", &["save"], SlashAction::Export),
+    local("kanban", &["kb", "k"], SlashAction::Kanban),
     local("quit", &["exit"], SlashAction::Quit),
     spec("q", &[], BACKEND_OPENCODE, SlashAction::Quit),
     // Gemini ACP confirmed: /init (acpCommandHandler.ts InitCommand)

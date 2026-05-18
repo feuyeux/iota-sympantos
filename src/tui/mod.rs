@@ -8,6 +8,7 @@
 
 mod events;
 mod input;
+mod kanban_command;
 mod r#loop;
 mod markdown;
 mod render;
@@ -36,6 +37,7 @@ use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::acp::{ALL_BACKENDS, AcpBackend};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
+use crate::kanban::{KanbanStore, SqliteKanbanStore};
 use crate::telemetry::metrics;
 use input::Composer;
 use render::observability_line;
@@ -79,6 +81,9 @@ struct TuiApp {
     engine: Arc<TokioMutex<IotaEngine>>,
     config: NimiaConfig,
     cwd: PathBuf,
+
+    // Kanban store
+    kanban_store: Arc<dyn KanbanStore>,
 
     // Conversation and input state
     history: HistoryState,
@@ -158,10 +163,23 @@ impl TuiApp {
         let (turn_tx, turn_rx) = mpsc::channel(4);
         let (stream_tx, stream_rx) = mpsc::channel::<String>(64);
 
+        // Kanban store initialization
+        let kanban_dir = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".i6")
+            .join("kanban");
+        std::fs::create_dir_all(&kanban_dir).ok();
+        let kanban_db_path = kanban_dir.join("iota.db");
+        let kanban_store: Arc<dyn KanbanStore> = Arc::new(
+            SqliteKanbanStore::open(&kanban_db_path)
+                .context("Failed to open kanban store")?,
+        );
+
         Ok(Self {
             engine,
             config,
             cwd,
+            kanban_store,
             history: HistoryState::new(MAX_HISTORY),
             composer: Composer::new(),
             active_backend,
@@ -296,6 +314,12 @@ impl TuiApp {
                     });
                 }
             },
+            SlashAction::Kanban => {
+                let lines = kanban_command::execute(command.args, &self.kanban_store, None);
+                for line in lines {
+                    self.record_entry(ConversationEntry::SystemNotice { text: line });
+                }
+            }
             SlashAction::Quit => {
                 self.quit_confirm_tick = Some(self.tick_count);
                 self.overlay = Overlay::QuitConfirm;
@@ -415,7 +439,7 @@ impl TuiApp {
 
         for entry in &self.history.entries {
             match entry {
-                ConversationEntry::UserMessage { text } => {
+                ConversationEntry::UserMessage { text, .. } => {
                     content.push_str("YOU:\n");
                     content.push_str(text);
                     content.push_str("\n\n");
@@ -484,6 +508,7 @@ impl TuiApp {
         }
         self.record_entry(ConversationEntry::UserMessage {
             text: forward_text.clone(),
+            backend: Some(self.active_backend),
         });
         self.running_turn = true;
         self.turn_started_at = Some(std::time::Instant::now());
