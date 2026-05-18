@@ -3,6 +3,9 @@ pub mod types;
 pub mod store;
 pub mod sqlite_store;
 
+#[cfg(test)]
+mod sqlite_store_tests;
+
 pub use state_machine::validate_transition;
 pub use store::KanbanStore;
 pub use sqlite_store::SqliteKanbanStore;
