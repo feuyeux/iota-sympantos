@@ -1,10 +1,20 @@
+use crate::kanban::{CreateTaskRequest, Dispatcher, KanbanStore, Status, TaskFilter, TaskPatch};
 use std::sync::Arc;
-use crate::kanban::{CreateTaskRequest, KanbanStore, Status, TaskFilter, TaskPatch};
+use std::sync::{Mutex, TryLockError};
 
 pub(super) fn execute(
     args: &str,
     store: &Arc<dyn KanbanStore>,
     default_board: Option<&str>,
+) -> Vec<String> {
+    execute_with_dispatcher(args, store, default_board, None)
+}
+
+pub(super) fn execute_with_dispatcher(
+    args: &str,
+    store: &Arc<dyn KanbanStore>,
+    default_board: Option<&str>,
+    dispatcher: Option<&Arc<Mutex<Dispatcher>>>,
 ) -> Vec<String> {
     let parts: Vec<&str> = args.split_whitespace().collect();
     let subcmd = parts.first().copied().unwrap_or("list");
@@ -17,13 +27,20 @@ pub(super) fn execute(
         "move" | "mv" | "transition" => cmd_move(&parts[1..], store),
         "comment" | "note" => cmd_comment(&parts[1..], store),
         "assign" => cmd_assign(&parts[1..], store),
-        "dispatch" | "run" => cmd_dispatch(store),
+        "dispatch" | "run" => cmd_dispatch(store, dispatcher),
         "help" | "?" => cmd_help(),
-        _ => vec![format!("Unknown kanban subcommand: {}. Try /kanban help", subcmd)],
+        _ => vec![format!(
+            "Unknown kanban subcommand: {}. Try /kanban help",
+            subcmd
+        )],
     }
 }
 
-fn cmd_list(args: &[&str], store: &Arc<dyn KanbanStore>, default_board: Option<&str>) -> Vec<String> {
+fn cmd_list(
+    args: &[&str],
+    store: &Arc<dyn KanbanStore>,
+    default_board: Option<&str>,
+) -> Vec<String> {
     let status_filter = args.first().and_then(|s| s.parse::<Status>().ok());
 
     let board_id = default_board.and_then(|slug| store.get_board(slug).ok().map(|b| b.id));
@@ -62,7 +79,9 @@ fn cmd_boards(store: &Arc<dyn KanbanStore>) -> Vec<String> {
     match store.list_boards() {
         Ok(boards) => {
             if boards.is_empty() {
-                return vec!["No boards. Create one with: /kanban board create <slug> <name>".to_string()];
+                return vec![
+                    "No boards. Create one with: /kanban board create <slug> <name>".to_string(),
+                ];
             }
             let mut out = vec!["Boards:".to_string()];
             for board in &boards {
@@ -95,7 +114,11 @@ fn cmd_board(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
     }
 }
 
-fn cmd_create(args: &[&str], store: &Arc<dyn KanbanStore>, default_board: Option<&str>) -> Vec<String> {
+fn cmd_create(
+    args: &[&str],
+    store: &Arc<dyn KanbanStore>,
+    default_board: Option<&str>,
+) -> Vec<String> {
     if args.is_empty() {
         return vec!["Usage: /kanban create <title>".to_string()];
     }
@@ -110,7 +133,12 @@ fn cmd_create(args: &[&str], store: &Arc<dyn KanbanStore>, default_board: Option
     } else {
         match store.list_boards() {
             Ok(boards) if !boards.is_empty() => boards[0].id,
-            _ => return vec!["No boards exist. Create one first: /kanban board create <slug> <name>".to_string()],
+            _ => {
+                return vec![
+                    "No boards exist. Create one first: /kanban board create <slug> <name>"
+                        .to_string(),
+                ];
+            }
         }
     };
 
@@ -226,7 +254,39 @@ fn cmd_assign(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
     }
 }
 
-fn cmd_dispatch(store: &Arc<dyn KanbanStore>) -> Vec<String> {
+fn cmd_dispatch(
+    store: &Arc<dyn KanbanStore>,
+    dispatcher: Option<&Arc<Mutex<Dispatcher>>>,
+) -> Vec<String> {
+    if let Some(dispatcher) = dispatcher {
+        let mut dispatcher = match dispatcher.try_lock() {
+            Ok(dispatcher) => dispatcher,
+            Err(TryLockError::WouldBlock) => {
+                return vec![
+                    "Dispatch already running in the background; try again after it finishes."
+                        .to_string(),
+                ];
+            }
+            Err(TryLockError::Poisoned(err)) => {
+                eprintln!(
+                    "[iota] warning: kanban dispatcher mutex was poisoned; recovering inner value"
+                );
+                err.into_inner()
+            }
+        };
+        return match dispatcher.tick(store.as_ref()) {
+            Ok(report) => vec![format!(
+                "Dispatch tick: spawned: {}, completed: {}, timed out: {}, spawn failures: {}, reclaimed: {}",
+                report.spawned,
+                report.completed,
+                report.timed_out,
+                report.spawn_failures,
+                report.reclaimed
+            )],
+            Err(e) => vec![format!("Dispatch failed: {}", e)],
+        };
+    }
+
     let filter = TaskFilter {
         board_id: None,
         status: Some(Status::Ready),
@@ -265,7 +325,7 @@ fn cmd_help() -> Vec<String> {
         "  /kanban move <id> <status>  - Transition task to a new status".to_string(),
         "  /kanban comment <id> <text> - Add a comment to a task".to_string(),
         "  /kanban assign <id> <user>  - Assign a task to a user".to_string(),
-        "  /kanban dispatch            - List tasks ready to dispatch".to_string(),
+        "  /kanban dispatch            - Tick dispatcher and show activity".to_string(),
         "  /kanban help                - Show this help".to_string(),
         "".to_string(),
         "Statuses: triage, todo, ready, running, blocked, done, archived".to_string(),

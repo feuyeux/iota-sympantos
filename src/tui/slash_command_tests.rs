@@ -127,7 +127,7 @@ fn dynamic_or_unknown_slash_command_is_submitted_to_active_backend() {
     assert!(app.running_turn);
     assert!(matches!(
         app.history.entries.back(),
-        Some(ConversationEntry::UserMessage { text }) if text == "/my-command arg"
+        Some(ConversationEntry::UserMessage { text, .. }) if text == "/my-command arg"
     ));
 }
 
@@ -255,7 +255,7 @@ fn compress_alias_is_normalised_to_compact_before_forwarding() {
         assert!(
             matches!(
                 app.history.entries.back(),
-                Some(ConversationEntry::UserMessage { text }) if text == "/compact"
+                Some(ConversationEntry::UserMessage { text, .. }) if text == "/compact"
             ),
             "backend={backend}: alias /compress must be normalised to /compact"
         );

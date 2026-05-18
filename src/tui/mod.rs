@@ -24,7 +24,7 @@ mod slash_command_tests;
 
 use std::io::{IsTerminal, Stdout};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use crossterm::terminal::enable_raw_mode;
@@ -37,7 +37,7 @@ use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::acp::{ALL_BACKENDS, AcpBackend};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
-use crate::kanban::{KanbanStore, SqliteKanbanStore};
+use crate::kanban::{Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
 use crate::telemetry::metrics;
 use input::Composer;
 use render::observability_line;
@@ -84,6 +84,7 @@ struct TuiApp {
 
     // Kanban store
     kanban_store: Arc<dyn KanbanStore>,
+    kanban_dispatcher: Arc<Mutex<Dispatcher>>,
 
     // Conversation and input state
     history: HistoryState,
@@ -171,15 +172,16 @@ impl TuiApp {
         std::fs::create_dir_all(&kanban_dir).ok();
         let kanban_db_path = kanban_dir.join("iota.db");
         let kanban_store: Arc<dyn KanbanStore> = Arc::new(
-            SqliteKanbanStore::open(&kanban_db_path)
-                .context("Failed to open kanban store")?,
+            SqliteKanbanStore::open(&kanban_db_path).context("Failed to open kanban store")?,
         );
+        let kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig::default())));
 
         Ok(Self {
             engine,
             config,
             cwd,
             kanban_store,
+            kanban_dispatcher,
             history: HistoryState::new(MAX_HISTORY),
             composer: Composer::new(),
             active_backend,
@@ -315,7 +317,12 @@ impl TuiApp {
                 }
             },
             SlashAction::Kanban => {
-                let lines = kanban_command::execute(command.args, &self.kanban_store, None);
+                let lines = kanban_command::execute_with_dispatcher(
+                    command.args,
+                    &self.kanban_store,
+                    None,
+                    Some(&self.kanban_dispatcher),
+                );
                 for line in lines {
                     self.record_entry(ConversationEntry::SystemNotice { text: line });
                 }

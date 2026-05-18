@@ -7,6 +7,7 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 - **跨后端记忆** — Rust 引擎层 SQLite 存储（SHA-256 去重、FTS5、6 召回桶）。任一后端写入的记忆可在其他后端召回注入。
 - **确定性技能** — YAML 声明的技能由 Rust 引擎分发，触发匹配与输出模板与后端无关，所有后端产出一致的结构化结果。
 - **iota-fun 多语言执行** — 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` 支持。
+- **Kanban 任务管理** — 内置任务看板系统，支持状态机、依赖管理、执行追踪和事件溯源。适用于 Agent 长期任务管理和复杂流水线编排。
 - **Daemon 热路径** — 可选 TCP daemon 保持 ACP 客户端预热；任何命令加 `--daemon/-d` 即可路由。
 - **交互式 TUI** — ratatui 循环，含多行编辑器、Markdown 渲染、流式输出与权限审批覆层。
 
@@ -30,6 +31,10 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 | [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
 | [`docs/observability.md`](docs/observability.md) | logs/trace、RuntimeEvent、metrics、CacheStore 边界 |
 | [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
+| [`docs/hermes-kanban-guide.md`](docs/hermes-kanban-guide.md) | Kanban 功能完整指南 |
+| [`docs/hermes-kanban-example.md`](docs/hermes-kanban-example.md) | Hermes Agent 使用 Kanban 示例 |
+| [`docs/hermes-kanban-sequence-diagrams.md`](docs/hermes-kanban-sequence-diagrams.md) | Kanban 交互时序图 |
+| [`docs/kanban-architecture-deep-dive.md`](docs/kanban-architecture-deep-dive.md) | Kanban 架构深度解析 |
 
 ## 功能实验室
 
@@ -68,6 +73,14 @@ codex:
 ```
 
 `iota check` 查看所有后端的生效配置。
+
+### Hermes 后端
+
+需要先安装 Hermes Agent：
+
+```bash
+pip install 'hermes-agent[acp]'
+```
 
 ### 运行
 

@@ -1,7 +1,9 @@
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crate::kanban::{KanbanStore, SqliteKanbanStore};
+use crate::kanban::{
+    CreateTaskRequest, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore, Status,
+};
 
 fn test_store() -> Arc<dyn KanbanStore> {
     Arc::new(SqliteKanbanStore::open(Path::new(":memory:")).unwrap())
@@ -22,6 +24,11 @@ fn test_help() {
     assert!(
         out.iter().any(|l| l.contains("Kanban commands")),
         "help output should contain 'Kanban commands', got: {:?}",
+        out
+    );
+    assert!(
+        out.iter().any(|l| l.contains("Tick dispatcher")),
+        "help output should describe dispatch side effects, got: {:?}",
         out
     );
 }
@@ -209,4 +216,63 @@ fn test_dispatch_no_ready() {
         "expected 'No ready tasks' message, got: {:?}",
         out
     );
+}
+
+#[test]
+fn test_dispatch_ticks_dispatcher() {
+    let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = concrete.create_board("dev", "Development").unwrap();
+    let task_id = concrete
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Ready task".to_string(),
+            body: None,
+            status: Some(Status::Ready),
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+    let store: Arc<dyn KanbanStore> = Arc::new(concrete);
+    let tmp = std::env::temp_dir().join(format!("iota-kb-cmd-{}", uuid::Uuid::new_v4()));
+    let dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig {
+        max_concurrent: 1,
+        hermes_bin: Path::new("/missing/hermes-for-iota-test").to_path_buf(),
+        shadows_dir: tmp.clone(),
+        ..Default::default()
+    })));
+
+    let out = super::execute_with_dispatcher("dispatch", &store, None, Some(&dispatcher));
+
+    assert!(
+        out.iter().any(|l| l.contains("spawn failures: 1")),
+        "expected dispatcher report, got: {:?}",
+        out
+    );
+    assert_eq!(store.get_task(task_id).unwrap().status, Status::Ready);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_dispatch_reports_busy_instead_of_blocking_on_dispatcher_lock() {
+    let store = test_store();
+    let tmp = std::env::temp_dir().join(format!("iota-kb-cmd-{}", uuid::Uuid::new_v4()));
+    let dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig {
+        shadows_dir: tmp.clone(),
+        ..Default::default()
+    })));
+    let guard = dispatcher.lock().unwrap();
+
+    let out = super::execute_with_dispatcher("dispatch", &store, None, Some(&dispatcher));
+
+    drop(guard);
+    assert!(
+        out.iter()
+            .any(|line| line.contains("already running in the background")),
+        "expected non-blocking busy message, got: {:?}",
+        out
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
 }

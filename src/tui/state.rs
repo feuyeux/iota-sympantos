@@ -23,6 +23,7 @@ pub struct ObservabilityMeta {
 pub enum ConversationEntry {
     UserMessage {
         text: String,
+        backend: Option<AcpBackend>,
     },
     AssistantMessage {
         backend: AcpBackend,

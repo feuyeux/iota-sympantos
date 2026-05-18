@@ -221,6 +221,8 @@ impl CacheStore {
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_running_lock
     ON cache_executions(backend, request_hash) WHERE status = 'running';",
         )?;
+        // Clean up stale running executions globally on startup.
+        cleanup_stale_running(&conn, self.running_ttl_secs);
         // Purge records older than retention_days to bound database growth.
         purge_old_records(&conn, self.retention_days);
         Ok(())
@@ -245,6 +247,16 @@ pub fn request_hash(backend: &str, cwd: &Path, prompt: &str) -> String {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+fn cleanup_stale_running(conn: &Connection, running_ttl_secs: i64) {
+    let now = now_ts();
+    let stale_before = now - running_ttl_secs;
+    let _ = conn.execute(
+        "UPDATE cache_executions SET status = 'failed', finished_at = ?1
+         WHERE status = 'running' AND started_at < ?2",
+        params![now, stale_before],
+    );
+}
 
 fn purge_old_records(conn: &Connection, retention_days: i64) {
     let cutoff = now_ts() - retention_days * 86_400;

@@ -31,10 +31,8 @@ pub struct WorkerEnv {
 // ---------------------------------------------------------------------------
 
 pub struct WorkerHandle {
-    pub task_id: TaskId,
     pub run_id: RunId,
     pub child: Child,
-    pub shadow_path: PathBuf,
     pub started_at: Instant,
 }
 
@@ -42,29 +40,27 @@ impl WorkerHandle {
     /// Spawn `hermes -p <profile>` with the required environment variables.
     /// The context string is written to stdin.
     pub fn spawn(config: &WorkerConfig, env: WorkerEnv, context: &str) -> Result<Self> {
-        let mut child = Command::new(&config.hermes_bin)
+        let mut command = Command::new(&config.hermes_bin);
+        command
             .args(["-p", &env.profile])
             .env("HERMES_KANBAN_TASK", env.task_id.to_string())
             .env("HERMES_KANBAN_RUN_ID", &env.run_id)
-            .env("HERMES_KANBAN_DB", env.shadow_path.to_string_lossy().as_ref())
+            .env(
+                "HERMES_KANBAN_DB",
+                env.shadow_path.to_string_lossy().as_ref(),
+            )
             .env("HERMES_KANBAN_BOARD", &env.board_slug)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("spawning hermes process")?;
+            .stderr(Stdio::null());
+        configure_process_tree_root(&mut command);
+        let mut child = command.spawn().context("spawning hermes process")?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(context.as_bytes())
-                .context("writing context to hermes stdin")?;
-        }
+        write_context_or_kill(&mut child, context, write_child_stdin)?;
 
         Ok(Self {
-            task_id: env.task_id,
             run_id: env.run_id,
             child,
-            shadow_path: env.shadow_path,
             started_at: Instant::now(),
         })
     }
@@ -79,13 +75,72 @@ impl WorkerHandle {
 
     /// Kill the child process.
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().context("killing hermes process")
+        kill_process_tree(&mut self.child).context("killing hermes process")
     }
 
     /// Seconds since the worker was spawned.
     pub fn elapsed_secs(&self) -> u64 {
         self.started_at.elapsed().as_secs()
     }
+}
+
+fn configure_process_tree_root(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+fn kill_process_tree(child: &mut Child) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .context("running taskkill")?;
+        if !status.success() {
+            child.kill()?;
+        }
+        Ok(())
+    }
+    #[cfg(unix)]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("kill")
+            .args(["-TERM", &format!("-{}", pid)])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        child.kill()?;
+        Ok(())
+    }
+}
+
+fn write_context_or_kill(
+    child: &mut Child,
+    context: &str,
+    write_context: impl FnOnce(&mut Child, &str) -> std::io::Result<()>,
+) -> Result<()> {
+    if let Err(err) = write_context(child, context) {
+        let _ = kill_process_tree(child);
+        let _ = child.wait();
+        return Err(err).context("writing context to hermes stdin");
+    }
+    Ok(())
+}
+
+fn write_child_stdin(child: &mut Child, context: &str) -> std::io::Result<()> {
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(context.as_bytes())?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -192,5 +247,153 @@ mod tests {
         assert!(ctx.contains("default"), "should include profile");
         assert!(ctx.contains("failed"), "should include status");
         assert!(ctx.contains("Hit an error"), "should include summary");
+    }
+
+    #[test]
+    fn kill_stops_child_process_tree() {
+        let tmp = std::env::temp_dir().join(format!("iota-worker-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let child_pid_path = tmp.join("child.pid");
+
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            (
+                "powershell",
+                vec![
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    format!(
+                        "$p = Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
+                        child_pid_path.display()
+                    ),
+                ],
+            )
+        } else {
+            (
+                "sh",
+                vec![
+                    "-c".into(),
+                    format!("sleep 30 & echo $! > '{}'; wait", child_pid_path.display()),
+                ],
+            )
+        };
+
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_tree_root(&mut command);
+        let child = command.spawn().unwrap();
+        let mut handle = WorkerHandle {
+            run_id: "run".to_string(),
+            child,
+            started_at: Instant::now(),
+        };
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while !child_pid_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(child_pid_path.exists(), "child pid file was not written");
+        let child_pid = std::fs::read_to_string(&child_pid_path)
+            .unwrap()
+            .trim()
+            .to_string();
+
+        handle.kill().unwrap();
+        let _ = handle.child.wait();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        assert!(
+            !process_exists(&child_pid),
+            "worker kill should terminate descendant process {}",
+            child_pid
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn spawn_write_failure_kills_process_tree() {
+        let tmp = std::env::temp_dir().join(format!("iota-worker-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let child_pid_path = tmp.join("child.pid");
+
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            (
+                "powershell",
+                vec![
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    format!(
+                        "$p = Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
+                        child_pid_path.display()
+                    ),
+                ],
+            )
+        } else {
+            (
+                "sh",
+                vec![
+                    "-c".into(),
+                    format!("sleep 30 & echo $! > '{}'; wait", child_pid_path.display()),
+                ],
+            )
+        };
+
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_process_tree_root(&mut command);
+        let mut child = command.spawn().unwrap();
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while !child_pid_path.exists() && Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(child_pid_path.exists(), "child pid file was not written");
+        let child_pid = std::fs::read_to_string(&child_pid_path)
+            .unwrap()
+            .trim()
+            .to_string();
+
+        let result = write_context_or_kill(&mut child, "x", |_child, _context| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "test write failure",
+            ))
+        });
+
+        assert!(result.is_err());
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !process_exists(&child_pid),
+            "write failure cleanup should terminate descendant process {}",
+            child_pid
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn process_exists(pid: &str) -> bool {
+        if cfg!(windows) {
+            std::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("if (Get-Process -Id {} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}", pid),
+                ])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        } else {
+            std::process::Command::new("kill")
+                .args(["-0", pid])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        }
     }
 }

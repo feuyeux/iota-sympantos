@@ -1,13 +1,13 @@
-use anyhow::{bail, Context, Result};
-use rusqlite::{params, Connection};
+use anyhow::{Context, Result, bail};
+use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-use crate::utils::{lock_or_recover, now_ts};
 use super::state_machine::validate_transition;
 use super::store::KanbanStore;
 use super::types::*;
+use crate::utils::{lock_or_recover, now_ts};
 
 // --- Schema -------------------------------------------------------------------
 
@@ -194,6 +194,8 @@ impl SqliteKanbanStore {
 
         let mut parts: Vec<String> = Vec::new();
         let mut values: Vec<Value> = Vec::new();
+        let status_patch = patch.status;
+        let now = now_ts();
 
         if let Some(v) = patch.title {
             parts.push(format!("title = ?{}", values.len() + 1));
@@ -203,9 +205,13 @@ impl SqliteKanbanStore {
             parts.push(format!("body = ?{}", values.len() + 1));
             values.push(v.map(Value::Text).unwrap_or(Value::Null));
         }
-        if let Some(v) = patch.status {
+        if let Some(v) = status_patch {
             parts.push(format!("status = ?{}", values.len() + 1));
             values.push(Value::Text(v.as_str().to_owned()));
+            if v == Status::Running {
+                parts.push(format!("claimed_at = ?{}", values.len() + 1));
+                values.push(Value::Integer(now));
+            }
         }
         if let Some(v) = patch.assignee {
             parts.push(format!("assignee = ?{}", values.len() + 1));
@@ -236,7 +242,7 @@ impl SqliteKanbanStore {
         }
 
         parts.push(format!("updated_at = ?{}", values.len() + 1));
-        values.push(Value::Integer(now_ts()));
+        values.push(Value::Integer(now));
         let id_param = values.len() + 1;
         let sql = format!(
             "UPDATE tasks SET {} WHERE id = ?{id_param}",
@@ -245,6 +251,22 @@ impl SqliteKanbanStore {
         values.push(Value::Integer(id as i64));
 
         let conn = self.lock_conn();
+        if let Some(to) = status_patch {
+            let current_str: String = conn
+                .query_row(
+                    "SELECT status FROM tasks WHERE id = ?1",
+                    params![id as i64],
+                    |row| row.get(0),
+                )
+                .map_err(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => {
+                        anyhow::anyhow!("task {} not found", id)
+                    }
+                    other => anyhow::Error::from(other),
+                })?;
+            let from: Status = current_str.parse()?;
+            validate_transition(from, to)?;
+        }
         let rows = conn.execute(&sql, rusqlite::params_from_iter(values))?;
         if rows == 0 {
             bail!("task {} not found", id);
@@ -359,9 +381,8 @@ impl SqliteKanbanStore {
 
     fn get_links_impl(&self, id: TaskId) -> Result<Vec<Link>> {
         let conn = self.lock_conn();
-        let mut stmt = conn.prepare(
-            "SELECT from_id, to_id, kind FROM links WHERE from_id = ?1 OR to_id = ?1",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT from_id, to_id, kind FROM links WHERE from_id = ?1 OR to_id = ?1")?;
         let rows = stmt.query_map(params![id as i64], row_to_link)?;
         let mut out = Vec::new();
         for r in rows {
@@ -531,12 +552,7 @@ impl KanbanStore for SqliteKanbanStore {
     fn create_run(&self, task_id: TaskId, profile: &str) -> Result<RunId> {
         self.create_run_impl(task_id, profile)
     }
-    fn complete_run(
-        &self,
-        run_id: &str,
-        status: RunStatus,
-        exit_code: Option<i32>,
-    ) -> Result<()> {
+    fn complete_run(&self, run_id: &str, status: RunStatus, exit_code: Option<i32>) -> Result<()> {
         self.complete_run_impl(run_id, status, exit_code)
     }
     fn heartbeat(&self, run_id: &str) -> Result<()> {

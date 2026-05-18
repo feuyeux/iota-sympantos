@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use super::shadow::ShadowMaterializer;
@@ -13,11 +13,13 @@ pub struct AdvancedBridge {
     materializer: ShadowMaterializer,
 }
 
+#[allow(dead_code)]
 pub struct SpecifyResult {
     pub task_id: TaskId,
     pub spec_body: String,
 }
 
+#[allow(dead_code)]
 pub struct DecomposeResult {
     pub parent_id: TaskId,
     pub child_ids: Vec<TaskId>,
@@ -54,16 +56,18 @@ impl AdvancedBridge {
         let board = self.get_board_for_task(&task, store)?;
         let shadow = self.materializer.materialize(&task, &board, store)?;
 
-        let output = Command::new(&self.hermes_bin)
-            .args(["kanban", "specify", &task_id.to_string(), "--json"])
-            .env("HERMES_KANBAN_DB", &shadow.path)
-            .env("HERMES_KANBAN_BOARD", &board.slug)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .with_context(|| "failed to run hermes kanban specify")?;
-
-        self.materializer.cleanup(task_id)?;
+        let result = (|| -> Result<Output> {
+            let mut command = Command::new(&self.hermes_bin);
+            command
+                .args(["kanban", "specify", &task_id.to_string(), "--json"])
+                .env("HERMES_KANBAN_DB", &shadow.path)
+                .env("HERMES_KANBAN_BOARD", &board.slug);
+            run_with_timeout(&mut command, self.timeout)
+                .with_context(|| "failed to run hermes kanban specify")
+        })();
+        let cleanup_result = self.materializer.cleanup(task_id);
+        let output = result?;
+        cleanup_result?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -74,7 +78,9 @@ impl AdvancedBridge {
 
         // Try to parse as JSON, fall back to raw text as the spec body
         let spec_body = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&stdout) {
-            parsed.get("spec").and_then(|v| v.as_str())
+            parsed
+                .get("spec")
+                .and_then(|v| v.as_str())
                 .or_else(|| parsed.get("body").and_then(|v| v.as_str()))
                 .unwrap_or(&stdout)
                 .to_string()
@@ -83,10 +89,13 @@ impl AdvancedBridge {
         };
 
         // Write spec back to task body
-        store.update_task(task_id, super::types::TaskPatch {
-            body: Some(Some(spec_body.clone())),
-            ..Default::default()
-        })?;
+        store.update_task(
+            task_id,
+            super::types::TaskPatch {
+                body: Some(Some(spec_body.clone())),
+                ..Default::default()
+            },
+        )?;
 
         Ok(SpecifyResult { task_id, spec_body })
     }
@@ -97,33 +106,34 @@ impl AdvancedBridge {
         let board = self.get_board_for_task(&task, store)?;
         let shadow = self.materializer.materialize(&task, &board, store)?;
 
-        let output = Command::new(&self.hermes_bin)
-            .args(["kanban", "decompose", &task_id.to_string(), "--json"])
-            .env("HERMES_KANBAN_DB", &shadow.path)
-            .env("HERMES_KANBAN_BOARD", &board.slug)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .with_context(|| "failed to run hermes kanban decompose")?;
+        let result = (|| -> Result<Vec<(i64, String, Option<String>, Option<String>)>> {
+            let mut command = Command::new(&self.hermes_bin);
+            command
+                .args(["kanban", "decompose", &task_id.to_string(), "--json"])
+                .env("HERMES_KANBAN_DB", &shadow.path)
+                .env("HERMES_KANBAN_BOARD", &board.slug);
+            let output = run_with_timeout(&mut command, self.timeout)
+                .with_context(|| "failed to run hermes kanban decompose")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            self.materializer.cleanup(task_id)?;
-            bail!("hermes kanban decompose failed: {}", stderr.trim());
-        }
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                bail!("hermes kanban decompose failed: {}", stderr.trim());
+            }
 
-        // Read new tasks from shadow DB (hermes creates them there)
-        let shadow_conn = rusqlite::Connection::open(&shadow.path)?;
-        let mut stmt = shadow_conn.prepare(
-            "SELECT id, title, body, assignee FROM tasks WHERE id != ?1"
-        )?;
-        let new_tasks: Vec<(i64, String, Option<String>, Option<String>)> = stmt
-            .query_map(rusqlite::params![task_id as i64], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        self.materializer.cleanup(task_id)?;
+            // Read new tasks from shadow DB (hermes creates them there)
+            let shadow_conn = rusqlite::Connection::open(&shadow.path)?;
+            let mut stmt = shadow_conn
+                .prepare("SELECT id, title, body, assignee FROM tasks WHERE id != ?1")?;
+            let new_tasks: Vec<(i64, String, Option<String>, Option<String>)> = stmt
+                .query_map(rusqlite::params![task_id as i64], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(new_tasks)
+        })();
+        let cleanup_result = self.materializer.cleanup(task_id);
+        let new_tasks = result?;
+        cleanup_result?;
 
         // Import new tasks into iota store
         let mut child_ids = Vec::new();
@@ -143,14 +153,72 @@ impl AdvancedBridge {
             child_ids.push(new_id);
         }
 
-        Ok(DecomposeResult { parent_id: task_id, child_ids })
+        Ok(DecomposeResult {
+            parent_id: task_id,
+            child_ids,
+        })
     }
 
     fn get_board_for_task(&self, task: &Task, store: &dyn KanbanStore) -> Result<Board> {
-        store.list_boards()?
+        store
+            .list_boards()?
             .into_iter()
             .find(|b| b.id == task.board_id)
             .ok_or_else(|| anyhow::anyhow!("board not found for task {}", task.id))
+    }
+}
+
+fn run_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output> {
+    configure_process_tree_root(command);
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let started = std::time::Instant::now();
+
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output().map_err(Into::into);
+        }
+        if started.elapsed() >= timeout {
+            kill_child_tree(&mut child);
+            let _ = child.wait_with_output();
+            bail!("hermes command timed out after {}ms", timeout.as_millis());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn configure_process_tree_root(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
+}
+
+fn kill_child_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("kill")
+            .args(["-TERM", &format!("-{}", pid)])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = child.kill();
     }
 }
 
@@ -165,10 +233,8 @@ mod tests {
     fn bridge_is_available_false_for_missing_binary() {
         let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let bridge = AdvancedBridge::new(
-            PathBuf::from("/nonexistent/hermes-binary-xyz"),
-            tmp.clone(),
-        );
+        let bridge =
+            AdvancedBridge::new(PathBuf::from("/nonexistent/hermes-binary-xyz"), tmp.clone());
         assert!(!bridge.is_available());
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -177,21 +243,30 @@ mod tests {
     fn specify_fails_gracefully_when_hermes_missing() {
         let store = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
         let board_id = store.create_board("b", "B").unwrap();
-        let task_id = store.create_task(CreateTaskRequest {
-            board_id, title: "Vague task".into(), body: Some("do stuff".into()),
-            status: None, assignee: None, priority: None, tags: vec![],
-            workspace_kind: None, workspace_path: None,
-        }).unwrap();
+        let task_id = store
+            .create_task(CreateTaskRequest {
+                board_id,
+                title: "Vague task".into(),
+                body: Some("do stuff".into()),
+                status: None,
+                assignee: None,
+                priority: None,
+                tags: vec![],
+                workspace_kind: None,
+                workspace_path: None,
+            })
+            .unwrap();
 
         let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let bridge = AdvancedBridge::new(
-            PathBuf::from("/nonexistent/hermes-xyz"),
-            tmp.clone(),
-        );
+        let bridge = AdvancedBridge::new(PathBuf::from("/nonexistent/hermes-xyz"), tmp.clone());
 
         let result = bridge.specify(task_id, &store);
         assert!(result.is_err());
+        assert!(
+            !tmp.join(task_id.to_string()).exists(),
+            "shadow directory should be cleaned after specify spawn failure"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -199,21 +274,30 @@ mod tests {
     fn decompose_fails_gracefully_when_hermes_missing() {
         let store = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
         let board_id = store.create_board("b", "B").unwrap();
-        let task_id = store.create_task(CreateTaskRequest {
-            board_id, title: "Big task".into(), body: None,
-            status: None, assignee: None, priority: None, tags: vec![],
-            workspace_kind: None, workspace_path: None,
-        }).unwrap();
+        let task_id = store
+            .create_task(CreateTaskRequest {
+                board_id,
+                title: "Big task".into(),
+                body: None,
+                status: None,
+                assignee: None,
+                priority: None,
+                tags: vec![],
+                workspace_kind: None,
+                workspace_path: None,
+            })
+            .unwrap();
 
         let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&tmp).unwrap();
-        let bridge = AdvancedBridge::new(
-            PathBuf::from("/nonexistent/hermes-xyz"),
-            tmp.clone(),
-        );
+        let bridge = AdvancedBridge::new(PathBuf::from("/nonexistent/hermes-xyz"), tmp.clone());
 
         let result = bridge.decompose(task_id, &store);
         assert!(result.is_err());
+        assert!(
+            !tmp.join(task_id.to_string()).exists(),
+            "shadow directory should be cleaned after decompose spawn failure"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -224,6 +308,60 @@ mod tests {
         let bridge = AdvancedBridge::new(PathBuf::from("hermes"), tmp.clone())
             .with_timeout(Duration::from_secs(60));
         assert_eq!(bridge.timeout, Duration::from_secs(60));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn specify_respects_timeout() {
+        let store = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+        let board_id = store.create_board("b", "B").unwrap();
+        let task_id = store
+            .create_task(CreateTaskRequest {
+                board_id,
+                title: "Slow task".into(),
+                body: None,
+                status: None,
+                assignee: None,
+                priority: None,
+                tags: vec![],
+                workspace_kind: None,
+                workspace_path: None,
+            })
+            .unwrap();
+
+        let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let hermes_path = if cfg!(windows) {
+            let path = tmp.join("slow-hermes.cmd");
+            std::fs::write(
+                &path,
+                "@echo off\r\npowershell -NoProfile -Command Start-Sleep -Seconds 2\r\n",
+            )
+            .unwrap();
+            path
+        } else {
+            let path = tmp.join("slow-hermes.sh");
+            std::fs::write(&path, "#!/bin/sh\nsleep 2\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&path).unwrap().permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&path, perms).unwrap();
+            }
+            path
+        };
+
+        let bridge = AdvancedBridge::new(hermes_path, tmp.join("shadows"))
+            .with_timeout(Duration::from_millis(50));
+        let started = std::time::Instant::now();
+        let result = bridge.specify(task_id, &store);
+
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "timeout should stop the command promptly"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

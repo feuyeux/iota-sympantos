@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use anyhow::Result;
 use crossterm::event::{Event as CEvent, EventStream, KeyEventKind};
 use futures_util::StreamExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::acp::{AcpBackend, AcpPromptOutput};
+use crate::kanban::TickReport;
+use crate::utils::lock_or_recover;
 
 use super::events::LoopSignal;
 use super::state::{ConversationEntry, ObservabilityMeta};
@@ -32,6 +34,9 @@ pub(super) async fn run_loop(
 
     // pending_prompt is set by the submit path.
     let mut pending_prompt: Option<(AcpBackend, PathBuf, String)> = None;
+    let (kanban_tx, mut kanban_rx) = mpsc::channel::<Result<TickReport>>(4);
+    let (kanban_shutdown_tx, kanban_shutdown_rx) = oneshot::channel();
+    let kanban_task = spawn_kanban_dispatcher_task(app, kanban_tx, kanban_shutdown_rx);
 
     loop {
         app.run_loop_flush_pending_scrollback(terminal);
@@ -58,6 +63,10 @@ pub(super) async fn run_loop(
                 app.run_loop_handle_engine_result(result);
             }
 
+            Some(result) = kanban_rx.recv() => {
+                app.run_loop_handle_kanban_dispatch_result(result);
+            }
+
             // Pick up the internal submit signal from the channel.
             Some(msg) = app.turn_rx.recv() => {
                 let TurnMessage::Prompt { backend, cwd, text } = msg;
@@ -73,8 +82,44 @@ pub(super) async fn run_loop(
         }
     }
 
+    let _ = kanban_shutdown_tx.send(());
+    let _ = kanban_task.await;
     app.run_loop_teardown_turn_and_engine().await;
     Ok(())
+}
+
+fn spawn_kanban_dispatcher_task(
+    app: &TuiApp,
+    kanban_tx: mpsc::Sender<Result<TickReport>>,
+    mut shutdown_rx: oneshot::Receiver<()>,
+) -> tokio::task::JoinHandle<()> {
+    let store = app.kanban_store.clone();
+    let dispatcher = app.kanban_dispatcher.clone();
+    let interval = lock_or_recover(&dispatcher).tick_interval();
+
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {}
+                _ = &mut shutdown_rx => break,
+            }
+            let store = store.clone();
+            let dispatcher = dispatcher.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                lock_or_recover(&dispatcher).tick(store.as_ref())
+            })
+            .await
+            .unwrap_or_else(|err| Err(anyhow::anyhow!("kanban dispatcher task failed: {}", err)));
+            match shutdown_rx.try_recv() {
+                Ok(()) | Err(oneshot::error::TryRecvError::Closed) => break,
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+            if kanban_tx.send(result).await.is_err() {
+                break;
+            }
+        }
+    })
 }
 
 fn run_loop_draw_if_due(
@@ -92,6 +137,35 @@ fn run_loop_draw_if_due(
 }
 
 impl TuiApp {
+    fn run_loop_handle_kanban_dispatch_result(&mut self, result: Result<TickReport>) {
+        match result {
+            Ok(report)
+                if report.spawned > 0
+                    || report.completed > 0
+                    || report.timed_out > 0
+                    || report.spawn_failures > 0
+                    || report.reclaimed > 0 =>
+            {
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: format!(
+                        "Kanban dispatch: spawned: {}, completed: {}, timed out: {}, spawn failures: {}, reclaimed: {}",
+                        report.spawned,
+                        report.completed,
+                        report.timed_out,
+                        report.spawn_failures,
+                        report.reclaimed
+                    ),
+                });
+            }
+            Ok(_) => {}
+            Err(err) => {
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: format!("Kanban dispatch failed: {}", err),
+                });
+            }
+        }
+    }
+
     fn run_loop_spawn_pending_prompt_if_any(
         &mut self,
         pending_prompt: &mut Option<(AcpBackend, PathBuf, String)>,
@@ -168,6 +242,7 @@ impl TuiApp {
             self.record_queued_prompt_delta(-1);
             self.record_entry(ConversationEntry::UserMessage {
                 text: queued.clone(),
+                backend: Some(self.active_backend),
             });
             self.running_turn = true;
             self.turn_started_at = Some(std::time::Instant::now());
@@ -236,9 +311,14 @@ fn observability_from_output(output: &AcpPromptOutput) -> ObservabilityMeta {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use tokio::sync::oneshot;
 
     use crate::config::NimiaConfig;
+    use crate::kanban::{
+        CreateTaskRequest, Dispatcher, DispatcherConfig, SqliteKanbanStore, Status,
+    };
 
     use super::*;
     use crate::tui::Overlay;
@@ -257,5 +337,49 @@ mod tests {
 
         assert_eq!(app.overlay, Overlay::None);
         assert!(app.pending_approval.is_some());
+    }
+
+    #[test]
+    fn tick_drives_kanban_dispatcher_lifecycle() {
+        let mut app = TuiApp::new(NimiaConfig::default()).unwrap();
+        let tmp = std::env::temp_dir().join(format!("iota-tui-kanban-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        app.kanban_store = Arc::new(SqliteKanbanStore::open(&tmp.join("store.db")).unwrap());
+        app.kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig {
+            shadows_dir: tmp.join("shadows"),
+            ..Default::default()
+        })));
+        let slug = format!("tick-test-{}", uuid::Uuid::new_v4());
+        let board_id = app.kanban_store.create_board(&slug, "Tick Test").unwrap();
+        let task_id = app
+            .kanban_store
+            .create_task(CreateTaskRequest {
+                board_id,
+                title: "Ready task".to_string(),
+                body: None,
+                status: Some(Status::Ready),
+                assignee: None,
+                priority: None,
+                tags: vec![],
+                workspace_kind: None,
+                workspace_path: None,
+            })
+            .unwrap();
+        lock_or_recover(&app.kanban_dispatcher)
+            .set_hermes_bin_for_tests(PathBuf::from("/missing/hermes-for-iota-test"));
+
+        let result = {
+            let store = app.kanban_store.clone();
+            lock_or_recover(&app.kanban_dispatcher).tick(store.as_ref())
+        };
+        app.run_loop_handle_kanban_dispatch_result(result);
+
+        let runs = app.kanban_store.get_runs(task_id).unwrap();
+        assert_eq!(runs.len(), 1, "tick should dispatch ready task");
+        assert_eq!(runs[0].status, crate::kanban::RunStatus::Failed);
+        assert_eq!(
+            app.kanban_store.get_task(task_id).unwrap().status,
+            Status::Ready
+        );
     }
 }

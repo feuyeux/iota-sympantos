@@ -63,7 +63,7 @@ pub(super) fn banner_lines() -> Vec<Line<'static>> {
 
 fn entry_to_lines(entry: &ConversationEntry) -> Vec<Line<'static>> {
     match entry {
-        ConversationEntry::UserMessage { text } => user_lines(text),
+        ConversationEntry::UserMessage { text, backend } => user_lines(text, *backend),
         ConversationEntry::AssistantMessage {
             backend,
             text,
@@ -89,8 +89,15 @@ fn entry_to_lines(entry: &ConversationEntry) -> Vec<Line<'static>> {
     }
 }
 
-fn user_lines(text: &str) -> Vec<Line<'static>> {
-    let label = Span::styled("●  ", theme::user_label_style());
+fn user_lines(text: &str, backend: Option<AcpBackend>) -> Vec<Line<'static>> {
+    let label = if let Some(backend) = backend {
+        Span::styled(
+            assistant_label(backend).to_string(),
+            theme::user_label_style(),
+        )
+    } else {
+        Span::styled("●  ".to_string(), theme::user_label_style())
+    };
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut first = true;
     for raw in text.split('\n') {
@@ -115,14 +122,23 @@ fn assistant_lines(
     text: &str,
     observability: Option<&ObservabilityMeta>,
 ) -> Vec<Line<'static>> {
-    let mut out = vec![Line::from(Span::styled(
-        assistant_label(backend),
-        theme::assistant_label_style(),
-    ))];
+    let label = Span::styled(assistant_label(backend), theme::assistant_label_style());
+    let mut out = Vec::new();
+    let mut first = true;
     for md in markdown::render(text) {
-        let mut spans: Vec<Span<'static>> = vec![Span::raw("     ")];
-        spans.extend(md.spans);
-        out.push(Line::from(spans));
+        if first {
+            let mut spans = vec![label.clone(), Span::raw("  ")];
+            spans.extend(md.spans);
+            out.push(Line::from(spans));
+            first = false;
+        } else {
+            let mut spans: Vec<Span<'static>> = vec![Span::raw("     ")];
+            spans.extend(md.spans);
+            out.push(Line::from(spans));
+        }
+    }
+    if out.is_empty() {
+        out.push(Line::from(label));
     }
     if let Some(meta) = observability
         && let Some(line) = observability_line(meta)
@@ -212,7 +228,7 @@ mod tests {
 
     #[test]
     fn user_message_uses_solid_circle_prompt() {
-        let lines = user_lines("hello");
+        let lines = user_lines("hello", None);
 
         assert_eq!(lines[0].spans[0].content.as_ref(), "●  ");
     }
@@ -237,7 +253,9 @@ mod tests {
 
         let lines = entry_to_lines(&entry);
 
+        // First span is the label, second is spacing, third is content
         assert_eq!(lines[0].spans[0].content.as_ref(), "■ cc");
+        assert!(lines[0].spans.len() >= 2);
     }
 
     #[test]

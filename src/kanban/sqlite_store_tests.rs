@@ -223,6 +223,31 @@ fn transition_invalid_rejected() {
 }
 
 #[test]
+fn update_task_status_rejects_invalid_transition() {
+    let store = open_memory();
+    let board_id = make_board(&store);
+    let task_id = make_task(&store, board_id, "T");
+
+    let err = store
+        .update_task(
+            task_id,
+            TaskPatch {
+                status: Some(Status::Running),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+
+    assert!(
+        err.to_string().contains("invalid status transition"),
+        "expected transition validation error, got: {}",
+        err
+    );
+    let task = store.get_task(task_id).unwrap();
+    assert_eq!(task.status, Status::Triage);
+}
+
+#[test]
 fn transition_blocked_and_unblock() {
     let store = open_memory();
     let board_id = make_board(&store);
@@ -280,7 +305,9 @@ fn comments_add_and_list() {
     let board_id = make_board(&store);
     let task_id = make_task(&store, board_id, "T");
 
-    store.add_comment(task_id, "alice", "first comment").unwrap();
+    store
+        .add_comment(task_id, "alice", "first comment")
+        .unwrap();
     store.add_comment(task_id, "bob", "second comment").unwrap();
 
     let comments = store.list_comments(task_id).unwrap();

@@ -143,16 +143,18 @@ impl ShadowMaterializer {
             )?;
         }
 
-        Ok(ShadowDb { path: db_path, task_id: task.id })
+        Ok(ShadowDb {
+            path: db_path,
+            task_id: task.id,
+        })
     }
 
     /// Removes the shadow directory for the given task.
     pub fn cleanup(&self, task_id: TaskId) -> Result<()> {
         let task_dir = self.shadows_dir.join(task_id.to_string());
         if task_dir.exists() {
-            std::fs::remove_dir_all(&task_dir).with_context(|| {
-                format!("removing shadow dir {}", task_dir.display())
-            })?;
+            std::fs::remove_dir_all(&task_dir)
+                .with_context(|| format!("removing shadow dir {}", task_dir.display()))?;
         }
         Ok(())
     }
@@ -237,11 +239,7 @@ impl ShadowWatcher {
 
         let mut events = Vec::new();
         for r in rows {
-            let ev = r?;
-            if ev.id > self.last_event_id {
-                self.last_event_id = ev.id;
-            }
-            events.push(ev);
+            events.push(r?);
         }
 
         // Check terminal task status
@@ -261,6 +259,12 @@ impl ShadowWatcher {
         Ok((events, terminal))
     }
 
+    pub fn mark_events_synced(&mut self, events: &[ShadowEvent]) {
+        if let Some(max_id) = events.iter().map(|event| event.id).max() {
+            self.last_event_id = self.last_event_id.max(max_id);
+        }
+    }
+
     /// Applies a slice of shadow events to the iota KanbanStore.
     pub fn sync_events(
         &self,
@@ -274,20 +278,23 @@ impl ShadowWatcher {
                     store.heartbeat(run_id)?;
                 }
                 "comment" => {
-                    let v: serde_json::Value = serde_json::from_str(&event.payload)
-                        .context("parsing comment payload")?;
+                    let v: serde_json::Value =
+                        serde_json::from_str(&event.payload).context("parsing comment payload")?;
                     let author = v["author"].as_str().unwrap_or("hermes");
                     let body = v["body"].as_str().unwrap_or("");
-                    store.add_comment(self.task_id, author, body)?;
+                    store.add_comment(event.task_id, author, body)?;
                 }
                 "status_change" => {
                     let v: serde_json::Value = serde_json::from_str(&event.payload)
                         .context("parsing status_change payload")?;
+                    if event.task_id == self.task_id {
+                        continue;
+                    }
                     let to_str = v["to"]
                         .as_str()
                         .context("missing 'to' field in status_change payload")?;
                     let to: Status = to_str.parse()?;
-                    store.transition(self.task_id, to)?;
+                    store.transition(event.task_id, to)?;
                 }
                 "task_create" => {
                     let v: serde_json::Value = serde_json::from_str(&event.payload)
@@ -318,9 +325,8 @@ impl ShadowWatcher {
                     };
                     let new_task_id = store.create_task(req)?;
                     let link_kind_str = v["link_kind"].as_str().unwrap_or("related");
-                    let link_kind: LinkKind =
-                        link_kind_str.parse().unwrap_or(LinkKind::Related);
-                    store.create_link(self.task_id, new_task_id, link_kind)?;
+                    let link_kind: LinkKind = link_kind_str.parse().unwrap_or(LinkKind::Related);
+                    store.create_link(event.task_id, new_task_id, link_kind)?;
                 }
                 _ => {} // Unknown event types are silently ignored
             }
@@ -335,16 +341,14 @@ impl ShadowWatcher {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::sqlite_store::SqliteKanbanStore;
     use super::super::store::KanbanStore;
-    use super::super::types::*;
+    use super::*;
     use rusqlite::{Connection, params};
     use std::path::Path;
 
     fn test_tmp_dir() -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("iota-test-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("iota-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -503,6 +507,7 @@ mod tests {
         assert_eq!(events[1].event_type, "comment");
         assert!(terminal.is_none());
 
+        watcher.mark_events_synced(&events);
         let (events2, _) = watcher.poll().unwrap();
         assert_eq!(events2.len(), 0);
     }
@@ -566,5 +571,92 @@ mod tests {
         assert_eq!(comments.len(), 1);
         assert_eq!(comments[0].author, "bot");
         assert_eq!(comments[0].body, "task done");
+    }
+
+    #[test]
+    fn failed_sync_does_not_advance_event_cursor() {
+        let tmp = test_tmp_dir();
+        let db_path = tmp.join("kanban.db");
+        let task_id: TaskId = 1;
+        let now = 1_000_000i64;
+
+        let conn = init_shadow_db(&db_path);
+        conn.execute(
+            "INSERT INTO tasks (id, board_id, title, status, tags,
+             created_at, updated_at, claim_ttl_secs)
+             VALUES (?1, 1, 'test', 'running', '[]', ?2, ?2, 900)",
+            params![task_id as i64, now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_events (task_id, event_type, payload, created_at)
+             VALUES (?1, 'comment', '{bad-json', ?2)",
+            params![task_id as i64, now],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = open_store(&tmp.join("store.db"));
+        let board_id = make_board(&store);
+        let main_task_id = make_task(&store, board_id);
+        let run_id = store.create_run(main_task_id, "test-profile").unwrap();
+        let mut watcher = ShadowWatcher::new(db_path, main_task_id);
+
+        let (events, _) = watcher.poll().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(watcher.sync_events(&events, &store, &run_id).is_err());
+
+        let (events_again, _) = watcher.poll().unwrap();
+        assert_eq!(events_again.len(), 1);
+        assert_eq!(events_again[0].id, events[0].id);
+    }
+
+    #[test]
+    fn sync_events_routes_comment_to_event_task_id() {
+        let tmp = test_tmp_dir();
+        let store = open_store(&tmp.join("store.db"));
+        let board_id = make_board(&store);
+        let main_task_id = make_task(&store, board_id);
+        let linked_task_id = make_task(&store, board_id);
+        let run_id = store.create_run(main_task_id, "test-profile").unwrap();
+        let watcher = ShadowWatcher::new(tmp.join("unused.db"), main_task_id);
+
+        let events = vec![ShadowEvent {
+            id: 1,
+            task_id: linked_task_id,
+            event_type: "comment".to_string(),
+            payload: r#"{"author":"bot","body":"linked note"}"#.to_string(),
+        }];
+
+        watcher.sync_events(&events, &store, &run_id).unwrap();
+
+        assert!(store.list_comments(main_task_id).unwrap().is_empty());
+        let comments = store.list_comments(linked_task_id).unwrap();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].body, "linked note");
+    }
+
+    #[test]
+    fn sync_events_defers_main_task_status_until_worker_exit() {
+        let tmp = test_tmp_dir();
+        let store = open_store(&tmp.join("store.db"));
+        let board_id = make_board(&store);
+        let task_id = make_task(&store, board_id);
+        store.transition(task_id, Status::Todo).unwrap();
+        store.transition(task_id, Status::Ready).unwrap();
+        store.transition(task_id, Status::Running).unwrap();
+        let run_id = store.create_run(task_id, "test-profile").unwrap();
+        let watcher = ShadowWatcher::new(tmp.join("unused.db"), task_id);
+
+        let events = vec![ShadowEvent {
+            id: 1,
+            task_id,
+            event_type: "status_change".to_string(),
+            payload: r#"{"to":"done"}"#.to_string(),
+        }];
+
+        watcher.sync_events(&events, &store, &run_id).unwrap();
+
+        assert_eq!(store.get_task(task_id).unwrap().status, Status::Running);
     }
 }
