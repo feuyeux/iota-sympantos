@@ -251,6 +251,6 @@ pub struct Run {
 pub struct KanbanEvent {
     pub id: EventId,
     pub event_type: String,
-    pub payload: serde_json::Value,
+    pub payload: String,
     pub created_at: i64,
 }
