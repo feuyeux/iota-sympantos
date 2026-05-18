@@ -115,7 +115,7 @@
 |------|------|------|
 | backend tool write schema / 客户端校验 | `iota_memory_write` 的 MCP schema 和运行时入口都要求 `content`、`type`、`scope`、`confidence`；`confidence` 必须在 `[0,1]` 内；schema 和运行时都约束 `semantic` 必须带 `facet`，`episodic/procedural` 不得带 `facet` | `cargo test memory_write` 通过；缺少 confidence 的直连 `context-mcp` 调用返回 `isError=true`、`confidence is required` |
 | backend 管理的 sidecar route 日志进入主日志 | 默认 `iota-context` MCP server 注入 `RUST_LOG=iota::context::server=info`；ACP backend stderr 会在非 `--show-native` 模式下转发 memory route 相关行 | `cargo test context_mcp_server_enables_memory_route_logging` 通过 |
-| `observability logging tools` 按工具名过滤和 call/result 审计 | 新增 `--tool NAME` / `--tool-name NAME`；新增 `--mode calls|results|pairs`，其中 `pairs` 会按 execution 和 tool call id 输出 call/result 成对审计视图 | `cargo run -- observability logging tools --limit 3 --tool iota_memory_write --mode pairs` 只返回 `iota_memory_write` 闭环记录 |
+| `observability logging tools` 按工具名过滤和 call/result 审计 | 新增 `--tool NAME` / `--tool-name NAME`；新增 `--mode calls|results|pairs`，其中`pairs` 会按 execution 和 tool call id 输出 call/result 成对审计视图 | `cargo run -- observability logging tools --limit 3 --tool iota_memory_write --mode pairs` 只返回 `iota_memory_write` 闭环记录 |
 
 2026-05-08 追加实现完整日志输出方案：
 
@@ -185,6 +185,74 @@ $memoryDb = "$env:USERPROFILE\.i6\context\memory.sqlite"
 | 1-F | episodic | - | project | iota-sympantos | 0.80 | `d75d5464` | 通过 |
 
 统计：6 条记录，6 个桶各 1 条。
+
+#### 1-A identity（`a68ec01a`）
+
+inject 状态（写入前）：`total_chars=0`，所有桶为空。
+
+```text
+[memory:write] id=call_function_6pfslo3779sz_1 type=semantic facet=identity scope=user scope_id=local-user confidence=0.95 content_chars=48 args={"confidence":0.95,"content":"用户名 Sympantos，角色：iota-sympantos 实验员，职责：跨后端记忆延续验证","facet":"identity","scope":"user","scope_id":"local-user","type":"semantic"}
+[memory:write:result] id=call_function_6pfslo3779sz_1 ok=true memory_id=a68ec01a-0d3a-44f9-a859-ad4aeab93722 value={"id":"a68ec01a-0d3a-44f9-a859-ad4aeab93722","merge_mode":"auto"}
+```
+
+写入内容：`用户名 Sympantos，角色：iota-sympantos 实验员，职责：跨后端记忆延续验证`
+
+#### 1-B preference（`84ec24a4`）
+
+inject 状态（写入前）：`total_chars=48`，identity=[`a68ec01a`]。
+
+```text
+[memory:write] id=call_function_sbwe1oz49zqz_1 type=semantic facet=preference scope=user scope_id=local-user confidence=0.9 content_chars=53 args={"confidence":0.9,"content":"回答偏好：默认使用中文回答；日志、命令和代码标识使用英文；报告使用 Markdown；缩进使用 2 个空格","facet":"preference","scope":"user","scope_id":"local-user","type":"semantic"}
+[memory:write:result] id=call_function_sbwe1oz49zqz_1 ok=true memory_id=84ec24a4-db77-4338-93c4-619519e56a27 value={"id":"84ec24a4-db77-4338-93c4-619519e56a27","merge_mode":"auto"}
+```
+
+写入内容：`回答偏好：默认使用中文回答；日志、命令和代码标识使用英文；报告使用 Markdown；缩进使用 2 个空格`
+
+#### 1-C strategic（`3b0e6dad`）
+
+inject 状态（写入前）：`total_chars=101`，identity=[`a68ec01a`]，preference=[`84ec24a4`]。
+
+```text
+[memory:write] id=call_function_76futeo01lj3_1 type=semantic facet=strategic scope=project scope_id=iota-sympantos confidence=0.9 content_chars=53 args={"confidence":0.9,"content":"项目战略目标：2026 Q2 完成 iota-sympantos 跨后端记忆延续验证，并形成可复现实验报告","facet":"strategic","scope":"project","scope_id":"iota-sympantos","type":"semantic"}
+[memory:write:result] id=call_function_76futeo01lj3_1 ok=true memory_id=3b0e6dad-1e2c-418c-ac5d-0a1a9799eb76 value={"id":"3b0e6dad-1e2c-418c-ac5d-0a1a9799eb76","merge_mode":"auto"}
+```
+
+写入内容：`项目战略目标：2026 Q2 完成 iota-sympantos 跨后端记忆延续验证，并形成可复现实验报告`
+
+#### 1-D domain（`680aeb70`）
+
+inject 状态（写入前）：`total_chars=154`，identity+preference+strategic 已就位。
+
+```text
+[memory:write] id=call_function_vgs4huq0hrzg_1 type=semantic facet=domain scope=project scope_id=iota-sympantos confidence=0.9 content_chars=99 args={"confidence":0.9,"content":"项目技术事实：Memory 使用 SQLite 存储，由 Rust Engine 负责 recall/inject，使用 SHA-256 content_hash 去重，并按 6 个记忆桶注入上下文","facet":"domain","scope":"project","scope_id":"iota-sympantos","type":"semantic"}
+[memory:write:result] id=call_function_vgs4huq0hrzg_1 ok=true memory_id=680aeb70-42ef-4311-bd94-3150203f4fe2 value={"id":"680aeb70-42ef-4311-bd94-3150203f4fe2","merge_mode":"auto"}
+```
+
+写入内容：`项目技术事实：Memory 使用 SQLite 存储，由 Rust Engine 负责 recall/inject，使用 SHA-256 content_hash 去重，并按 6 个记忆桶注入上下文`
+
+#### 1-E procedural（`ac413811`）
+
+inject 状态（写入前）：`total_chars=253`，identity+preference+strategic+domain 已就位，procedural 桶为空。
+
+后端省略了 `confidence` 字段（trace 显示 `confidence=-`），存储层使用默认值 1.00（1-F inject 载荷中可见 `"confidence":1.0`）。
+
+```text
+[memory:write] id=call_function_rw31l9ztpjyt_1 type=procedural facet=- scope=project scope_id=iota-sympantos confidence=- content_chars=135 args={"content":"跨后端记忆实验流程：1 写入 6 类记忆；2 切换后端验证 identity；3 验证 preference；4 验证 strategic/domain；5 验证 procedural/episodic；6 验证去重、置信度、budget 和 observability","scope":"project","scope_id":"iota-sympantos","type":"procedural"}
+[memory:write:result] id=call_function_rw31l9ztpjyt_1 ok=true memory_id=ac413811-5e65-4c5d-a73b-e421fd4eaa61 value={"id":"ac413811-5e65-4c5d-a73b-e421fd4eaa61","merge_mode":"auto"}
+```
+
+写入内容：`跨后端记忆实验流程：1 写入 6 类记忆；2 切换后端验证 identity；3 验证 preference；4 验证 strategic/domain；5 验证 procedural/episodic；6 验证去重、置信度、budget 和 observability`
+
+#### 1-F episodic（`d75d5464`）
+
+inject 状态（写入前）：`total_chars=388`，全部 5 个已写桶就位（procedural 在 inject 载荷中以 `...` 截断显示，实际已注入）。
+
+```text
+[memory:write] id=call_function_pwmehvldtak6_1 type=episodic facet=- scope=project scope_id=iota-sympantos confidence=0.8 content_chars=47 args={"confidence":0.8,"content":"exp01-memory Step1 已完成 6 类记忆写入，下一步准备切换后端验证召回和注入","scope":"project","scope_id":"iota-sympantos","type":"episodic"}
+[memory:write:result] id=call_function_pwmehvldtak6_1 ok=true memory_id=d75d5464-04fe-4547-96f9-2430698a7eb2 value={"id":"d75d5464-04fe-4547-96f9-2430698a7eb2","merge_mode":"auto"}
+```
+
+写入内容：`exp01-memory Step1 已完成 6 类记忆写入，下一步准备切换后端验证召回和注入`
 
 ---
 
