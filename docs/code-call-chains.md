@@ -21,7 +21,6 @@ cli::run()
        "run"                -> ACP prompt path
        "context-mcp"        -> mcp::server::run_stdio()
        "fun-mcp"            -> skill::fun_server::run_stdio()
-       "native-materialize" -> run_native_materialize()
        "observability"      -> run_observability_command()
        "logs"                -> run_logs_command()
        "trace"               -> run_trace_command()
@@ -812,31 +811,6 @@ iota bench-* --daemon
   -> repeated send_prompt_autostart_daemon("ping")
 ```
 
-Native materialize：
-
-```text
-iota native-materialize [--dry-run] <path> [content]
-  -> native::dry_run() or native::apply()
-  -> replace <!-- IOTA_START --> ... <!-- IOTA_END --> block
-
-iota native-materialize [--dry-run] --backend <name> [workspace]
-  -> native::backend_memory_path()
-       ClaudeCode -> workspace/MEMORY.md
-       Gemini     -> ~/.gemini/GEMINI.md
-       OpenCode   -> workspace/AGENTS.md
-       Codex      -> workspace/AGENTS.md
-       Hermes     -> None
-
-iota native-materialize [--dry-run] --all --backend <name> [workspace]
-  -> config::read_config()
-  -> SkillRegistry::load()
-  -> MemoryStore::open()
-  -> native::dry_run_backend_projection()
-       -> memory projection
-       -> compatible skill projection
-  -> optional apply()
-```
-
 Skill pull：
 
 ```text
@@ -985,7 +959,6 @@ embed(content)
 | `skill/fun_server.rs` | iota-fun MCP server 和语言执行 | 7,9 |
 | `mcp/client.rs` | stdio MCP client | 7 |
 | `mcp/router.rs` | ACP tool-call 拦截 | 6,11 |
-| `native/mod.rs` | 原生文件投影 | 12 |
 | `store/memory.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
 | `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
 | `store/cache.rs` | execution lifecycle | 1,3,4,12 |

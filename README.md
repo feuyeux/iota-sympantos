@@ -79,3 +79,25 @@ iota check                                        # 检查配置与后端状态
 ```
 
 `--timing` 将路由与 ACP 阶段耗时以 JSON 格式输出到 stderr。
+
+### 调试与运行
+
+```bash
+# 交互式 TUI
+cargo run --quiet
+
+# 带日志级别
+RUST_LOG=debug cargo run --quiet
+
+# 带 timing 输出运行单次 prompt
+cargo run --quiet -- run codex "ping" --timing
+
+# 运行测试
+cargo test
+
+# 仅构建检查（不执行）
+cargo check --offline
+
+# 附加调试器
+cargo run --quiet --debug
+```

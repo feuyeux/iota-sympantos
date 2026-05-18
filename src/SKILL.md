@@ -38,7 +38,6 @@ src/
 ├── engine/              # IotaEngine orchestration, prompt execution, handoff
 ├── mcp/                 # MCP protocol layer: server, router, tool dispatch, client
 ├── memory/              # Persistent memory store (FTS5 + embedding) & types
-├── native/              # Native file materializer (MEMORY.md, AGENTS.md)
 ├── runtime_event/       # Unified event types for telemetry & routing
 ├── skill/               # Skill registry, trigger matching, cache, sandbox executor
 ├── store/               # SQLite stores (cache, approval, ledger)

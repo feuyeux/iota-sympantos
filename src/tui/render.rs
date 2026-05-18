@@ -41,17 +41,13 @@ impl TuiApp {
     }
 
     fn render_composer(&self, frame: &mut Frame, area: Rect) {
-        let title_hint = if self.composer.is_searching() {
+        let (title_hint, title_style) = if self.composer.is_searching() {
             let q = self.composer.search_query().unwrap_or("");
-            format!(" Ctrl+R: {}_ ", q)
+            (format!(" Ctrl+R: {}_ ", q), theme::system_notice_style())
+        } else if let Some(hint) = self.slash_completion_hint() {
+            (format!(" {} ", hint), theme::completion_hint_style())
         } else {
-            String::new()
-        };
-
-        let title_style = if self.composer.is_searching() {
-            theme::system_notice_style()
-        } else {
-            theme::composer_border_style(true)
+            (String::new(), theme::composer_border_style(true))
         };
 
         let block = Block::default()
@@ -67,7 +63,7 @@ impl TuiApp {
         if self.composer.text.is_empty() && !self.running_turn {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    "Type a prompt and press Enter… (? for help)",
+                    "Type a prompt or / command and press Enter… (? for help)",
                     Style::default().fg(ratatui::style::Color::DarkGray),
                 ))),
                 inner,
@@ -77,9 +73,21 @@ impl TuiApp {
         }
 
         let (disp_lines, cur_row, cur_col) = self.composer.display_lines();
+        let ghost = self.slash_ghost();
         let para_lines: Vec<Line> = disp_lines
             .iter()
-            .map(|line_text| Line::raw(line_text.clone()))
+            .enumerate()
+            .map(|(row_idx, line_text)| {
+                if row_idx == cur_row {
+                    if let Some(ref g) = ghost {
+                        return Line::from(vec![
+                            Span::raw(line_text.clone()),
+                            Span::styled(g.clone(), theme::ghost_text_style()),
+                        ]);
+                    }
+                }
+                Line::raw(line_text.clone())
+            })
             .collect();
 
         let vp_height = inner.height as usize;

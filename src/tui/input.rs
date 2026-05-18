@@ -474,6 +474,11 @@ impl Composer {
         i
     }
 
+    /// Returns true when the cursor is positioned at the end of the text buffer.
+    pub fn cursor_at_end(&self) -> bool {
+        self.cursor >= grapheme_count(&self.text)
+    }
+
     /// Build display lines split by newline, for multi-line rendering.
     /// Returns (lines, cursor_row, cursor_col_in_row).
     pub fn display_lines(&self) -> (Vec<String>, usize, usize) {

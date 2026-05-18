@@ -4,7 +4,7 @@ Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `sequenti
 
 Create a vertical poster for the document `iota-sympantos code call chains`.
 
-Scene: a prompt capsule travels through a simple five-station dispatch board. Station 1 is `main.rs → cli::run()` with command switches shown as labeled toggle levers: `run`, `check`, `bench <cold|warm>`, `mcp <context|fun>`, `observability`, `native-materialize`, `skill`, `__daemon`. Station 2 splits into two paths: TUI path via `tui/loop.rs` spawning an engine task, and daemon path via TCP at `127.0.0.1:47661`. Station 3 is `engine/mod.rs` (IotaEngine): skill match, memory recall, context capsule. Station 4 is ACP: `initialize → session/new → session/prompt → session/update → session/complete` shown as a ribbon. Station 5 shows backend process output returning upstream.
+Scene: a prompt capsule travels through a simple five-station dispatch board. Station 1 is `main.rs → cli::run()` with command switches shown as labeled toggle levers: `run`, `check`, `bench <cold|warm>`, `mcp <context|fun>`, `observability`, `skill`, `__daemon`. Station 2 splits into two paths: TUI path via `tui/loop.rs` spawning an engine task, and daemon path via TCP at `127.0.0.1:47661`. Station 3 is `engine/mod.rs` (IotaEngine): skill match, memory recall, context capsule. Station 4 is ACP: `initialize → session/new → session/prompt → session/update → session/complete` shown as a ribbon. Station 5 shows backend process output returning upstream.
 
 Four external gates (simple hatched borders):
 - SQLite stores: events · memory · approvals · sessions

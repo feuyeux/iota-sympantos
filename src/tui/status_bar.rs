@@ -13,6 +13,7 @@ const MAX_CWD_CHARS: usize = 36;
 const KEY_HINTS: &[(&str, &str)] = &[
     ("Wheel/Trackpad", "scroll"),
     ("Drag", "select"),
+    ("/", "command"),
     ("Ctrl+B", "backend"),
     ("?", "help"),
     ("Ctrl+C", "quit"),

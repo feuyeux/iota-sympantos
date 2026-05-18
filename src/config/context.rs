@@ -28,8 +28,6 @@ pub struct ContextEngineConfig {
     pub memory_db: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_roots: Vec<String>,
-    #[serde(default)]
-    pub native_overlays: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budgets: Option<ContextBudgetsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,7 +49,6 @@ impl Default for ContextEngineConfig {
             injection: default_context_injection(),
             memory_db: None,
             skill_roots: Vec::new(),
-            native_overlays: false,
             budgets: None,
             recall_thresholds: None,
             episodic_compaction_keep: default_episodic_compaction_keep(),

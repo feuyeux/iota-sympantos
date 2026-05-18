@@ -147,7 +147,6 @@ iota bench-cold [轮次] [--daemon]
 iota bench-warm [轮次] [--daemon]
 iota context-mcp         # 启动 iota-context MCP sidecar（stdio）
 iota fun-mcp            # 启动 iota-fun 7 语言 MCP server（stdio）
-iota native-materialize  # 将 memory/skill 投影到原生文件
 iota skill pull <源> [名称]
 iota __daemon           # 内部 daemon 入口
 ```
@@ -219,8 +218,7 @@ iota __daemon           # 内部 daemon 入口
 | 5b | MCP response channel / 拦截 | `mcp/router.rs` | ✅ |
 | 6 | Approval 归一化 + 持久化 | `store/approvals.rs` | ✅ |
 | 7 | SessionLedger + handoff | `store/ledger.rs` | ✅ |
-| 8 | Native materializer | `native/mod.rs` | ✅ |
-| 9 | Config 扩展（context_engine） | `config.rs` | ✅ |
+| 8 | Config 扩展（context_engine） | `config.rs` | ✅ |
 
 **所有 Phase 均已实现。**
 

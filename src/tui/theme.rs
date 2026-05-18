@@ -69,3 +69,13 @@ pub fn spinner_style() -> Style {
         .fg(MAGENTA_LIGHT)
         .add_modifier(Modifier::BOLD)
 }
+
+/// Ghost text shown after the cursor for slash-command completions.
+pub fn ghost_text_style() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
+/// Completion hints shown in the composer border title.
+pub fn completion_hint_style() -> Style {
+    Style::default().fg(Color::Rgb(110, 110, 180))
+}

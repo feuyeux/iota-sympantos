@@ -126,7 +126,9 @@ impl TuiApp {
                 }
             },
             (KeyModifiers::NONE, KeyCode::Tab) => {
-                if self.running_turn && !self.composer.text.trim().is_empty() {
+                if self.slash_tab_complete() {
+                    // slash completion accepted — nothing else to do
+                } else if self.running_turn && !self.composer.text.trim().is_empty() {
                     self.submit();
                 }
             }

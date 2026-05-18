@@ -49,7 +49,6 @@ Completed split:
 - `src/cli/mod.rs` — run() dispatch, shared helpers
 - `src/cli/run_cmd.rs` — `iota run` command logic
 - `src/cli/info_cmd.rs` — backend info and check commands
-- `src/cli/memory_cmd.rs` — memory subcommands
 - `src/cli/daemon_cmd.rs` — daemon/bench commands
 - `src/cli/observability_cmd.rs` — token stats and observability commands
 - `src/cli/skill_cmd.rs` — skill pull command

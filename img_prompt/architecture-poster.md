@@ -14,7 +14,6 @@ The tower has 8 labeled floors:
 - Floor 5 ACP: acp/client.rs · stream_reader.rs · permission.rs
 - Floor 6 Backends: five platform stations
 - Floor 7 Skill: skill/mod.rs · skill/fun.rs · mcp/router.rs
-- Floor 8 Native: native/mod.rs
 - Basement Store: store/cache.rs · store/observability.rs · approvals.rs · ledger.rs · telemetry/stderr.rs
 
 Composition: portrait poster, 2:3 aspect ratio. Strong vertical hierarchy, Entry at top, Basement at bottom. Arrows, pipes, short labels. Title `iota-sympantos Architecture` hand-lettered at top. Magenta accent only on the main tower beacon and status rail.

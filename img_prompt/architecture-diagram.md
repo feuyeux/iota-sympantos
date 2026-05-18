@@ -391,21 +391,7 @@ Show:
 Seven Fn runners:
 `Python / TypeScript / Rust / Go / Java / C++ / Zig`
 
-### 8. Native Projection
-
-Files:
-`src/native/mod.rs`
-
-Show:
-- `iota native-materialize`
-- Memory / skill native file projection
-- Backend-native files
-- Block replacement markers:
-  - `<!-- IOTA_START -->`
-  - `<!-- IOTA_END -->`
-- Useful for backends without MCP support
-
-### 9. Store / Telemetry / Observability
+### 8. Store / Telemetry / Observability
 
 Bottom wide foundation band.
 

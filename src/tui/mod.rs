@@ -12,10 +12,14 @@ mod r#loop;
 mod markdown;
 mod render;
 mod scrollback;
+mod slash_command;
 mod state;
 mod status_bar;
 mod terminal_lifecycle;
 mod theme;
+
+#[cfg(test)]
+mod slash_command_tests;
 
 use std::io::{IsTerminal, Stdout};
 use std::path::PathBuf;
@@ -35,6 +39,7 @@ use crate::engine::IotaEngine;
 use crate::telemetry::metrics;
 use input::Composer;
 use render::observability_line;
+use slash_command::{SlashAction, parse_slash_command, slash_completions};
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 use terminal_lifecycle::{TerminalGuard, install_terminal_panic_hook};
 
@@ -208,6 +213,164 @@ impl TuiApp {
         self.record_entry(ConversationEntry::SystemNotice { text: notice });
     }
 
+    fn try_switch_backend_from_slash_command(&mut self, backend: AcpBackend) {
+        if !self.enabled_backends().contains(&backend) {
+            self.record_entry(ConversationEntry::SystemNotice {
+                text: format!("Backend {} is disabled in ~/.i6/nimia.yaml", backend),
+            });
+            return;
+        }
+        self.switch_backend(backend);
+    }
+
+    fn handle_slash_command(&mut self, text: &str) -> bool {
+        if !text.starts_with('/') {
+            return false;
+        }
+
+        let Some(command) = parse_slash_command(text, self.active_backend) else {
+            return false;
+        };
+
+        match command.action {
+            SlashAction::SubmitToBackend => {
+                return false;
+            }
+            SlashAction::Help => {
+                self.help_requested = true;
+            }
+            SlashAction::Clear => {
+                self.history.entries.clear();
+                self.pending_scrollback_entries.clear();
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: "Transcript cache cleared (terminal scrollback preserved)".into(),
+                });
+            }
+            SlashAction::ListBackends => {
+                let enabled = self
+                    .enabled_backends()
+                    .into_iter()
+                    .map(|backend| {
+                        if backend == self.active_backend {
+                            format!("{}*", backend)
+                        } else {
+                            backend.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: format!("Enabled backends: {}", enabled),
+                });
+            }
+            SlashAction::SwitchBackend(backend) => {
+                self.try_switch_backend_from_slash_command(backend);
+            }
+            SlashAction::Model => {
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: format!(
+                        "{} model: {}",
+                        self.active_backend,
+                        self.active_model.as_deref().unwrap_or("—")
+                    ),
+                });
+            }
+            SlashAction::Status => {
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: format!(
+                        "Status: backend {} · model {}",
+                        self.active_backend,
+                        self.active_model.as_deref().unwrap_or("—"),
+                    ),
+                });
+            }
+            SlashAction::Export => match self.export_history() {
+                Ok(path) => {
+                    self.record_entry(ConversationEntry::SystemNotice {
+                        text: format!("Exported to {}", path.display()),
+                    });
+                }
+                Err(err) => {
+                    self.record_entry(ConversationEntry::SystemNotice {
+                        text: format!("Export failed: {}", err),
+                    });
+                }
+            },
+            SlashAction::Quit => {
+                self.quit_confirm_tick = Some(self.tick_count);
+                self.overlay = Overlay::QuitConfirm;
+            }
+        }
+        true
+    }
+
+    // ── slash completion ─────────────────────────────────────────────────────
+
+    /// Returns the ghost-text suffix to display after the cursor when typing a
+    /// slash command. For example, `/he` on Hermes returns `Some("lp")` so the
+    /// render layer can append it in dim gray.
+    pub(super) fn slash_ghost(&self) -> Option<String> {
+        let text = &self.composer.text;
+        if !text.starts_with('/') || text.contains(char::is_whitespace) {
+            return None;
+        }
+        if !self.composer.cursor_at_end() {
+            return None;
+        }
+        let prefix = &text[1..];
+        let completions = slash_completions(prefix, self.active_backend);
+        let first = completions.first()?;
+        if first.len() > prefix.len() {
+            Some(first[prefix.len()..].to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Returns a space-separated list of matching slash command names for the
+    /// composer border title. Returns `None` when not in slash-typing mode.
+    pub(super) fn slash_completion_hint(&self) -> Option<String> {
+        let text = &self.composer.text;
+        if !text.starts_with('/') || text.contains(char::is_whitespace) {
+            return None;
+        }
+        let prefix = &text[1..];
+        let completions = slash_completions(prefix, self.active_backend);
+        if completions.is_empty() {
+            return None;
+        }
+        const MAX_SHOW: usize = 8;
+        let shown: Vec<&str> = completions.iter().copied().take(MAX_SHOW).collect();
+        let mut hint = shown.join("  ");
+        if completions.len() > MAX_SHOW {
+            hint.push_str(&format!("  +{}", completions.len() - MAX_SHOW));
+        }
+        Some(hint)
+    }
+
+    /// Accept the first slash-command completion by replacing the composer text.
+    /// Returns `true` if a completion was accepted.
+    pub(super) fn slash_tab_complete(&mut self) -> bool {
+        let text = self.composer.text.clone();
+        if !text.starts_with('/') || text.contains(char::is_whitespace) {
+            return false;
+        }
+        if !self.composer.cursor_at_end() {
+            return false;
+        }
+        let prefix = &text[1..];
+        let completions = slash_completions(prefix, self.active_backend);
+        if let Some(&first) = completions.first() {
+            if first != prefix {
+                let completed = format!("/{}", first);
+                self.composer.cursor = completed.chars().count();
+                self.composer.text = completed;
+                return true;
+            }
+        }
+        false
+    }
+
     fn cycle_backend(&mut self) {
         let enabled = self.enabled_backends();
         if enabled.is_empty() {
@@ -293,19 +456,38 @@ impl TuiApp {
         if text.is_empty() {
             return;
         }
+        // Resolve alias → canonical name for SubmitToBackend commands.
+        // e.g. user types "/compress" → we forward "/compact" so the backend's
+        // ACP slash handler sees the canonical name it registers against.
+        let forward_text: Option<String> = parse_slash_command(&text, self.active_backend)
+            .filter(|cmd| cmd.action == SlashAction::SubmitToBackend)
+            .map(|cmd| {
+                if cmd.args.is_empty() {
+                    format!("/{}", cmd.name)
+                } else {
+                    format!("/{} {}", cmd.name, cmd.args)
+                }
+            });
+        let forward_text = forward_text.unwrap_or_else(|| text.clone());
+
+        if self.handle_slash_command(&text) {
+            return;
+        }
         if self.running_turn {
             // Tab-queue: store for after current turn finishes
-            self.queued_prompt = Some(text);
+            self.queued_prompt = Some(forward_text);
             self.record_queued_prompt_delta(1);
             self.record_entry(ConversationEntry::SystemNotice {
                 text: "Queued (will send after current turn)".into(),
             });
             return;
         }
-        self.record_entry(ConversationEntry::UserMessage { text: text.clone() });
+        self.record_entry(ConversationEntry::UserMessage {
+            text: forward_text.clone(),
+        });
         self.running_turn = true;
         self.turn_started_at = Some(std::time::Instant::now());
-        self.send_turn_prompt(self.active_backend, self.cwd.clone(), text);
+        self.send_turn_prompt(self.active_backend, self.cwd.clone(), forward_text);
     }
 
     fn record_queued_prompt_delta(&self, delta: i64) {

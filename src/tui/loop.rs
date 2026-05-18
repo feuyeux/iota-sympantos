@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use crossterm::event::{Event as CEvent, EventStream};
+use crossterm::event::{Event as CEvent, EventStream, KeyEventKind};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
@@ -193,7 +193,8 @@ impl TuiApp {
 
     async fn run_loop_handle_terminal_event(&mut self, event: CEvent) -> LoopSignal {
         match event {
-            CEvent::Key(key) => self.on_key_event(key).await,
+            CEvent::Key(key) if key.kind == KeyEventKind::Press => self.on_key_event(key).await,
+            CEvent::Key(_) => LoopSignal::Continue,
             CEvent::Resize(_, _) => LoopSignal::Continue,
             _ => LoopSignal::Continue,
         }

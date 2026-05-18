@@ -98,7 +98,6 @@ context_engine:
   skill_roots:
     - ~/.i6/skills
     - ./.iota/skills
-  native_overlays: false
   budgets:
     memory_chars: 2000
     skills_chars: 1200

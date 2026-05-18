@@ -10,7 +10,7 @@ iota-sympantos 是一个轻量级 Rust CLI/TUI 编排器。它把用户入口、
 src/
 ├── main.rs                  # binary 入口，注册模块并进入 cli::run()
 ├── cli/
-│   ├── mod.rs               # 命令分发、daemon autostart、bench、observability、logs/trace、native、skill
+│   ├── mod.rs               # 命令分发、daemon autostart、bench、observability、logs/trace、skill
 │   └── observability_cmd.rs # token usage 查询、汇总、导出和 Prometheus 文本输出
 ├── tui/
 │   ├── input.rs             # 多行输入、Unicode 光标、历史搜索、kill/yank、word motion
@@ -48,8 +48,6 @@ src/
 │   ├── server.rs            # iota-context MCP stdio server（从 context/server.rs 迁移）
 │   ├── router.rs            # ACP 侧 tool-call 拦截，委托 tool_dispatch
 │   └── tool_dispatch.rs     # 共享工具派发逻辑（解析器、验证器、handlers）
-├── native/
-│   └── mod.rs               # memory/skill 原生文件投影
 ├── store/
 │   ├── mod.rs               # store layer 入口
 │   ├── approvals.rs         # approval 事件记录和默认风险分类
@@ -91,7 +89,7 @@ src/
 │ Context       │   │ Protocol       │   │ Store          │   │ Runtime Events │
 │ context/*     │   │ acp/*, mcp/*   │   │ store/*        │   │ runtime_event  │
 │ skill/*       │   │ JSON-RPC       │   │ SQLite         │   │ normalized     │
-│ native/*      │   │ stdio/TCP      │   │ + embedding    │   │ event stream   │
+│                │   │ stdio/TCP      │   │ + embedding    │   │ event stream   │
 └───────────────┘   └────────────────┘   └────────────────┘   └────────────────┘
           │                  │                    ▲
           │                  ▼                    │
@@ -123,7 +121,7 @@ src/
 
 | 模块 | 职责 | 主要下游 |
 |---|---|---|
-| `cli/mod.rs` | 解析命令并分发 `run/check/tui/bench/observability/logs/trace/context-mcp/fun-mcp/native-materialize/skill/__daemon`；负责 daemon autostart 和 CLI 输出 | `config`, `engine`, `daemon`, `acp`, `store`, `native`, `skill`, `tui` |
+| `cli/mod.rs` | 解析命令并分发 `run/check/tui/bench/observability/logs/trace/context-mcp/fun-mcp/skill/__daemon`；负责 daemon autostart 和 CLI 输出 | `config`, `engine`, `daemon`, `acp`, `store`, `skill`, `tui` |
 | `cli/observability_cmd.rs` | `iota observability logging/tokens/metrics`；查询本地 token usage、backend summary、JSON export 和 Prometheus 文本指标 | `store::observability` |
 | `tui.rs` | 终端生命周期、事件循环、prompt 队列、后台 engine task、流式输出、approval 浮层、pager/help/quit overlay | `engine`, `acp::permission`, `tui/*` |
 | `tui/input.rs` | 多行编辑、历史、搜索、词移动和 kill buffer | 无项目级依赖 |
@@ -175,9 +173,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 | `skill/runner.rs` | 执行 `execution.mode = mcp` skill；可顺序或并行调用 MCP tools；渲染 template | `mcp::client`, `runtime_event`, `skill` |
 | `skill/cache.rs` | 从本地路径或 HTTP(S) 拉取 skill，并写入 `~/.i6/skills` | filesystem/network |
 | `skill/fun_server.rs` | `iota-fun` MCP stdio server；运行 `fun.python/typescript/rust/go/java/cpp/zig` | 外部解释器/编译器 |
-| `native/mod.rs` | 将 memory/skill 投影到 backend 原生文件，使用 `<!-- IOTA_START -->` / `<!-- IOTA_END -->` 块替换 | `memory`, `skill`, `acp::AcpBackend` |
-
-Context Fabric 提供 prompt 背景、可确定工具和对不支持 MCP 后端的原生投影。
+Context Fabric 提供 prompt 背景和可确定工具。
 
 ### Store
 
@@ -429,4 +425,3 @@ config/utils -> shared support
 | 新 memory 能力 | `memory/`, `mcp/tool_dispatch.rs` | Store 拥有 schema/query，tool_dispatch 暴露工具 |
 | 新 MCP 工具 | `mcp/tool_dispatch.rs`，`mcp/server.rs` tools()，必要时 `mcp/router.rs` | 添加 descriptor、dispatch handler、路由策略 |
 | 新 engine-run skill 行为 | `skill/mod.rs`, `skill/runner.rs` | 扩展 metadata/runner，不改变 ACP prompt path |
-| 新 native projection | `native/mod.rs`, `cli/mod.rs` | 添加目标路径和 render/apply 分支 |
