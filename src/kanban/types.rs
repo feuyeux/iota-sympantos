@@ -254,3 +254,18 @@ pub struct KanbanEvent {
     pub payload: String,
     pub created_at: i64,
 }
+
+// ---------------------------------------------------------------------------
+// UI Events (broadcast channel for real-time TUI updates)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub enum KanbanUiEvent {
+    TaskCreated { id: TaskId, title: String },
+    TaskStatusChanged { id: TaskId, from: Status, to: Status },
+    TaskUpdated { id: TaskId },
+    TaskDeleted { id: TaskId },
+    CommentAdded { task_id: TaskId, comment_id: CommentId },
+    RunStarted { task_id: TaskId, run_id: RunId },
+    RunCompleted { task_id: TaskId, run_id: RunId, status: RunStatus },
+}

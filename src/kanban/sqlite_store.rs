@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use super::state_machine::validate_transition;
@@ -75,6 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_comments_task      ON comments(task_id);
 #[derive(Clone)]
 pub struct SqliteKanbanStore {
     conn: Arc<Mutex<Connection>>,
+    event_tx: broadcast::Sender<KanbanUiEvent>,
 }
 
 impl SqliteKanbanStore {
@@ -94,13 +96,32 @@ impl SqliteKanbanStore {
              PRAGMA foreign_keys=ON;",
         )?;
         conn.execute_batch(SCHEMA)?;
+        let (event_tx, _) = broadcast::channel(64);
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            event_tx,
         })
     }
 
     fn lock_conn(&self) -> std::sync::MutexGuard<'_, Connection> {
         lock_or_recover(&self.conn)
+    }
+
+    /// Subscribe to real-time UI events emitted when store mutations occur.
+    pub fn subscribe(&self) -> broadcast::Receiver<KanbanUiEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Look up the task_id associated with a run.
+    fn task_id_for_run(&self, run_id: &str) -> Option<TaskId> {
+        let conn = self.lock_conn();
+        conn.query_row(
+            "SELECT task_id FROM runs WHERE id = ?1",
+            params![run_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok()
+        .map(|v| v as TaskId)
     }
 
     // -- Board -----------------------------------------------------------------
@@ -517,22 +538,32 @@ impl KanbanStore for SqliteKanbanStore {
         self.get_board_impl(slug)
     }
     fn create_task(&self, req: CreateTaskRequest) -> Result<TaskId> {
-        self.create_task_impl(req)
+        let title = req.title.clone();
+        let id = self.create_task_impl(req)?;
+        let _ = self.event_tx.send(KanbanUiEvent::TaskCreated { id, title });
+        Ok(id)
     }
     fn get_task(&self, id: TaskId) -> Result<Task> {
         self.get_task_impl(id)
     }
     fn update_task(&self, id: TaskId, patch: TaskPatch) -> Result<()> {
-        self.update_task_impl(id, patch)
+        self.update_task_impl(id, patch)?;
+        let _ = self.event_tx.send(KanbanUiEvent::TaskUpdated { id });
+        Ok(())
     }
     fn list_tasks(&self, filter: TaskFilter) -> Result<Vec<Task>> {
         self.list_tasks_impl(filter)
     }
     fn delete_task(&self, id: TaskId) -> Result<()> {
-        self.delete_task_impl(id)
+        self.delete_task_impl(id)?;
+        let _ = self.event_tx.send(KanbanUiEvent::TaskDeleted { id });
+        Ok(())
     }
     fn transition(&self, id: TaskId, to: Status) -> Result<()> {
-        self.transition_impl(id, to)
+        let from = self.get_task(id)?.status;
+        self.transition_impl(id, to)?;
+        let _ = self.event_tx.send(KanbanUiEvent::TaskStatusChanged { id, from, to });
+        Ok(())
     }
     fn create_link(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
         self.create_link_impl(from, to, kind)
@@ -544,16 +575,27 @@ impl KanbanStore for SqliteKanbanStore {
         self.get_links_impl(id)
     }
     fn add_comment(&self, task_id: TaskId, author: &str, body: &str) -> Result<CommentId> {
-        self.add_comment_impl(task_id, author, body)
+        let comment_id = self.add_comment_impl(task_id, author, body)?;
+        let _ = self.event_tx.send(KanbanUiEvent::CommentAdded { task_id, comment_id });
+        Ok(comment_id)
     }
     fn list_comments(&self, task_id: TaskId) -> Result<Vec<Comment>> {
         self.list_comments_impl(task_id)
     }
     fn create_run(&self, task_id: TaskId, profile: &str) -> Result<RunId> {
-        self.create_run_impl(task_id, profile)
+        let run_id = self.create_run_impl(task_id, profile)?;
+        let _ = self.event_tx.send(KanbanUiEvent::RunStarted { task_id, run_id: run_id.clone() });
+        Ok(run_id)
     }
     fn complete_run(&self, run_id: &str, status: RunStatus, exit_code: Option<i32>) -> Result<()> {
-        self.complete_run_impl(run_id, status, exit_code)
+        let task_id = self.task_id_for_run(run_id).unwrap_or(0);
+        self.complete_run_impl(run_id, status, exit_code)?;
+        let _ = self.event_tx.send(KanbanUiEvent::RunCompleted {
+            task_id,
+            run_id: run_id.to_string(),
+            status,
+        });
+        Ok(())
     }
     fn heartbeat(&self, run_id: &str) -> Result<()> {
         self.heartbeat_impl(run_id)

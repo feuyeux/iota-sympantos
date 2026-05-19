@@ -68,6 +68,10 @@ pub(super) async fn run_loop(
                 app.run_loop_handle_kanban_dispatch_result(result);
             }
 
+            Ok(event) = app.kanban_event_rx.recv() => {
+                app.run_loop_handle_kanban_ui_event(event);
+            }
+
             // Pick up the internal submit signal from the channel.
             Some(msg) = app.turn_rx.recv() => {
                 let TurnMessage::Prompt { backend, cwd, text } = msg;
@@ -170,6 +174,26 @@ impl TuiApp {
                 });
             }
         }
+    }
+
+    fn run_loop_handle_kanban_ui_event(&mut self, event: crate::kanban::KanbanUiEvent) {
+        use crate::kanban::KanbanUiEvent;
+        let text = match event {
+            KanbanUiEvent::TaskCreated { id, title } => {
+                format!("Task #{} created: {}", id, title)
+            }
+            KanbanUiEvent::TaskStatusChanged { id, from, to } => {
+                format!("Task #{}: {} -> {}", id, from, to)
+            }
+            KanbanUiEvent::RunStarted { task_id, .. } => {
+                format!("Worker started for task #{}", task_id)
+            }
+            KanbanUiEvent::RunCompleted { task_id, status, .. } => {
+                format!("Worker completed for task #{} ({})", task_id, status)
+            }
+            _ => return, // Don't spam for minor events
+        };
+        self.record_entry(ConversationEntry::SystemNotice { text });
     }
 
     fn run_loop_spawn_pending_prompt_if_any(

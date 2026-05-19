@@ -32,6 +32,7 @@ use crossterm::terminal::enable_raw_mode;
 use ratatui::backend::CrosstermBackend;
 use ratatui::{TerminalOptions, Viewport};
 use tokio::sync::{Mutex as TokioMutex, mpsc};
+use tokio::sync::broadcast as tokio_broadcast;
 use tokio::task::JoinHandle;
 
 use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
@@ -88,6 +89,8 @@ struct TuiApp {
     kanban_dispatcher: Arc<Mutex<Dispatcher>>,
     /// Whether auto-dispatch daemon is active (background task ticks the dispatcher).
     kanban_daemon_active: Arc<AtomicBool>,
+    /// Broadcast receiver for real-time kanban UI events.
+    kanban_event_rx: tokio_broadcast::Receiver<crate::kanban::KanbanUiEvent>,
 
     // Conversation and input state
     history: HistoryState,
@@ -174,9 +177,10 @@ impl TuiApp {
             .join("kanban");
         std::fs::create_dir_all(&kanban_dir).ok();
         let kanban_db_path = kanban_dir.join("iota.db");
-        let kanban_store: Arc<dyn KanbanStore> = Arc::new(
-            SqliteKanbanStore::open(&kanban_db_path).context("Failed to open kanban store")?,
-        );
+        let kanban_store_concrete =
+            SqliteKanbanStore::open(&kanban_db_path).context("Failed to open kanban store")?;
+        let kanban_event_rx = kanban_store_concrete.subscribe();
+        let kanban_store: Arc<dyn KanbanStore> = Arc::new(kanban_store_concrete);
         let kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig::default())));
         let kanban_daemon_active = Arc::new(AtomicBool::new(true));
 
@@ -187,6 +191,7 @@ impl TuiApp {
             kanban_store,
             kanban_dispatcher,
             kanban_daemon_active,
+            kanban_event_rx,
             history: HistoryState::new(MAX_HISTORY),
             composer: Composer::new(),
             active_backend,
