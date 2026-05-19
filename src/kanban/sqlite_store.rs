@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+use super::event_sourcing::*;
 use super::state_machine::validate_transition;
 use super::store::KanbanStore;
 use super::types::*;
@@ -110,6 +111,119 @@ impl SqliteKanbanStore {
     /// Subscribe to real-time UI events emitted when store mutations occur.
     pub fn subscribe(&self) -> broadcast::Receiver<KanbanUiEvent> {
         self.event_tx.subscribe()
+    }
+
+    /// Record a structured event directly to the events table.
+    /// Called after _impl methods have released the mutex, so re-locking is safe.
+    fn record_event_internal(&self, event_type: &str, payload: &str) {
+        let conn = self.lock_conn();
+        let now = now_ts();
+        let _ = conn.execute(
+            "INSERT INTO events (event_type, payload, created_at) VALUES (?1, ?2, ?3)",
+            params![event_type, payload, now],
+        );
+    }
+
+    /// Replay a sequence of events against this store, rebuilding state.
+    /// Used for syncing a remote node's events into this store.
+    /// Returns the number of events successfully applied.
+    pub fn replay_events(&self, events: &[KanbanEvent]) -> Result<usize> {
+        let mut applied = 0;
+        for event in events {
+            match self.apply_event(event) {
+                Ok(()) => applied += 1,
+                Err(e) => {
+                    tracing::warn!(
+                        event_id = event.id,
+                        event_type = %event.event_type,
+                        error = %e,
+                        "skipping event during replay"
+                    );
+                }
+            }
+        }
+        Ok(applied)
+    }
+
+    fn apply_event(&self, event: &KanbanEvent) -> Result<()> {
+        match event.event_type.as_str() {
+            EVT_BOARD_CREATED => {
+                let p: BoardCreatedPayload = serde_json::from_str(&event.payload)?;
+                let _ = self.create_board_impl(&p.slug, &p.name);
+                Ok(())
+            }
+            EVT_TASK_CREATED => {
+                let p: TaskCreatedPayload = serde_json::from_str(&event.payload)?;
+                let req = CreateTaskRequest {
+                    board_id: p.board_id,
+                    title: p.title,
+                    body: p.body,
+                    status: p.status.parse().ok(),
+                    assignee: p.assignee,
+                    priority: Some(p.priority),
+                    tags: p.tags,
+                    workspace_kind: None,
+                    workspace_path: None,
+                };
+                let _ = self.create_task_impl(req);
+                Ok(())
+            }
+            EVT_TASK_UPDATED => {
+                let p: TaskUpdatedPayload = serde_json::from_str(&event.payload)?;
+                let patch = TaskPatch {
+                    title: p.patch.title,
+                    body: p.patch.body,
+                    status: p.patch.status.and_then(|s| s.parse().ok()),
+                    assignee: p.patch.assignee,
+                    priority: p.patch.priority,
+                    tags: p.patch.tags,
+                    workspace_kind: None,
+                    workspace_path: None,
+                };
+                let _ = self.update_task_impl(p.task_id, patch);
+                Ok(())
+            }
+            EVT_TASK_DELETED => {
+                let p: TaskDeletedPayload = serde_json::from_str(&event.payload)?;
+                let _ = self.delete_task_impl(p.task_id);
+                Ok(())
+            }
+            EVT_TASK_TRANSITIONED => {
+                let p: TaskTransitionedPayload = serde_json::from_str(&event.payload)?;
+                let to: Status = p.to.parse()?;
+                let _ = self.transition_impl(p.task_id, to);
+                Ok(())
+            }
+            EVT_LINK_CREATED => {
+                let p: LinkCreatedPayload = serde_json::from_str(&event.payload)?;
+                let kind: LinkKind = p.kind.parse()?;
+                let _ = self.create_link_impl(p.from_id, p.to_id, kind);
+                Ok(())
+            }
+            EVT_LINK_REMOVED => {
+                let p: LinkRemovedPayload = serde_json::from_str(&event.payload)?;
+                let kind: LinkKind = p.kind.parse()?;
+                let _ = self.remove_link_impl(p.from_id, p.to_id, kind);
+                Ok(())
+            }
+            EVT_COMMENT_ADDED => {
+                let p: CommentAddedPayload = serde_json::from_str(&event.payload)?;
+                let _ = self.add_comment_impl(p.task_id, &p.author, &p.body);
+                Ok(())
+            }
+            EVT_RUN_STARTED => {
+                let p: RunStartedPayload = serde_json::from_str(&event.payload)?;
+                let _ = self.create_run_impl(p.task_id, &p.profile);
+                Ok(())
+            }
+            EVT_RUN_COMPLETED => {
+                let p: RunCompletedPayload = serde_json::from_str(&event.payload)?;
+                let status: RunStatus = p.status.parse()?;
+                let _ = self.complete_run_impl(&p.run_id, status, p.exit_code);
+                Ok(())
+            }
+            _ => Ok(()), // Unknown event types are silently skipped
+        }
     }
 
     /// Look up the task_id associated with a run.
@@ -529,7 +643,17 @@ impl SqliteKanbanStore {
 
 impl KanbanStore for SqliteKanbanStore {
     fn create_board(&self, slug: &str, name: &str) -> Result<BoardId> {
-        self.create_board_impl(slug, name)
+        let id = self.create_board_impl(slug, name)?;
+        self.record_event_internal(
+            EVT_BOARD_CREATED,
+            &serde_json::to_string(&BoardCreatedPayload {
+                board_id: id,
+                slug: slug.to_string(),
+                name: name.to_string(),
+            })
+            .unwrap_or_default(),
+        );
+        Ok(id)
     }
     fn list_boards(&self) -> Result<Vec<Board>> {
         self.list_boards_impl()
@@ -539,16 +663,55 @@ impl KanbanStore for SqliteKanbanStore {
     }
     fn create_task(&self, req: CreateTaskRequest) -> Result<TaskId> {
         let title = req.title.clone();
+        let body = req.body.clone();
+        let board_id = req.board_id;
+        let status = req.status.unwrap_or(Status::Triage).as_str().to_string();
+        let assignee = req.assignee.clone();
+        let priority = req.priority.unwrap_or(0);
+        let tags = req.tags.clone();
         let id = self.create_task_impl(req)?;
-        let _ = self.event_tx.send(KanbanUiEvent::TaskCreated { id, title });
+        let _ = self.event_tx.send(KanbanUiEvent::TaskCreated {
+            id,
+            title: title.clone(),
+        });
+        self.record_event_internal(
+            EVT_TASK_CREATED,
+            &serde_json::to_string(&TaskCreatedPayload {
+                task_id: id,
+                board_id,
+                title,
+                body,
+                status,
+                assignee,
+                priority,
+                tags,
+            })
+            .unwrap_or_default(),
+        );
         Ok(id)
     }
     fn get_task(&self, id: TaskId) -> Result<Task> {
         self.get_task_impl(id)
     }
     fn update_task(&self, id: TaskId, patch: TaskPatch) -> Result<()> {
+        let patch_payload = TaskPatchPayload {
+            title: patch.title.clone(),
+            body: patch.body.clone(),
+            status: patch.status.map(|s| s.as_str().to_string()),
+            assignee: patch.assignee.clone(),
+            priority: patch.priority,
+            tags: patch.tags.clone(),
+        };
         self.update_task_impl(id, patch)?;
         let _ = self.event_tx.send(KanbanUiEvent::TaskUpdated { id });
+        self.record_event_internal(
+            EVT_TASK_UPDATED,
+            &serde_json::to_string(&TaskUpdatedPayload {
+                task_id: id,
+                patch: patch_payload,
+            })
+            .unwrap_or_default(),
+        );
         Ok(())
     }
     fn list_tasks(&self, filter: TaskFilter) -> Result<Vec<Task>> {
@@ -557,19 +720,52 @@ impl KanbanStore for SqliteKanbanStore {
     fn delete_task(&self, id: TaskId) -> Result<()> {
         self.delete_task_impl(id)?;
         let _ = self.event_tx.send(KanbanUiEvent::TaskDeleted { id });
+        self.record_event_internal(
+            EVT_TASK_DELETED,
+            &serde_json::to_string(&TaskDeletedPayload { task_id: id }).unwrap_or_default(),
+        );
         Ok(())
     }
     fn transition(&self, id: TaskId, to: Status) -> Result<()> {
         let from = self.get_task(id)?.status;
         self.transition_impl(id, to)?;
         let _ = self.event_tx.send(KanbanUiEvent::TaskStatusChanged { id, from, to });
+        self.record_event_internal(
+            EVT_TASK_TRANSITIONED,
+            &serde_json::to_string(&TaskTransitionedPayload {
+                task_id: id,
+                from: from.as_str().to_string(),
+                to: to.as_str().to_string(),
+            })
+            .unwrap_or_default(),
+        );
         Ok(())
     }
     fn create_link(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
-        self.create_link_impl(from, to, kind)
+        self.create_link_impl(from, to, kind)?;
+        self.record_event_internal(
+            EVT_LINK_CREATED,
+            &serde_json::to_string(&LinkCreatedPayload {
+                from_id: from,
+                to_id: to,
+                kind: kind.as_str().to_string(),
+            })
+            .unwrap_or_default(),
+        );
+        Ok(())
     }
     fn remove_link(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
-        self.remove_link_impl(from, to, kind)
+        self.remove_link_impl(from, to, kind)?;
+        self.record_event_internal(
+            EVT_LINK_REMOVED,
+            &serde_json::to_string(&LinkRemovedPayload {
+                from_id: from,
+                to_id: to,
+                kind: kind.as_str().to_string(),
+            })
+            .unwrap_or_default(),
+        );
+        Ok(())
     }
     fn get_links(&self, id: TaskId) -> Result<Vec<Link>> {
         self.get_links_impl(id)
@@ -577,6 +773,16 @@ impl KanbanStore for SqliteKanbanStore {
     fn add_comment(&self, task_id: TaskId, author: &str, body: &str) -> Result<CommentId> {
         let comment_id = self.add_comment_impl(task_id, author, body)?;
         let _ = self.event_tx.send(KanbanUiEvent::CommentAdded { task_id, comment_id });
+        self.record_event_internal(
+            EVT_COMMENT_ADDED,
+            &serde_json::to_string(&CommentAddedPayload {
+                comment_id,
+                task_id,
+                author: author.to_string(),
+                body: body.to_string(),
+            })
+            .unwrap_or_default(),
+        );
         Ok(comment_id)
     }
     fn list_comments(&self, task_id: TaskId) -> Result<Vec<Comment>> {
@@ -585,6 +791,15 @@ impl KanbanStore for SqliteKanbanStore {
     fn create_run(&self, task_id: TaskId, profile: &str) -> Result<RunId> {
         let run_id = self.create_run_impl(task_id, profile)?;
         let _ = self.event_tx.send(KanbanUiEvent::RunStarted { task_id, run_id: run_id.clone() });
+        self.record_event_internal(
+            EVT_RUN_STARTED,
+            &serde_json::to_string(&RunStartedPayload {
+                run_id: run_id.clone(),
+                task_id,
+                profile: profile.to_string(),
+            })
+            .unwrap_or_default(),
+        );
         Ok(run_id)
     }
     fn complete_run(&self, run_id: &str, status: RunStatus, exit_code: Option<i32>) -> Result<()> {
@@ -595,6 +810,16 @@ impl KanbanStore for SqliteKanbanStore {
             run_id: run_id.to_string(),
             status,
         });
+        self.record_event_internal(
+            EVT_RUN_COMPLETED,
+            &serde_json::to_string(&RunCompletedPayload {
+                run_id: run_id.to_string(),
+                task_id,
+                status: status.as_str().to_string(),
+                exit_code,
+            })
+            .unwrap_or_default(),
+        );
         Ok(())
     }
     fn heartbeat(&self, run_id: &str) -> Result<()> {

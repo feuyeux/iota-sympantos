@@ -1,5 +1,6 @@
 pub mod bridge;
 pub mod dispatcher;
+pub mod event_sourcing;
 pub mod shadow;
 pub mod sqlite_store;
 pub mod state_machine;
