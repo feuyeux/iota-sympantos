@@ -211,7 +211,7 @@ To execute these functions, you need the following language runtimes installed:
 ### Runtime Mapping
 
 | Tool | Runtime path |
-|---|---|
+| :---| :---|
 | `fun.python` | `python3 -c <source>` |
 | `fun.typescript` | `node -e <source>` |
 | `fun.go` | writes `main.go`, runs `go run` |

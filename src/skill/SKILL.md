@@ -25,7 +25,7 @@ Loads `.md`/`.yaml` skill manifests, matches triggers against prompts, and execu
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `cache` | HTTP/local skill fetching and caching |
 | `runner` | MCP-mode skill execution and template rendering |
 | `fun` | `iota-fun` MCP server — 7-language execution (C++, Go, Java, Python, Rust, TypeScript, Zig) |

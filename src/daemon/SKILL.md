@@ -24,7 +24,7 @@ TCP server on `127.0.0.1:47661` that keeps `IotaEngine` instances alive across C
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `pool` | `EnginePool` — per-cwd engine instance management |
 | `proto` | `DaemonPromptRequest` / `DaemonPromptResponse` wire types |
 

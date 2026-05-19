@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
       DOWN_STACK=1
       shift
       ;;
-    -h|--help)
+    -h| :--help)
       usage
       exit 0
       ;;

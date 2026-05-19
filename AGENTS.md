@@ -93,7 +93,7 @@ initialize → session/new → session/prompt → 流式 session/update → sess
 ## 后端适配器
 
 | 后端 | 命令 | 别名 |
-|------|------|------|
+| :------| :------| :------|
 | Claude Code | `npx` | `claude`, `claudecode` |
 | Codex | `npx` | `codex` |
 | Gemini CLI | `npx` | `gemini`, `gemini-cli` |
@@ -156,7 +156,7 @@ iota __daemon           # 内部 daemon 入口
 ## TUI 功能（已完成）
 
 | 功能 | 文件 | 状态 |
-|------|------|------|
+| :------| :------| :------|
 | 多行输入（Shift+Enter 换行） | `tui/input.rs` | ✅ |
 | Unicode grapheme 光标 | `tui/input.rs` | ✅ |
 | Kill buffer（Ctrl+K/Ctrl+Y） | `tui/input.rs` | ✅ |
@@ -176,7 +176,7 @@ iota __daemon           # 内部 daemon 入口
 ### TUI 当前状态
 
 | 功能 | 文件 | 状态 |
-|------|------|------|
+| :------| :------| :------|
 | Panic hook 终端恢复 | `tui.rs` | ✅ |
 | 错误路径终端恢复（RAII guard） | `tui.rs` | ✅ |
 | stdout is-terminal 检查 | `tui.rs` | ✅ |
@@ -189,7 +189,7 @@ iota __daemon           # 内部 daemon 入口
 ### TUI 仍可改进
 
 | 功能 | 优先级 | 说明 |
-|------|--------|------|
+| :------| :--------| :------|
 | 鼠标滚轮滚动 | P2 | 已启用鼠标捕获，但滚轮事件未形成完整滚动交互 |
 | 键盘增强标志 | P2 | Shift+Enter 在部分终端仍依赖终端自身支持 |
 | 窗口标题（OSC） | P3 | 尚未设置终端窗口标题 |
@@ -200,7 +200,7 @@ iota __daemon           # 内部 daemon 入口
 ## Context Fabric 实现状态（对照 plan-0504 / plan-0504-plus）
 
 | Phase | 内容 | 文件 | 状态 |
-|-------|------|------|-------|
+| :-------| :------| :------| :-------|
 | 1 | RuntimeEvent 归一化 | `runtime_event.rs` | ✅ |
 | 1 | CacheStore execution replay / dedupe | `store/cache.rs` | ✅ |
 | 1 | Execution idempotency + lock + fencing | `store/cache.rs` | ✅ |

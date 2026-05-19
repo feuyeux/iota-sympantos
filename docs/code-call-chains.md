@@ -180,7 +180,7 @@ initialize
 辅助模块：
 
 | 模块 | 调用点 | 职责 |
-|---|---|---|
+| :---| :---| :---|
 | `acp/wire.rs` | `read_prompt_events_for_id()`, `wait_for_response()` | 带 timeout 的 line read、JSON parse、response id 判断、error 格式化 |
 | `runtime_event.rs` | ACP event loop | update/complete/permission/usage/tool/error 到 `RuntimeEvent` |
 | `acp/permission.rs` | permission request | 自动批准 iota tool/whitelist，或走 TUI/stdin |
@@ -663,7 +663,7 @@ acp::session::session_new_params_with_options()
 默认启用规则：
 
 | Backend | 默认是否注入 `mcpServers` |
-|---|---|
+| :---| :---|
 | Claude Code | 仅当 `context_engine_backend.claude-code.mcp_session_new` 为 `true/try/on` |
 | Codex | 仅当 `context_engine_backend.codex.mcp_session_new` 为 `true/try/on`；即使空 server 也发送 `mcpServers` |
 | Gemini | 默认启用 |
@@ -926,7 +926,7 @@ embed(content)
 ## 模块覆盖表
 
 | 模块 | 主要职责 | 覆盖链路 |
-|---|---|---|
+| :---| :---| :---|
 | `main.rs` | Tokio 入口 | 入口总览 |
 | `cli/mod.rs` | 命令分发、daemon autostart、bench、logs/trace、native、skill | 1,3,4,12 |
 | `config.rs` | `~/.i6/nimia.yaml`、EffectiveConfig、backend command/env、MCP/session options、embedding config | 1,2,3,10 |
@@ -969,7 +969,7 @@ embed(content)
 ## 进程间和外部调用清单
 
 | 位置 | 类型 | 发起方 | 目标 | 协议/用途 |
-|---|---|---|---|---|
+| :---| :---| :---| :---| :---|
 | `cli::start_daemon_silently()` | child process | CLI | `iota __daemon` | daemon autostart |
 | `daemon::send_prompt()` / `send_warm()` | TCP | CLI | daemon | JSON line request/response |
 | `AcpClient::start()` | child process + stdio | engine | ACP backend | JSON-RPC 2.0 line protocol |

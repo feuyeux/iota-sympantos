@@ -510,7 +510,7 @@ exp01-full-log-probe-20260507-fixed
 #### Step 10 总览：完整记忆日志链路
 
 | 链路 | backend | execution_id | 关键事件 | 结果 |
-|------|---------|--------------|----------|------|
+| :------| :---------| :--------------| :----------| :------|
 | backend tool write | claude-code | `5f0914d7-8a4b-43d2-86d7-07ad1efe668f` | `tool_call iota_memory_write` + `tool_result iota_memory_write` | 通过 |
 | backend tool search | claude-code | `7445ea10-52cf-4fee-a82e-0ab8c5a5235a` | `tool_call iota_memory_search` + `tool_result iota_memory_search` | 通过 |
 | engine episodic write | gemini | `ab4afaad-946a-408a-b1e6-8b6cb8504306` | `engine episodic memory write completed` | 通过 |
@@ -742,7 +742,7 @@ EventStore 结论：
 本次没有在文档更新前删除 probe 记录，原因是 Step 10 的 DB 侧证据需要保留到文档完成。实验数据分为以下几类：
 
 | 类型 | 例子 | 默认策略 |
-|------|------|----------|
+| :------| :------| :----------|
 | 验证用固定记忆 | Step 1 六类 memory | 实验结束后可清理 |
 | 审计 probe | `exp01-full-log-probe-*` | 文档完成前保留，归档后清理 |
 | padding 数据 | `domain-padding-*` | budget 验证后应清理 |

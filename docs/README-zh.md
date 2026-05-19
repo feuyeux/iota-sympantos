@@ -1,7 +1,7 @@
 # iota-sympantos 文档索引
 
 | 文档 | 说明 |
-|---|---|
+| :---| :---|
 | [architecture.md](architecture.md) | 分层架构、模块职责、扩展点 |
 | [code-call-chains.md](code-call-chains.md) | CLI/TUI/daemon/ACP/Context Fabric 调用链 |
 | [observability.md](observability.md) | 当前 logs、trace、RuntimeEvent、token observability、metrics、store 边界 |

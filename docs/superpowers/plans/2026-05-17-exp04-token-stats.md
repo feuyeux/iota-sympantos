@@ -23,6 +23,7 @@
 ## 2. Task 1: 扩展 TokenUsage 数据模型
 
 **Files:**
+
 - Modify: `src/runtime_event/mod.rs`
 - Modify: `src/runtime_event/tests.rs`
 - Modify: `src/tui/state.rs`
@@ -55,6 +56,7 @@ pub raw_payload: Value,
 - [x] **Step 3: 添加单元测试**
 
 覆盖：
+
 - OpenAI Responses
 - OpenAI Chat / Completions
 - Anthropic Messages
@@ -68,6 +70,7 @@ pub raw_payload: Value,
 ## 3. Task 2: 实现 TokenUsageNormalizer
 
 **Files:**
+
 - Modify/Add: `src/runtime_event/mod.rs` 或 `src/runtime_event/token_usage.rs`
 - Modify: `src/acp/stream_reader.rs`
 
@@ -76,7 +79,7 @@ pub raw_payload: Value,
 识别以下来源：
 
 | Source | 路径 |
-|--------|------|
+| :--------| :------|
 | `prompt_result.usage` | `result.usage` |
 | `prompt_result.gemini_quota` | `result._meta.quota.token_count` |
 | `session_update.usage_update` | `params.update.sessionUpdate == "usage_update"` |
@@ -89,6 +92,7 @@ pub raw_payload: Value,
 - [x] **Step 3: 实现 normalized total 计算**
 
 规则：
+
 - Anthropic: `input + cache_read + cache_creation + output + thinking`
 - Gemini: 优先 provider total；否则不重复加 cached content
 - OpenAI: 优先 provider total；details 只作为拆分
@@ -103,6 +107,7 @@ pub raw_payload: Value,
 ## 4. Task 3: 增加 ObservabilityStore
 
 **Files:**
+
 - Add/Modify: `src/store/observability.rs`
 - Modify: `src/store/mod.rs`
 - Modify: `src/engine/telemetry.rs`
@@ -141,6 +146,7 @@ CREATE TABLE IF NOT EXISTS token_usage_events (
 - [x] **Step 3: 提供查询 API**
 
 实现：
+
 - recent token events
 - events by execution id
 - backend summary
@@ -155,6 +161,7 @@ CREATE TABLE IF NOT EXISTS token_usage_events (
 ## 5. Task 4: 实现 `iota observability` CLI
 
 **Files:**
+
 - Modify: `src/cli/mod.rs`
 - Modify/Add: `src/cli/observability_cmd.rs`
 
@@ -198,6 +205,7 @@ iota_token_normalized_total
 ## 6. Task 5: 接入 TUI 展示
 
 **Files:**
+
 - Modify: `src/tui/state.rs`
 - Modify: `src/tui/loop.rs`
 - Modify: `src/tui/status_bar.rs`
@@ -243,6 +251,7 @@ TUI 不解析 raw payload，只使用 normalizer 输出。
 ## 7. Task 6: 用 exp04 复验链路
 
 **Files:**
+
 - Modify: `gefsi/exp04-token-stats.md`
 - Create/Update: `gefsi/logs/exp04-*.log` only when parser fallback is needed
 
@@ -274,6 +283,7 @@ done
 - [x] **Step 4: 更新实验报告**
 
 报告必须包含：
+
 - 原始 observability 数据表
 - provider reported total 排序
 - normalized total 排序
@@ -298,7 +308,7 @@ cargo build --release
 ## 9. 验收矩阵
 
 | # | 验收项 | 判定标准 |
-|---|--------|----------|
+| :---| :--------| :----------|
 | 1 | Token parser | OpenAI / Anthropic / Gemini / adapter-only fixtures 全部通过 |
 | 2 | 持久化 | token usage events 可按 execution id 查询 |
 | 3 | CLI 查询 | `iota observability tokens recent/summary/export` 可用 |

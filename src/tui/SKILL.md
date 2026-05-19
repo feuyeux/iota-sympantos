@@ -43,7 +43,7 @@ ratatui-based interactive chat interface with markdown rendering, multi-line com
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `input` | Multi-line input with kill-buffer, word motion, history search |
 | `events` | Keyboard/mouse event handling and dispatch |
 | `loop` | Main event loop, async engine turn, frame timing |

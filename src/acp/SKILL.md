@@ -26,7 +26,7 @@ JSON-RPC 2.0 protocol driver for communicating with AI coding assistant backends
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `backend` | `AcpBackend` enum, `ALL_BACKENDS`, command/alias resolution |
 | `client` | `AcpClient` — process spawn, session creation, prompt execution |
 | `message` | Response parsing: text extraction, tool calls, permissions |

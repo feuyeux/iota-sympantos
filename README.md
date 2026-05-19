@@ -5,7 +5,7 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 ## 核心功能
 
 | 功能 | 说明 |
-|------|------|
+| :------| :------|
 | **跨后端记忆** | SQLite 存储（SHA-256 去重、FTS5、6 召回桶），任一后端写入的记忆可在其他后端召回注入 |
 | **确定性技能** | YAML 声明，由 Rust 引擎分发；触发匹配与输出模板与后端无关 |
 | **iota-fun** | 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` |
@@ -53,7 +53,7 @@ pip install 'hermes-agent[acp]'
 ## TUI 快捷键
 
 | 快捷键 | 作用 |
-|--------|------|
+| :--------| :------|
 | `Enter` | 发送 prompt |
 | `Shift+Enter` | 插入换行 |
 | `Tab` | 运行中排队下一条 prompt |
@@ -93,7 +93,7 @@ CLI / TUI
 ## 文档
 
 | 文档 | 说明 |
-|------|------|
+| :------| :------|
 | [`docs/architecture.md`](docs/architecture.md) | 系统架构设计 |
 | [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
 | [`docs/observability.md`](docs/observability.md) | logs / trace / metrics |

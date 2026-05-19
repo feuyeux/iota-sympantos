@@ -25,7 +25,7 @@ Core orchestration layer that manages ACP client pools, executes prompt turns, a
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `memory_ops` | Memory extraction, classification, recall, and injection |
 | `prompt` | Core prompt execution flow with early-return paths |
 | `session_ledger` | Session/turn persistence and backend handoff records |

@@ -10,7 +10,7 @@ metadata:
 # iota-sympantos 实验4：Token Observability 链路设计
 
 | 字段 | 值 |
-|------|-----|
+| :------| :-----|
 | 实验代号 | exp04-token-stats |
 | 设计日期 | 2026-05-17 |
 | 终极目标 | 统一从 `iota observability` 获取 token 消耗数据 |
@@ -36,7 +36,7 @@ exp04 不应停留在 `--show-native` 日志解析。最终链路必须满足：
 当前实现和旧实验设计之间存在偏差：
 
 | 问题 | 影响 |
-|------|------|
+| :------| :------|
 | 当前 CLI 没有 `iota observability` 子命令 | 旧计划中的优先数据源不可执行 |
 | `~/.i6/context/events.sqlite` 当前只保存 execution lifecycle | 无法从本地 store 查询 token usage 事件 |
 | `TokenUsageEvent` 只有 `input/cache/output/total` | 无法区分 cache read、cache write、thinking、provider total |
@@ -51,7 +51,7 @@ exp04 不应停留在 `--show-native` 日志解析。最终链路必须满足：
 ### 3.1 平台字段对比
 
 | 语义 | OpenAI Responses API | OpenAI Chat / Completions | Anthropic Messages API | Gemini / Google GenAI |
-|------|----------------------|---------------------------|------------------------|-----------------------|
+| :------| :----------------------| :---------------------------| :------------------------| :-----------------------|
 | 输入 token | `usage.input_tokens` | `usage.prompt_tokens` | `usage.input_tokens` | `usageMetadata.promptTokenCount` |
 | 输出 token | `usage.output_tokens` | `usage.completion_tokens` | `usage.output_tokens` | `usageMetadata.candidatesTokenCount` |
 | 总 token | `usage.total_tokens` | `usage.total_tokens` | 无直接字段，需计算 | `usageMetadata.totalTokenCount` |
@@ -64,7 +64,7 @@ exp04 不应停留在 `--show-native` 日志解析。最终链路必须满足：
 ### 3.2 归一化原则
 
 | 字段 | 含义 | 说明 |
-|------|------|------|
+| :------| :------| :------|
 | `input_tokens` | provider 报告的输入 token 主字段 | Gemini 中已包含 cached content；Anthropic 中不含 cache read/write |
 | `cache_read_input_tokens` | 缓存命中的输入 token | OpenAI 从 details 提取，Anthropic 从 `cache_read_input_tokens` 提取，Gemini 从 `cachedContentTokenCount` 提取 |
 | `cache_creation_input_tokens` | 缓存写入 token | Anthropic 支持；其他平台通常为空 |
@@ -103,7 +103,7 @@ ACP stdout/stderr JSON-RPC
 采集层负责从 ACP 消息中提取 usage：
 
 | ACP 来源 | 示例 | 处理方式 |
-|----------|------|----------|
+| :----------| :------| :----------|
 | `prompt:<id>.result.usage` | claude-code、hermes、opencode | 解析 `usage` 对象 |
 | `prompt:<id>.result._meta.quota.token_count` | gemini | 解析 Gemini quota，并保留 `_meta` |
 | `session/update usage_update` | codex、opencode、hermes | 作为 adapter-level total 或 context window usage |
@@ -249,7 +249,7 @@ done
 ## 6. 验收标准
 
 | # | 验收项 | 判定标准 |
-|---|--------|----------|
+| :---| :--------| :----------|
 | 1 | 采集完整 | 5 个 backend 的 usage 或 adapter total 均能生成 `RuntimeEvent::TokenUsage` |
 | 2 | 持久化可查 | 每条 token usage 可通过 `iota observability logging events <execution_id>` 回溯 |
 | 3 | token 明细可查 | `iota observability tokens recent` 能输出 15 条 exp04 记录 |

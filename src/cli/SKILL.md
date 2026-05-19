@@ -18,7 +18,7 @@ Top-level CLI entry point. Parses arguments and routes to subcommand handlers.
 ## Commands
 
 | Command | Handler | Description |
-|---------|---------|-------------|
+| :---------| :---------| :-------------|
 | (default) | `tui::run()` | Interactive TUI mode |
 | `run <backend> <prompt>` | `run_cmd` | Single-shot prompt execution |
 | `check [--daemon]` | `info_cmd` | Backend health/info JSON output |
@@ -33,7 +33,7 @@ Top-level CLI entry point. Parses arguments and routes to subcommand handlers.
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `daemon_cmd` | Daemon lifecycle, cold/warm/daemon benchmarks |
 | `info_cmd` | `check` command — backend info aggregation |
 | `observability_cmd` | Logs and trace query commands |

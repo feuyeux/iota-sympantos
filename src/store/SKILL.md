@@ -28,7 +28,7 @@ SQLite-backed persistence for execution cache, tool approvals, session ledger, a
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `approvals` | `ApprovalStore` — tool approval events and policy |
 | `cache` | `CacheStore` — execution replay and deduplication |
 | `ledger` | `SessionLedger` — sessions, backend sessions, turns, handoffs |
@@ -88,7 +88,7 @@ All stores use `Arc<Mutex<Connection>>`. `CacheStore` provides a private `lock_c
 `token_event_score()` selects the canonical record per execution:
 
 | Priority | Condition |
-|----------|-----------|
+| :----------| :-----------|
 | +5 | `provider_reported_total_tokens` is present |
 | +4 | `normalized_total_tokens` is present |
 | +2 | `source` ≠ `session_update.usage_update` |

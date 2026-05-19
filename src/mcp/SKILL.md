@@ -24,7 +24,7 @@ Centralised MCP (Model Context Protocol) implementation: stdio server, ACP strea
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `server` | Stdio MCP server — JSON-RPC protocol adapter for `iota context-mcp` |
 | `router` | ACP stream interceptor — detects and routes `iota_*` tool calls |
 | `tool_dispatch` | Shared tool execution logic — parsers, validators, handlers (used by both `server` and `router`) |

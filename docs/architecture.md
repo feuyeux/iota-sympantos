@@ -112,7 +112,7 @@ src/
 ### Entry
 
 | 模块 | 职责 | 下游 |
-|---|---|---|
+| :---| :---| :---|
 | `main.rs` | 注册顶层模块，启动 Tokio runtime，调用 `cli::run()` | `cli` |
 
 `main.rs` 不持有业务策略。
@@ -120,7 +120,7 @@ src/
 ### Presentation
 
 | 模块 | 职责 | 主要下游 |
-|---|---|---|
+| :---| :---| :---|
 | `cli/mod.rs` | 解析命令并分发 `run/check/tui/bench/observability/logs/trace/context-mcp/fun-mcp/skill/__daemon`；负责 daemon autostart 和 CLI 输出 | `config`, `engine`, `daemon`, `acp`, `store`, `skill`, `tui` |
 | `cli/observability_cmd.rs` | `iota observability logging/tokens/metrics`；查询本地 token usage、backend summary、JSON export 和 Prometheus 文本指标 | `store::observability` |
 | `tui.rs` | 终端生命周期、事件循环、prompt 队列、后台 engine task、流式输出、approval 浮层、pager/help/quit overlay | `engine`, `acp::permission`, `tui/*` |
@@ -140,7 +140,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 ### Service Orchestration
 
 | 模块 | 职责 | 主要下游 |
-|---|---|---|
+| :---| :---| :---|
 | `engine.rs` | 核心编排门面。按 `(backend, cwd)` 维护 ACP client pool；处理 session ledger、handoff、memory recall/write、skill 短路、context capsule、ACP 调用和事件落库 | `acp`, `config`, `context`, `skill`, `store`, `runtime_event` |
 | `daemon/mod.rs` | `127.0.0.1:47661` 默认 TCP daemon；支持 `IOTA_DAEMON_ADDR`；每连接一条 JSON request/response；8 并发限流；10 MiB 请求上限；Ctrl+C 优雅关闭 | `engine`, `daemon::pool`, `daemon::proto` |
 | `daemon/pool.rs` | `EnginePool` 按 cwd 复用 `IotaEngine`，从而复用 ACP 子进程和 session/handoff 状态 | `engine`, `config` |
@@ -151,7 +151,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 ### Protocol
 
 | 模块 | 职责 | 主要下游 |
-|---|---|---|
+| :---| :---| :---|
 | `acp/mod.rs` | `AcpBackend`、默认 adapter 命令、`parse_acp_args()`、ACP 子进程启动、`initialize/session/new/session/prompt`、流式事件读取和 timing | `acp::permission`, `acp::session`, `acp::wire`, `mcp::router`, `runtime_event` |
 | `acp/session.rs` | 生成 `session/new` params；渲染 `mcpServers`；支持 `always_send_empty_mcp_servers` 和 env `string_array/object` 两种形态 | `acp::AcpBackend` |
 | `acp/wire.rs` | ACP stdout line timeout、JSON parse、response id 判断、error 格式化 | 无项目级依赖 |
@@ -167,7 +167,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 ### Context Fabric
 
 | 模块 | 职责 | 主要下游 |
-|---|---|---|
+| :---| :---| :---|
 | `context/mod.rs` | 组装 `<iota-context>` capsule：session/model、memory tools 提示、memory buckets、working memory、workspace `git status --short`、skill index、handoff | `config`, `memory`, `skill` |
 | `skill/mod.rs` | 加载 workspace `skills/`、workspace `.iota/skills`、配置 roots、`~/.i6/skills`；解析 YAML frontmatter；按 backend 和 trigger 匹配 | `acp::AcpBackend` |
 | `skill/runner.rs` | 执行 `execution.mode = mcp` skill；可顺序或并行调用 MCP tools；渲染 template | `mcp::client`, `runtime_event`, `skill` |
@@ -178,7 +178,7 @@ Context Fabric 提供 prompt 背景和可确定工具。
 ### Store
 
 | 模块 | 职责 | 默认路径 |
-|---|---|---|
+| :---| :---| :---|
 | `store/cache.rs` | execution lifecycle、status、fencing token；`CacheStore` 在 `open()` 时读取一次 `StoreConfig` 并缓存到 struct 字段（消除热路径磁盘 IO）；批量状态查询 `get_execution_statuses()` 使用单条 `WHERE IN (...)` | `~/.i6/context/events.sqlite` |
 | `store/observability.rs` | token usage events、raw payload、execution-level 最优记录去重（按 `token_event_score` 选 best）、backend 聚合 summary；新增 `token_percentiles(backend)` → P50/P95/P99、`token_usage_between(from, to)` 时间窗口查询；`record_token_usage()` 内联校验 `computed ≤ provider_total` | `~/.i6/context/events.sqlite` |
 | `memory/store.rs` | memory taxonomy、dedup、TTL、merge mode、recall buckets、FTS/LIKE、vector/hybrid search | `~/.i6/context/memory.sqlite` 或 `context_engine.memory_db` |
@@ -191,7 +191,7 @@ Store 模块只暴露 typed operations，不调用 UI、daemon、ACP client 或 
 ### Configuration
 
 | 模块 | 职责 |
-|---|---|
+| :---| :---|
 | `config.rs` | 唯一读取 `~/.i6/nimia.yaml`；构建 `EffectiveConfig`；展开 `~/`；规范化 Windows `npx`；渲染 backend command/env；注入 context MCP server；读取 recall thresholds、embedding、skill roots、backend whitelist 和 session options；`StoreConfig` 提供四个可配置数据保留参数（`cache_retention_days`、`cache_running_ttl_secs`、`observability_retention_days`、`approvals_max_pending_age_secs`） |
 | `utils.rs` | `now_ts()`、`summarize()`、`lock_or_recover()` |
 
@@ -286,7 +286,7 @@ SkillRegistry::match_skill()
 ## ACP 后端
 
 | Backend | 默认命令 | 别名 | 备注 |
-|---|---|---|---|
+| :---| :---| :---| :---|
 | Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@latest` | `claude`, `claude-code`, `claudecode` | 配置模板 pin 到 `0.32.0` |
 | Codex | `npx -y @zed-industries/codex-acp@0.12.0` | `codex` | `normalized_acp_command()` 会追加 Codex `-c` 参数 |
 | Gemini CLI | `npx -y @google/gemini-cli@latest --acp` | `gemini`, `gemini-cli` | 配置模板 pin 到 `0.41.2` |
@@ -302,7 +302,7 @@ Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 ### Backend section
 
 | 字段 | 含义 |
-|---|---|
+| :---| :---|
 | `enabled` | 是否参与 `check`、warm、bench |
 | `acp.command` / `acp.args` | ACP adapter 启动命令 |
 | `version_mapping` | 记录 adapter/bin 版本，供 `check` 输出 |
@@ -313,7 +313,7 @@ Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 ### Model env 映射
 
 | Backend | 映射 |
-|---|---|
+| :---| :---|
 | Claude Code | `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `ANTHROPIC_DEFAULT_*_MODEL`, `API_TIMEOUT_MS`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` |
 | Codex | `ROUTER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`；同时追加 `-c model=...`、`model_provider`、provider base_url/env_key/wire_api |
 | Gemini | `GEMINI_API_KEY`, `GEMINI_MODEL` |
@@ -323,7 +323,7 @@ Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 ### Context engine section
 
 | 字段 | 含义 |
-|---|---|
+| :---| :---|
 | `enabled` / `injection` | 控制 context；当前实现中只有 `injection=off` 会禁用 prompt capsule，其它值都会启用注入 |
 | `memory_db` | memory SQLite 路径 |
 | `skill_roots` | 额外 skill root；实际加载还包括 workspace `skills/`、workspace `.iota/skills`、`~/.i6/skills` |
@@ -336,7 +336,7 @@ Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 ### Per-backend context options
 
 | 字段 | 含义 |
-|---|---|
+| :---| :---|
 | `mcp_session_new` | 控制是否在 `session/new` 注入 `mcpServers`；`try` 只对 Claude Code/Codex 默认启用 |
 | `always_send_empty_mcp_servers` | 没有 MCP server 时也发送空数组 |
 | `mcp_env_shape` | `string_array` 或 `object` |
@@ -367,7 +367,7 @@ ApprovalDecision
 ### Memory taxonomy
 
 | Type | Facet | 典型 scope | Recall bucket |
-|---|---|---|---|
+| :---| :---| :---| :---|
 | `semantic` | `identity` | `user` | identity |
 | `semantic` | `preference` | `user` | preference |
 | `semantic` | `strategic` | `project` | strategic |
@@ -380,7 +380,7 @@ Memory search 支持 `keyword`、`vector`、`hybrid`。Vector 数据写入 `memo
 ## 外部边界
 
 | 边界 | 发起方 | 目标 | 协议/机制 |
-|---|---|---|---|
+| :---| :---| :---| :---|
 | Daemon autostart | CLI | `current_exe __daemon` | child process |
 | Daemon request | CLI | `127.0.0.1:47661` | TCP JSON line |
 | ACP backend | engine | Claude/Codex/Gemini/Hermes/OpenCode adapter | child process stdio JSON-RPC 2.0 |
@@ -417,7 +417,7 @@ config/utils -> shared support
 ## 扩展点
 
 | 目标 | 修改位置 | 模式 |
-|---|---|---|
+| :---| :---| :---|
 | 新 ACP 后端 | `src/acp/mod.rs`, `src/config.rs`, `nimia.yaml.template` | 增加 enum、alias、默认命令、`ALL_BACKENDS`、backend config/env/home 映射 |
 | 新 CLI 命令 | `src/cli/mod.rs` | 添加 match arm 和 handler，复用 service/context/store |
 | 新 TUI 组件 | `src/tui/*`, `src/tui.rs` | 状态和渲染下沉到子模块，顶层只组合 |

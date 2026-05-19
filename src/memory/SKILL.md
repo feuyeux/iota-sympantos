@@ -26,7 +26,7 @@ Persistent memory store with SQLite FTS5 full-text search and TF-IDF embedding-b
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `store` | `MemoryStore` — SQLite-backed CRUD, FTS5, recall, merge |
 | `embedding` | `EmbeddingEngine` — TF-IDF tokenization, cosine similarity, blob serialization |
 

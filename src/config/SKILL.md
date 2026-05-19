@@ -26,7 +26,7 @@ Parses `~/.i6/nimia.yaml` and provides typed configuration for all modules.
 ## Sub-modules
 
 | Module | Purpose |
-|--------|---------|
+| :--------| :---------|
 | `backend` | `BackendConfig`, env variable mapping, command resolution |
 | `helpers` | `expand_home_path()`, `normalize_command()` |
 | `context` | `ContextEngineConfig`, `RecallThresholdsConfig`, `ContextBudgetsConfig`, `EmbeddingConfig` |

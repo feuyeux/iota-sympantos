@@ -87,7 +87,7 @@ time iota run --backend claude-code --trace "生成宠物"
 **检查点 2.1** — trace 输出中确认以下 7 个工具均被调用：
 
 | 工具 | 返回属性 | 示例合法值 |
-|---|---|---|
+| :---| :---| :---|
 | fun.cpp | action | 睡觉 / 奔跑 / 喝水 / 吃饭 / 捕捉 / 发呆 |
 | fun.typescript | color | red / blue / green / yellow / black / white |
 | fun.rust | material | wood / metal / glass / plastic / stone |
@@ -200,7 +200,7 @@ done
 ## 四、验收矩阵
 
 | 验收项 | 步骤 | 判定标准 |
-|---|---|---|
+| :---| :---| :---|
 | trigger 匹配生效 | Step 1-A/1-B | trace 出现 `[skill:pet-generator]` |
 | 非 trigger 不命中 | Step 1-C | 无 skill 匹配，走普通路径 |
 | 7 工具全量调用 | Step 2 | trace 中 7 个 fun.* 调用记录齐全 |
@@ -236,7 +236,7 @@ iota run --trace "generate pet" 2>&1 | head -30
 ## 六、已知局限
 
 | 局限 | 说明 | 影响 |
-|---|---|---|
+| :---| :---| :---|
 | 编译环境依赖 | cpp/rust/zig/java 需本地安装对应工具链 | 缺少工具链时对应工具失败，fallback 到 report |
 | 编译缓存无版本控制 | 源码变更后需手动清理 `~/.iota/iota-fun/` | 缓存失效不自动检测 |
 | 并行度无上限配置 | `parallel: true` 全量并发，7 个进程同时启动 | 低配机器可能有资源竞争 |
@@ -247,7 +247,7 @@ iota run --trace "generate pet" 2>&1 | head -30
 ## 七、后续实验规划
 
 | 实验编号 | 主题 |
-|---|---|
+| :---| :---|
 | exp03 | 新增自定义 Skill：验证 SKILL.md 新增流程（Step 8 of 09-skill-fun.md） |
 | exp04 | Skill + Memory 联动：pet-generator 结果写入 episodic，下轮召回 |
 | exp05 | failurePolicy: fail_fast 行为验证（对比 report） |
@@ -264,7 +264,7 @@ iota run --trace "generate pet" 2>&1 | head -30
 ### 验收矩阵 — 实际结果
 
 | 验收项 | 判定标准 | 结果 | 备注 |
-|---|---|---|---|
+| :---| :---| :---| :---|
 | trigger 匹配生效 | trace 出现 skill 匹配 | ✅ PASS | 中文/英文均命中 |
 | 非 trigger 不命中 | 走普通 backend 路径 | ✅ PASS | "帮我写一首诗"→诗歌输出 |
 | 7 工具全量调用 | trace 7 个 fun.* 调用 | ✅ PASS | 全部执行并返回值 |
@@ -294,7 +294,7 @@ Run 1: 97ms  Run 2: 106ms  Run 3: 107ms
 ### 已发现问题
 
 | 问题 | 严重度 | 说明 |
-|---|---|---|
+| :---| :---| :---|
 | `fun.rust` material 总是 "wood" | 低 | `subsec_nanos % 5` 在快速并发下值收敛，不影响系统功能 |
 | codex 后端 `session/new` MCP 格式不兼容 | 中 | codex ACP 不接受 env 字段，跨后端验证仅测了 claude-code + gemini |
 
