@@ -3,6 +3,8 @@
 //! Every mutation is recorded as a structured event in the append-only events table.
 //! Events can be replayed to rebuild state, enabling multi-node sync.
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 use super::types::*;

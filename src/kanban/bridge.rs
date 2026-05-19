@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
@@ -34,6 +35,7 @@ impl AdvancedBridge {
         }
     }
 
+    #[cfg(test)]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -106,7 +108,9 @@ impl AdvancedBridge {
         let board = self.get_board_for_task(&task, store)?;
         let shadow = self.materializer.materialize(&task, &board, store)?;
 
-        let result = (|| -> Result<Vec<(i64, String, Option<String>, Option<String>)>> {
+        let existing_shadow_task_ids = read_shadow_task_ids(&shadow.path)?;
+
+        let result = (|| -> Result<Vec<ShadowTaskRow>> {
             let mut command = Command::new(&self.hermes_bin);
             command
                 .args(["kanban", "decompose", &task_id.to_string(), "--json"])
@@ -120,16 +124,7 @@ impl AdvancedBridge {
                 bail!("hermes kanban decompose failed: {}", stderr.trim());
             }
 
-            // Read new tasks from shadow DB (hermes creates them there)
-            let shadow_conn = rusqlite::Connection::open(&shadow.path)?;
-            let mut stmt = shadow_conn
-                .prepare("SELECT id, title, body, assignee FROM tasks WHERE id != ?1")?;
-            let new_tasks: Vec<(i64, String, Option<String>, Option<String>)> = stmt
-                .query_map(rusqlite::params![task_id as i64], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(new_tasks)
+            read_new_shadow_tasks(&shadow.path, &existing_shadow_task_ids)
         })();
         let cleanup_result = self.materializer.cleanup(task_id);
         let new_tasks = result?;
@@ -137,13 +132,13 @@ impl AdvancedBridge {
 
         // Import new tasks into iota store
         let mut child_ids = Vec::new();
-        for (_shadow_id, title, body, assignee) in new_tasks {
+        for shadow_task in new_tasks {
             let new_id = store.create_task(CreateTaskRequest {
                 board_id: task.board_id,
-                title,
-                body,
+                title: shadow_task.title,
+                body: shadow_task.body,
                 status: None, // triage
-                assignee,
+                assignee: shadow_task.assignee,
                 priority: Some(task.priority),
                 tags: task.tags.clone(),
                 workspace_kind: task.workspace_kind.clone(),
@@ -166,6 +161,47 @@ impl AdvancedBridge {
             .find(|b| b.id == task.board_id)
             .ok_or_else(|| anyhow::anyhow!("board not found for task {}", task.id))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ShadowTaskRow {
+    title: String,
+    body: Option<String>,
+    assignee: Option<String>,
+}
+
+fn read_shadow_task_ids(db_path: &Path) -> Result<Vec<i64>> {
+    let conn = rusqlite::Connection::open(db_path)?;
+    let mut stmt = conn.prepare("SELECT id FROM tasks")?;
+    let ids = stmt
+        .query_map([], |row| row.get::<_, i64>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+fn read_new_shadow_tasks(db_path: &Path, existing_ids: &[i64]) -> Result<Vec<ShadowTaskRow>> {
+    let existing_ids: HashSet<i64> = existing_ids.iter().copied().collect();
+    let conn = rusqlite::Connection::open(db_path)?;
+    let mut stmt = conn.prepare("SELECT id, title, body, assignee FROM tasks ORDER BY id")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            ShadowTaskRow {
+                title: row.get(1)?,
+                body: row.get(2)?,
+                assignee: row.get(3)?,
+            },
+        ))
+    })?;
+
+    let mut tasks = Vec::new();
+    for row in rows {
+        let (id, task) = row?;
+        if !existing_ids.contains(&id) {
+            tasks.push(task);
+        }
+    }
+    Ok(tasks)
 }
 
 fn run_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output> {
@@ -335,7 +371,7 @@ mod tests {
             let path = tmp.join("slow-hermes.cmd");
             std::fs::write(
                 &path,
-                "@echo off\r\npowershell -NoProfile -Command Start-Sleep -Seconds 2\r\n",
+                "@echo off\r\npowershell -NoProfile -WindowStyle Hidden -Command Start-Sleep -Seconds 2\r\n",
             )
             .unwrap();
             path
@@ -362,6 +398,47 @@ mod tests {
             started.elapsed() < Duration::from_secs(1),
             "timeout should stop the command promptly"
         );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn read_new_shadow_tasks_excludes_existing_materialized_tasks() {
+        let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let db_path = tmp.join("kanban.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tasks (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                body TEXT,
+                assignee TEXT
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, body, assignee) VALUES (1, 'parent', NULL, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, body, assignee) VALUES (2, 'linked', NULL, NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, body, assignee) VALUES (3, 'new child', 'body', 'alice')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let tasks = read_new_shadow_tasks(&db_path, &[1, 2]).unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "new child");
+        assert_eq!(tasks[0].body.as_deref(), Some("body"));
+        assert_eq!(tasks[0].assignee.as_deref(), Some("alice"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

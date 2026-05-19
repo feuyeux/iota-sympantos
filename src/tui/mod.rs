@@ -9,6 +9,7 @@
 mod events;
 mod input;
 mod kanban_command;
+mod kanban_view;
 mod r#loop;
 mod markdown;
 mod render;
@@ -31,17 +32,18 @@ use anyhow::{Context, Result};
 use crossterm::terminal::enable_raw_mode;
 use ratatui::backend::CrosstermBackend;
 use ratatui::{TerminalOptions, Viewport};
-use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::sync::broadcast as tokio_broadcast;
+use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::task::JoinHandle;
 
 use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use crate::acp::{ALL_BACKENDS, AcpBackend};
 use crate::config::{NimiaConfig, backend_config, configured_model};
 use crate::engine::IotaEngine;
-use crate::kanban::{Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
+use crate::kanban::{AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
 use crate::telemetry::metrics;
 use input::Composer;
+use kanban_view::KanbanViewState;
 use render::observability_line;
 use slash_command::{SlashAction, parse_slash_command, slash_completions};
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
@@ -51,8 +53,8 @@ type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const MAX_HISTORY: usize = 500;
-/// Inline viewport rows: 1 spinner/status row + 3 composer rows + 1 status bar.
-const VIEWPORT_HEIGHT: u16 = 5;
+/// Inline viewport rows: optional Kanban panel + spinner + composer + status bar.
+const VIEWPORT_HEIGHT: u16 = 18;
 
 // ── Typed turn message ────────────────────────────────────────────────────────
 
@@ -87,6 +89,8 @@ struct TuiApp {
     // Kanban store
     kanban_store: Arc<dyn KanbanStore>,
     kanban_dispatcher: Arc<Mutex<Dispatcher>>,
+    kanban_bridge: AdvancedBridge,
+    kanban_view: KanbanViewState,
     /// Whether auto-dispatch daemon is active (background task ticks the dispatcher).
     kanban_daemon_active: Arc<AtomicBool>,
     /// Broadcast receiver for real-time kanban UI events.
@@ -181,8 +185,13 @@ impl TuiApp {
             SqliteKanbanStore::open(&kanban_db_path).context("Failed to open kanban store")?;
         let kanban_event_rx = kanban_store_concrete.subscribe();
         let kanban_store: Arc<dyn KanbanStore> = Arc::new(kanban_store_concrete);
-        let kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig::default())));
-        let kanban_daemon_active = Arc::new(AtomicBool::new(true));
+        let dispatcher_config = DispatcherConfig::default();
+        let kanban_bridge = AdvancedBridge::new(
+            dispatcher_config.hermes_bin.clone(),
+            dispatcher_config.shadows_dir.clone(),
+        );
+        let kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(dispatcher_config)));
+        let kanban_daemon_active = Arc::new(AtomicBool::new(false));
 
         Ok(Self {
             engine,
@@ -190,6 +199,8 @@ impl TuiApp {
             cwd,
             kanban_store,
             kanban_dispatcher,
+            kanban_bridge,
+            kanban_view: KanbanViewState::default(),
             kanban_daemon_active,
             kanban_event_rx,
             history: HistoryState::new(MAX_HISTORY),
@@ -327,12 +338,16 @@ impl TuiApp {
                 }
             },
             SlashAction::Kanban => {
-                let lines = kanban_command::execute_with_dispatcher(
+                if self.handle_kanban_view_slash(command.args) {
+                    return true;
+                }
+                let lines = kanban_command::execute_with_services(
                     command.args,
                     &self.kanban_store,
                     None,
                     Some(&self.kanban_dispatcher),
                     Some(&self.kanban_daemon_active),
+                    Some(&self.kanban_bridge),
                 );
                 for line in lines {
                     self.record_entry(ConversationEntry::SystemNotice { text: line });
@@ -344,6 +359,54 @@ impl TuiApp {
             }
         }
         true
+    }
+
+    fn handle_kanban_view_slash(&mut self, args: &str) -> bool {
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        let subcmd = parts.first().copied().unwrap_or("");
+        match subcmd {
+            "tab" | "ui" | "open" => {
+                let board_slug = parts.get(1).map(|slug| (*slug).to_string());
+                self.kanban_view.open(board_slug);
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: "Kanban tab opened. Keys: 1-4/L/R modes, j/k select, Tab columns, Enter detail, n/e/c/m/a, d/D, / filter, Esc close.".into(),
+                });
+                true
+            }
+            "close" => {
+                self.kanban_view.close();
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: "Kanban tab closed.".into(),
+                });
+                true
+            }
+            "filter" => {
+                self.kanban_view.set_filter(parts[1..].join(" "));
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: if self.kanban_view.filter.is_empty() {
+                        "Kanban filter cleared.".into()
+                    } else {
+                        format!("Kanban filter: {}", self.kanban_view.filter)
+                    },
+                });
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn execute_kanban_command(&mut self, args: &str) {
+        let lines = kanban_command::execute_with_services(
+            args,
+            &self.kanban_store,
+            None,
+            Some(&self.kanban_dispatcher),
+            Some(&self.kanban_daemon_active),
+            Some(&self.kanban_bridge),
+        );
+        for line in lines {
+            self.record_entry(ConversationEntry::SystemNotice { text: line });
+        }
     }
 
     // ── slash completion ─────────────────────────────────────────────────────

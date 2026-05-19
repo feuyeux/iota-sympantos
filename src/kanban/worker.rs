@@ -84,6 +84,17 @@ impl WorkerHandle {
     }
 }
 
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        // Best-effort: kill the process tree and wait for it to exit.
+        // This prevents orphaned PowerShell/consulate windows from lingering
+        // if the WorkerHandle is removed from the Dispatcher without an
+        // explicit kill() call (e.g. health_check removing a finished worker).
+        let _ = kill_process_tree(&mut self.child);
+        let _ = self.child.wait();
+    }
+}
+
 fn configure_process_tree_root(command: &mut Command) {
     #[cfg(unix)]
     {
@@ -260,9 +271,11 @@ mod tests {
                 "powershell",
                 vec![
                     "-NoProfile".into(),
+                    "-WindowStyle".into(),
+                    "Hidden".into(),
                     "-Command".into(),
                     format!(
-                        "$p = Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
+                        "$p = Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
                         child_pid_path.display()
                     ),
                 ],
@@ -324,9 +337,11 @@ mod tests {
                 "powershell",
                 vec![
                     "-NoProfile".into(),
+                    "-WindowStyle".into(),
+                    "Hidden".into(),
                     "-Command".into(),
                     format!(
-                        "$p = Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
+                        "$p = Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
                         child_pid_path.display()
                     ),
                 ],

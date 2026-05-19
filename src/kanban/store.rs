@@ -1,8 +1,12 @@
 use anyhow::Result;
+use std::any::Any;
 
 use super::types::*;
 
-pub trait KanbanStore: Send + Sync {
+#[allow(dead_code)]
+pub trait KanbanStore: Send + Sync + Any {
+    fn as_any(&self) -> &dyn Any;
+
     fn create_board(&self, slug: &str, name: &str) -> Result<BoardId>;
     fn list_boards(&self) -> Result<Vec<Board>>;
     fn get_board(&self, slug: &str) -> Result<Board>;

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::time::Duration;
 
 use super::shadow::{ShadowMaterializer, ShadowWatcher};
@@ -671,7 +672,10 @@ mod tests {
 
         let child = if cfg!(windows) {
             std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", "Start-Sleep -Seconds 30"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .spawn()
                 .unwrap()
         } else {

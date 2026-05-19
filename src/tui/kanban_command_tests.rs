@@ -1,9 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::kanban::{
-    CreateTaskRequest, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore, Status,
+    AdvancedBridge, CreateTaskRequest, Dispatcher, DispatcherConfig, KanbanStore,
+    SqliteKanbanStore, Status,
 };
 
 fn test_store() -> Arc<dyn KanbanStore> {
@@ -12,6 +13,25 @@ fn test_store() -> Arc<dyn KanbanStore> {
 
 fn exec(args: &str, store: &Arc<dyn KanbanStore>) -> Vec<String> {
     super::execute(args, store, None)
+}
+
+fn fake_hermes_echo_spec(tmp: &Path) -> PathBuf {
+    if cfg!(windows) {
+        let path = tmp.join("fake-hermes.cmd");
+        std::fs::write(&path, "@echo off\r\necho {\"spec\":\"expanded spec\"}\r\n").unwrap();
+        path
+    } else {
+        let path = tmp.join("fake-hermes.sh");
+        std::fs::write(&path, "#!/bin/sh\necho '{\"spec\":\"expanded spec\"}'\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -28,8 +48,24 @@ fn test_help() {
         out
     );
     assert!(
-        out.iter().any(|l| l.contains("dispatch") && l.contains("Tick dispatcher")),
+        out.iter()
+            .any(|l| l.contains("dispatch") && l.contains("Tick dispatcher")),
         "help output should describe dispatch, got: {:?}",
+        out
+    );
+    assert!(
+        out.iter().any(|l| l.contains("specify")),
+        "help output should describe specify, got: {:?}",
+        out
+    );
+    assert!(
+        out.iter().any(|l| l.contains("decompose")),
+        "help output should describe decompose, got: {:?}",
+        out
+    );
+    assert!(
+        !out.iter().any(|l| l.contains("sync")),
+        "help output should not expose unfinished distributed sync, got: {:?}",
         out
     );
 }
@@ -364,19 +400,57 @@ fn test_dispatch_rejects_invalid_status_task() {
         .unwrap();
     let store: Arc<dyn KanbanStore> = Arc::new(concrete);
 
-    let out = super::execute_with_dispatcher(
-        &format!("dispatch {}", task_id),
-        &store,
-        None,
-        None,
-        None,
-    );
+    let out =
+        super::execute_with_dispatcher(&format!("dispatch {}", task_id), &store, None, None, None);
 
     assert!(
         out.iter().any(|l| l.contains("must be")),
         "expected rejection message for done task, got: {:?}",
         out
     );
+}
+
+#[test]
+fn test_specify_updates_task_body_with_bridge() {
+    let tmp = std::env::temp_dir().join(format!("iota-kb-bridge-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = concrete.create_board("dev", "Development").unwrap();
+    let task_id = concrete
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Vague task".to_string(),
+            body: None,
+            status: None,
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+    let store: Arc<dyn KanbanStore> = Arc::new(concrete);
+    let bridge = AdvancedBridge::new(fake_hermes_echo_spec(&tmp), tmp.join("shadows"));
+
+    let out = super::execute_with_services(
+        &format!("specify {}", task_id),
+        &store,
+        None,
+        None,
+        None,
+        Some(&bridge),
+    );
+
+    assert!(
+        out.iter().any(|line| line.contains("Specified task")),
+        "expected specify success, got: {:?}",
+        out
+    );
+    assert_eq!(
+        store.get_task(task_id).unwrap().body.as_deref(),
+        Some("expanded spec")
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
 }
 
 // ---------------------------------------------------------------------------
@@ -509,4 +583,3 @@ fn test_board_view_subdispatch() {
         result
     );
 }
-

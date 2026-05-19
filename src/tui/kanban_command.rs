@@ -1,22 +1,37 @@
-use crate::kanban::{CreateTaskRequest, Dispatcher, KanbanStore, Status, TaskFilter, TaskPatch};
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::kanban::{
+    AdvancedBridge, CreateTaskRequest, Dispatcher, KanbanStore, Status, TaskFilter, TaskPatch,
+};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, TryLockError};
 
+#[cfg(test)]
 pub(super) fn execute(
     args: &str,
     store: &Arc<dyn KanbanStore>,
     default_board: Option<&str>,
 ) -> Vec<String> {
-    execute_with_dispatcher(args, store, default_board, None, None)
+    execute_with_services(args, store, default_board, None, None, None)
 }
 
+#[cfg(test)]
 pub(super) fn execute_with_dispatcher(
     args: &str,
     store: &Arc<dyn KanbanStore>,
     default_board: Option<&str>,
     dispatcher: Option<&Arc<Mutex<Dispatcher>>>,
     daemon_active: Option<&Arc<AtomicBool>>,
+) -> Vec<String> {
+    execute_with_services(args, store, default_board, dispatcher, daemon_active, None)
+}
+
+pub(super) fn execute_with_services(
+    args: &str,
+    store: &Arc<dyn KanbanStore>,
+    default_board: Option<&str>,
+    dispatcher: Option<&Arc<Mutex<Dispatcher>>>,
+    daemon_active: Option<&Arc<AtomicBool>>,
+    bridge: Option<&AdvancedBridge>,
 ) -> Vec<String> {
     let parts: Vec<&str> = args.split_whitespace().collect();
     let subcmd = parts.first().copied().unwrap_or("list");
@@ -27,11 +42,14 @@ pub(super) fn execute_with_dispatcher(
         "create" | "new" | "add" => cmd_create(&parts[1..], store, default_board),
         "view" | "columns" => cmd_view(&parts[1..], store, default_board),
         "show" => cmd_show(&parts[1..], store),
+        "edit" | "update" => cmd_edit(&parts[1..], store),
         "move" | "mv" | "transition" => cmd_move(&parts[1..], store),
         "comment" | "note" => cmd_comment(&parts[1..], store),
         "assign" => cmd_assign(&parts[1..], store),
         "dispatch" | "run" => cmd_dispatch(&parts[1..], store, dispatcher),
         "daemon" => cmd_daemon(daemon_active),
+        "specify" => cmd_specify(&parts[1..], store, bridge),
+        "decompose" => cmd_decompose(&parts[1..], store, bridge),
         "help" | "?" => cmd_help(),
         _ => vec![format!(
             "Unknown kanban subcommand: {}. Try /kanban help",
@@ -97,7 +115,11 @@ fn cmd_boards(store: &Arc<dyn KanbanStore>) -> Vec<String> {
     }
 }
 
-fn cmd_board(args: &[&str], store: &Arc<dyn KanbanStore>, default_board: Option<&str>) -> Vec<String> {
+fn cmd_board(
+    args: &[&str],
+    store: &Arc<dyn KanbanStore>,
+    default_board: Option<&str>,
+) -> Vec<String> {
     let subcmd = args.first().copied().unwrap_or("");
     match subcmd {
         "view" => return cmd_view(&args[1..], store, default_board),
@@ -128,7 +150,10 @@ fn cmd_view(
     let board = if let Some(slug) = args.first().copied().or(default_board) {
         store.get_board(slug).ok()
     } else {
-        store.list_boards().ok().and_then(|bs| bs.into_iter().next())
+        store
+            .list_boards()
+            .ok()
+            .and_then(|bs| bs.into_iter().next())
     };
 
     let board = match board {
@@ -136,7 +161,7 @@ fn cmd_view(
         None => {
             return vec![
                 "No boards found. Create one with: /kanban board create <slug> <name>".to_string(),
-            ]
+            ];
         }
     };
 
@@ -197,14 +222,23 @@ fn cmd_view(
     // Separator line under headers
     let mut sep_line = String::from("\u{2502}");
     for _i in 0..num_cols {
-        let sep = format!(" {:<width$}", "\u{2500}".repeat(col_width), width = col_width + 1);
+        let sep = format!(
+            " {:<width$}",
+            "\u{2500}".repeat(col_width),
+            width = col_width + 1
+        );
         sep_line.push_str(&sep);
         sep_line.push('\u{2502}');
     }
     lines.push(sep_line);
 
     // Task rows
-    let max_rows = grouped.iter().map(|col| col.len()).max().unwrap_or(0).min(15);
+    let max_rows = grouped
+        .iter()
+        .map(|col| col.len())
+        .max()
+        .unwrap_or(0)
+        .min(15);
 
     for row in 0..max_rows {
         let mut task_line = String::from("\u{2502}");
@@ -244,7 +278,10 @@ fn cmd_view(
 
     // Bottom border
     let bottom_width = inner_width - 2; // subtract ┘ and └
-    lines.push(format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(bottom_width)));
+    lines.push(format!(
+        "\u{2514}{}\u{2518}",
+        "\u{2500}".repeat(bottom_width)
+    ));
 
     lines
 }
@@ -347,6 +384,40 @@ fn cmd_move(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
     match store.transition(id, status) {
         Ok(()) => vec![format!("Task #{} -> {}", id, status)],
         Err(e) => vec![format!("Error: {}", e)],
+    }
+}
+
+fn cmd_edit(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
+    if args.len() < 3 {
+        return vec![
+            "Usage: /kanban edit <id> title <text> | /kanban edit <id> body <text>".to_string(),
+        ];
+    }
+    let id = match parse_task_id_arg(&args[0..1], "Usage: /kanban edit <id> <field> <text>") {
+        Ok(id) => id,
+        Err(lines) => return lines,
+    };
+    let value = args[2..].join(" ");
+    let patch = match args[1] {
+        "title" => TaskPatch {
+            title: Some(value.clone()),
+            ..Default::default()
+        },
+        "body" => TaskPatch {
+            body: Some(Some(value.clone())),
+            ..Default::default()
+        },
+        field => {
+            return vec![format!(
+                "Unsupported edit field: {}. Supported fields: title, body",
+                field
+            )];
+        }
+    };
+
+    match store.update_task(id, patch) {
+        Ok(()) => vec![format!("Task #{} {} updated.", id, args[1])],
+        Err(e) => vec![format!("Error updating task #{}: {}", id, e)],
     }
 }
 
@@ -507,20 +578,93 @@ fn cmd_daemon(daemon_active: Option<&Arc<AtomicBool>>) -> Vec<String> {
     }
 }
 
+fn parse_task_id_arg(args: &[&str], usage: &str) -> Result<u64, Vec<String>> {
+    let Some(id_str) = args.first() else {
+        return Err(vec![usage.to_string()]);
+    };
+    let id_str = id_str.strip_prefix('#').unwrap_or(id_str);
+    id_str
+        .parse::<u64>()
+        .map_err(|_| vec![format!("Invalid task id: {}", id_str)])
+}
+
+fn cmd_specify(
+    args: &[&str],
+    store: &Arc<dyn KanbanStore>,
+    bridge: Option<&AdvancedBridge>,
+) -> Vec<String> {
+    let id = match parse_task_id_arg(args, "Usage: /kanban specify <id>") {
+        Ok(id) => id,
+        Err(lines) => return lines,
+    };
+    let Some(bridge) = bridge else {
+        return vec!["Advanced kanban bridge is not available.".to_string()];
+    };
+    if !bridge.is_available() {
+        return vec!["Advanced kanban bridge is not available: hermes command failed.".to_string()];
+    }
+
+    match bridge.specify(id, store.as_ref()) {
+        Ok(result) => vec![format!(
+            "Specified task #{} ({} chars).",
+            result.task_id,
+            result.spec_body.chars().count()
+        )],
+        Err(e) => vec![format!("Specify failed for task #{}: {}", id, e)],
+    }
+}
+
+fn cmd_decompose(
+    args: &[&str],
+    store: &Arc<dyn KanbanStore>,
+    bridge: Option<&AdvancedBridge>,
+) -> Vec<String> {
+    let id = match parse_task_id_arg(args, "Usage: /kanban decompose <id>") {
+        Ok(id) => id,
+        Err(lines) => return lines,
+    };
+    let Some(bridge) = bridge else {
+        return vec!["Advanced kanban bridge is not available.".to_string()];
+    };
+    if !bridge.is_available() {
+        return vec!["Advanced kanban bridge is not available: hermes command failed.".to_string()];
+    }
+
+    match bridge.decompose(id, store.as_ref()) {
+        Ok(result) => vec![format!(
+            "Decomposed task #{} into {} child task(s): {}",
+            result.parent_id,
+            result.child_ids.len(),
+            result
+                .child_ids
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )],
+        Err(e) => vec![format!("Decompose failed for task #{}: {}", id, e)],
+    }
+}
+
 fn cmd_help() -> Vec<String> {
     vec![
         "Kanban commands:".to_string(),
+        "  /kanban tab [board]        - Open interactive Kanban tab".to_string(),
+        "  /kanban close              - Close interactive Kanban tab".to_string(),
         "  /kanban list [status]       - List tasks (optionally filter by status)".to_string(),
         "  /kanban view [board]        - Show board as column view".to_string(),
         "  /kanban boards              - List all boards".to_string(),
         "  /kanban board create <slug> <name> - Create a new board".to_string(),
         "  /kanban create <title>      - Create a new task".to_string(),
         "  /kanban show <id>           - Show task details".to_string(),
+        "  /kanban edit <id> title|body <text> - Edit task title or body".to_string(),
         "  /kanban move <id> <status>  - Transition task to a new status".to_string(),
         "  /kanban comment <id> <text> - Add a comment to a task".to_string(),
         "  /kanban assign <id> <user>  - Assign a task to a user".to_string(),
         "  /kanban dispatch [id]       - Tick dispatcher (or ready+dispatch one task)".to_string(),
         "  /kanban daemon              - Toggle auto-dispatch daemon (30s interval)".to_string(),
+        "  /kanban specify <id>        - Expand a task into a detailed spec via hermes".to_string(),
+        "  /kanban decompose <id>      - Break a task into child tasks via hermes".to_string(),
         "  /kanban help                - Show this help".to_string(),
         "".to_string(),
         "Statuses: triage, todo, ready, running, blocked, done, archived".to_string(),

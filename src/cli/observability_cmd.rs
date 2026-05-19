@@ -384,12 +384,6 @@ fn fmt_opt(value: Option<u64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn fmt_float(value: Option<f64>) -> String {
-    value
-        .map(|value| format!("{value:.1}"))
-        .unwrap_or_else(|| "-".to_string())
-}
-
 /// Format as "mean±std(CV=x%)" when stddev is available, or just "mean" when not.
 fn fmt_mean_std_cv(mean: Option<f64>, stddev: Option<f64>, cv: Option<f64>) -> String {
     let Some(mean) = mean else {

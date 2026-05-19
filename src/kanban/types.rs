@@ -10,6 +10,7 @@ pub type TaskId = u64;
 pub type BoardId = u64;
 pub type RunId = String;
 pub type CommentId = u64;
+#[allow(dead_code)]
 pub type EventId = u64;
 
 // ---------------------------------------------------------------------------
@@ -248,6 +249,7 @@ pub struct Run {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct KanbanEvent {
     pub id: EventId,
     pub event_type: String,
@@ -260,12 +262,34 @@ pub struct KanbanEvent {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum KanbanUiEvent {
-    TaskCreated { id: TaskId, title: String },
-    TaskStatusChanged { id: TaskId, from: Status, to: Status },
-    TaskUpdated { id: TaskId },
-    TaskDeleted { id: TaskId },
-    CommentAdded { task_id: TaskId, comment_id: CommentId },
-    RunStarted { task_id: TaskId, run_id: RunId },
-    RunCompleted { task_id: TaskId, run_id: RunId, status: RunStatus },
+    TaskCreated {
+        id: TaskId,
+        title: String,
+    },
+    TaskStatusChanged {
+        id: TaskId,
+        from: Status,
+        to: Status,
+    },
+    TaskUpdated {
+        id: TaskId,
+    },
+    TaskDeleted {
+        id: TaskId,
+    },
+    CommentAdded {
+        task_id: TaskId,
+        comment_id: CommentId,
+    },
+    RunStarted {
+        task_id: TaskId,
+        run_id: RunId,
+    },
+    RunCompleted {
+        task_id: TaskId,
+        run_id: RunId,
+        status: RunStatus,
+    },
 }

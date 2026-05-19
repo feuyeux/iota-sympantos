@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS events (
     payload     TEXT    NOT NULL,
     created_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS event_sync_cursors (
+    source      TEXT    PRIMARY KEY,
+    cursor      INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_tasks_board_status ON tasks(board_id, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee     ON tasks(assignee);
 CREATE INDEX IF NOT EXISTS idx_runs_task          ON runs(task_id);
@@ -124,9 +129,36 @@ impl SqliteKanbanStore {
         );
     }
 
+    pub fn sync_cursor(&self, source: &str) -> Result<EventId> {
+        let conn = self.lock_conn();
+        let cursor = conn
+            .query_row(
+                "SELECT cursor FROM event_sync_cursors WHERE source = ?1",
+                params![source],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
+        Ok(cursor as EventId)
+    }
+
+    pub fn set_sync_cursor(&self, source: &str, cursor: EventId) -> Result<()> {
+        let now = now_ts();
+        let conn = self.lock_conn();
+        conn.execute(
+            "INSERT INTO event_sync_cursors (source, cursor, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(source) DO UPDATE SET
+                cursor = MAX(event_sync_cursors.cursor, excluded.cursor),
+                updated_at = excluded.updated_at",
+            params![source, cursor as i64, now],
+        )?;
+        Ok(())
+    }
+
     /// Replay a sequence of events against this store, rebuilding state.
     /// Used for syncing a remote node's events into this store.
     /// Returns the number of events successfully applied.
+    #[allow(dead_code)]
     pub fn replay_events(&self, events: &[KanbanEvent]) -> Result<usize> {
         let mut applied = 0;
         for event in events {
@@ -145,27 +177,50 @@ impl SqliteKanbanStore {
         Ok(applied)
     }
 
+    /// Replay a sequence of events for sync import.
+    /// Unlike `replay_events`, this fails on the first unapplied event so the
+    /// caller can avoid advancing the peer cursor past missing state.
+    pub fn replay_events_strict(&self, events: &[KanbanEvent]) -> Result<usize> {
+        for event in events {
+            self.apply_event(event)
+                .with_context(|| format!("applying kanban event {} ({})", event.id, event.event_type))?;
+        }
+        Ok(events.len())
+    }
+
+    #[allow(dead_code)]
     fn apply_event(&self, event: &KanbanEvent) -> Result<()> {
         match event.event_type.as_str() {
             EVT_BOARD_CREATED => {
                 let p: BoardCreatedPayload = serde_json::from_str(&event.payload)?;
-                let _ = self.create_board_impl(&p.slug, &p.name);
+                let conn = self.lock_conn();
+                conn.execute(
+                    "INSERT OR IGNORE INTO boards (id, slug, name, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    params![p.board_id as i64, p.slug, p.name, event.created_at],
+                )?;
                 Ok(())
             }
             EVT_TASK_CREATED => {
                 let p: TaskCreatedPayload = serde_json::from_str(&event.payload)?;
-                let req = CreateTaskRequest {
-                    board_id: p.board_id,
-                    title: p.title,
-                    body: p.body,
-                    status: p.status.parse().ok(),
-                    assignee: p.assignee,
-                    priority: Some(p.priority),
-                    tags: p.tags,
-                    workspace_kind: None,
-                    workspace_path: None,
-                };
-                let _ = self.create_task_impl(req);
+                let tags_json = serde_json::to_string(&p.tags)?;
+                let conn = self.lock_conn();
+                conn.execute(
+                    "INSERT OR IGNORE INTO tasks
+                     (id, board_id, title, body, status, assignee, priority, tags,
+                      created_at, updated_at, claim_ttl_secs)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 900)",
+                    params![
+                        p.task_id as i64,
+                        p.board_id as i64,
+                        p.title,
+                        p.body,
+                        p.status,
+                        p.assignee,
+                        p.priority,
+                        tags_json,
+                        event.created_at,
+                    ],
+                )?;
                 Ok(())
             }
             EVT_TASK_UPDATED => {
@@ -180,47 +235,58 @@ impl SqliteKanbanStore {
                     workspace_kind: None,
                     workspace_path: None,
                 };
-                let _ = self.update_task_impl(p.task_id, patch);
-                Ok(())
+                self.update_task_impl(p.task_id, patch)
             }
             EVT_TASK_DELETED => {
                 let p: TaskDeletedPayload = serde_json::from_str(&event.payload)?;
-                let _ = self.delete_task_impl(p.task_id);
-                Ok(())
+                self.delete_task_impl(p.task_id)
             }
             EVT_TASK_TRANSITIONED => {
                 let p: TaskTransitionedPayload = serde_json::from_str(&event.payload)?;
                 let to: Status = p.to.parse()?;
-                let _ = self.transition_impl(p.task_id, to);
-                Ok(())
+                self.transition_impl(p.task_id, to)
             }
             EVT_LINK_CREATED => {
                 let p: LinkCreatedPayload = serde_json::from_str(&event.payload)?;
                 let kind: LinkKind = p.kind.parse()?;
-                let _ = self.create_link_impl(p.from_id, p.to_id, kind);
-                Ok(())
+                self.create_link_impl(p.from_id, p.to_id, kind)
             }
             EVT_LINK_REMOVED => {
                 let p: LinkRemovedPayload = serde_json::from_str(&event.payload)?;
                 let kind: LinkKind = p.kind.parse()?;
-                let _ = self.remove_link_impl(p.from_id, p.to_id, kind);
-                Ok(())
+                self.remove_link_impl(p.from_id, p.to_id, kind)
             }
             EVT_COMMENT_ADDED => {
                 let p: CommentAddedPayload = serde_json::from_str(&event.payload)?;
-                let _ = self.add_comment_impl(p.task_id, &p.author, &p.body);
+                let conn = self.lock_conn();
+                conn.execute(
+                    "INSERT OR IGNORE INTO comments (id, task_id, author, body, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        p.comment_id as i64,
+                        p.task_id as i64,
+                        p.author,
+                        p.body,
+                        event.created_at,
+                    ],
+                )?;
                 Ok(())
             }
             EVT_RUN_STARTED => {
                 let p: RunStartedPayload = serde_json::from_str(&event.payload)?;
-                let _ = self.create_run_impl(p.task_id, &p.profile);
+                let conn = self.lock_conn();
+                conn.execute(
+                    "INSERT OR IGNORE INTO runs
+                     (id, task_id, profile, status, started_at, last_heartbeat)
+                     VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
+                    params![p.run_id, p.task_id as i64, p.profile, event.created_at],
+                )?;
                 Ok(())
             }
             EVT_RUN_COMPLETED => {
                 let p: RunCompletedPayload = serde_json::from_str(&event.payload)?;
                 let status: RunStatus = p.status.parse()?;
-                let _ = self.complete_run_impl(&p.run_id, status, p.exit_code);
-                Ok(())
+                self.complete_run_impl(&p.run_id, status, p.exit_code)
             }
             _ => Ok(()), // Unknown event types are silently skipped
         }
@@ -456,6 +522,7 @@ impl SqliteKanbanStore {
         Ok(out)
     }
 
+    #[allow(dead_code)]
     fn delete_task_impl(&self, id: TaskId) -> Result<()> {
         let conn = self.lock_conn();
         let rows = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id as i64])?;
@@ -505,6 +572,7 @@ impl SqliteKanbanStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn remove_link_impl(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
         let conn = self.lock_conn();
         conn.execute(
@@ -614,6 +682,7 @@ impl SqliteKanbanStore {
 
     // -- Events ----------------------------------------------------------------
 
+    #[allow(dead_code)]
     fn append_event_impl(&self, event_type: &str, payload: &str) -> Result<EventId> {
         let now = now_ts();
         let conn = self.lock_conn();
@@ -624,6 +693,7 @@ impl SqliteKanbanStore {
         Ok(conn.last_insert_rowid() as u64)
     }
 
+    #[allow(dead_code)]
     fn events_since_impl(&self, cursor: EventId) -> Result<Vec<KanbanEvent>> {
         let conn = self.lock_conn();
         let mut stmt = conn.prepare(
@@ -642,6 +712,10 @@ impl SqliteKanbanStore {
 // --- Trait impl --------------------------------------------------------------
 
 impl KanbanStore for SqliteKanbanStore {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn create_board(&self, slug: &str, name: &str) -> Result<BoardId> {
         let id = self.create_board_impl(slug, name)?;
         self.record_event_internal(
@@ -729,7 +803,9 @@ impl KanbanStore for SqliteKanbanStore {
     fn transition(&self, id: TaskId, to: Status) -> Result<()> {
         let from = self.get_task(id)?.status;
         self.transition_impl(id, to)?;
-        let _ = self.event_tx.send(KanbanUiEvent::TaskStatusChanged { id, from, to });
+        let _ = self
+            .event_tx
+            .send(KanbanUiEvent::TaskStatusChanged { id, from, to });
         self.record_event_internal(
             EVT_TASK_TRANSITIONED,
             &serde_json::to_string(&TaskTransitionedPayload {
@@ -772,7 +848,10 @@ impl KanbanStore for SqliteKanbanStore {
     }
     fn add_comment(&self, task_id: TaskId, author: &str, body: &str) -> Result<CommentId> {
         let comment_id = self.add_comment_impl(task_id, author, body)?;
-        let _ = self.event_tx.send(KanbanUiEvent::CommentAdded { task_id, comment_id });
+        let _ = self.event_tx.send(KanbanUiEvent::CommentAdded {
+            task_id,
+            comment_id,
+        });
         self.record_event_internal(
             EVT_COMMENT_ADDED,
             &serde_json::to_string(&CommentAddedPayload {
@@ -790,7 +869,10 @@ impl KanbanStore for SqliteKanbanStore {
     }
     fn create_run(&self, task_id: TaskId, profile: &str) -> Result<RunId> {
         let run_id = self.create_run_impl(task_id, profile)?;
-        let _ = self.event_tx.send(KanbanUiEvent::RunStarted { task_id, run_id: run_id.clone() });
+        let _ = self.event_tx.send(KanbanUiEvent::RunStarted {
+            task_id,
+            run_id: run_id.clone(),
+        });
         self.record_event_internal(
             EVT_RUN_STARTED,
             &serde_json::to_string(&RunStartedPayload {
@@ -917,6 +999,7 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
     })
 }
 
+#[allow(dead_code)]
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<KanbanEvent> {
     Ok(KanbanEvent {
         id: row.get::<_, i64>(0)? as u64,

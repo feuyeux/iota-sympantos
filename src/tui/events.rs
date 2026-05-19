@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::kanban_view::{KanbanSnapshot, KanbanViewMode};
 use super::state::ConversationEntry;
 use super::{Overlay, TuiApp};
 
@@ -14,6 +15,9 @@ impl TuiApp {
             return signal;
         }
         if let Some(signal) = self.handle_quit_confirm_overlay_key(key) {
+            return signal;
+        }
+        if let Some(signal) = self.handle_kanban_view_key(key) {
             return signal;
         }
 
@@ -142,6 +146,132 @@ impl TuiApp {
         LoopSignal::Continue
     }
 
+    fn handle_kanban_view_key(&mut self, key: KeyEvent) -> Option<LoopSignal> {
+        if !self.kanban_view.active {
+            return None;
+        }
+        if matches!(
+            (key.modifiers, key.code),
+            (KeyModifiers::CONTROL, KeyCode::Char('c'))
+        ) {
+            return None;
+        }
+        if self.running_turn && matches!(key.code, KeyCode::Esc) {
+            return None;
+        }
+        if !self.composer.text.is_empty() && !matches!(key.code, KeyCode::Esc) {
+            return None;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.kanban_view.close();
+                return Some(LoopSignal::Continue);
+            }
+            KeyCode::Char(ch) if key.modifiers == KeyModifiers::NONE => {
+                if let Some(mode) = KanbanViewMode::from_digit(ch) {
+                    self.kanban_view.mode = mode;
+                    return Some(LoopSignal::Continue);
+                }
+            }
+            _ => {}
+        }
+
+        let snapshot = match KanbanSnapshot::load(
+            self.kanban_store.as_ref(),
+            self.kanban_view.board_slug.as_deref(),
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: format!("Kanban load failed: {}", err),
+                });
+                return Some(LoopSignal::Continue);
+            }
+        };
+
+        match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Char('v')) => {
+                self.kanban_view.cycle_mode();
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('L'))
+            | (KeyModifiers::NONE, KeyCode::Char('L')) => {
+                self.kanban_view.mode = KanbanViewMode::Graph;
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('R'))
+            | (KeyModifiers::NONE, KeyCode::Char('R')) => {
+                self.kanban_view.mode = KanbanViewMode::Timeline;
+            }
+            (KeyModifiers::NONE, KeyCode::Tab) => {
+                self.kanban_view.select_column_delta(1, &snapshot);
+            }
+            (KeyModifiers::SHIFT, KeyCode::BackTab) | (KeyModifiers::NONE, KeyCode::BackTab) => {
+                self.kanban_view.select_column_delta(-1, &snapshot);
+            }
+            (KeyModifiers::NONE, KeyCode::Down) | (KeyModifiers::NONE, KeyCode::Char('j')) => {
+                self.kanban_view.select_task_delta(1, &snapshot);
+            }
+            (KeyModifiers::NONE, KeyCode::Up) | (KeyModifiers::NONE, KeyCode::Char('k')) => {
+                self.kanban_view.select_task_delta(-1, &snapshot);
+            }
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                self.kanban_view.detail_open = !self.kanban_view.detail_open;
+            }
+            (KeyModifiers::NONE, KeyCode::Char('d')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.execute_kanban_command(&format!("dispatch #{id}"));
+                }
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('D'))
+            | (KeyModifiers::NONE, KeyCode::Char('D')) => {
+                self.execute_kanban_command("daemon");
+            }
+            (KeyModifiers::NONE, KeyCode::Char('s')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.execute_kanban_command(&format!("specify #{id}"));
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char('x')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.execute_kanban_command(&format!("decompose #{id}"));
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char('m')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.set_composer_text(format!("/kanban move #{id} "));
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char('e')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.set_composer_text(format!("/kanban edit #{id} title "));
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char('c')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.set_composer_text(format!("/kanban comment #{id} "));
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char('a')) => {
+                if let Some(id) = self.kanban_view.selected_task_id(&snapshot) {
+                    self.set_composer_text(format!("/kanban assign #{id} "));
+                }
+            }
+            (KeyModifiers::NONE, KeyCode::Char('n')) => {
+                self.set_composer_text("/kanban create ".to_string());
+            }
+            (KeyModifiers::NONE, KeyCode::Char('/')) => {
+                self.set_composer_text("/kanban filter ".to_string());
+            }
+            _ => return None,
+        }
+        Some(LoopSignal::Continue)
+    }
+
+    fn set_composer_text(&mut self, text: String) {
+        self.composer.cursor = text.chars().count();
+        self.composer.text = text;
+    }
+
     fn post_key_housekeeping(&mut self) {
         if self.overlay != Overlay::QuitConfirm {
             self.quit_confirm_tick = None;
@@ -152,5 +282,65 @@ impl TuiApp {
             self.overlay = Overlay::None;
             self.quit_confirm_tick = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use crossterm::event::{KeyCode, KeyEvent};
+
+    use crate::config::NimiaConfig;
+    use crate::kanban::{CreateTaskRequest, KanbanStore, SqliteKanbanStore, Status};
+
+    use super::*;
+
+    fn app_with_task() -> (TuiApp, u64) {
+        let mut app = TuiApp::new(NimiaConfig::default()).unwrap();
+        let tmp = std::env::temp_dir().join(format!("iota-kanban-view-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let store = SqliteKanbanStore::open(&tmp.join("store.db")).unwrap();
+        let board_id = store.create_board("dev", "Dev").unwrap();
+        let task_id = store
+            .create_task(CreateTaskRequest {
+                board_id,
+                title: "Implement tab".to_string(),
+                body: None,
+                status: Some(Status::Todo),
+                assignee: None,
+                priority: Some(1),
+                tags: vec![],
+                workspace_kind: None,
+                workspace_path: Some(PathBuf::from(".")),
+            })
+            .unwrap();
+        app.kanban_store = Arc::new(store);
+        (app, task_id)
+    }
+
+    #[test]
+    fn kanban_tab_slash_command_opens_view() {
+        let (mut app, _) = app_with_task();
+
+        assert!(app.handle_slash_command("/kanban tab dev"));
+
+        assert!(app.kanban_view.active);
+        assert_eq!(app.kanban_view.board_slug.as_deref(), Some("dev"));
+    }
+
+    #[tokio::test]
+    async fn kanban_tab_keys_switch_mode_and_prefill_task_command() {
+        let (mut app, task_id) = app_with_task();
+        app.handle_slash_command("/kanban tab dev");
+
+        app.on_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.kanban_view.mode, KanbanViewMode::List);
+
+        app.on_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.composer.text, format!("/kanban move #{task_id} "));
     }
 }

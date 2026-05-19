@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS task_links (
 
 pub struct ShadowDb {
     pub path: PathBuf,
+    #[allow(dead_code)]
     pub task_id: TaskId,
 }
 

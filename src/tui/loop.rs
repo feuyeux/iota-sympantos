@@ -188,7 +188,9 @@ impl TuiApp {
             KanbanUiEvent::RunStarted { task_id, .. } => {
                 format!("Worker started for task #{}", task_id)
             }
-            KanbanUiEvent::RunCompleted { task_id, status, .. } => {
+            KanbanUiEvent::RunCompleted {
+                task_id, status, ..
+            } => {
                 format!("Worker completed for task #{} ({})", task_id, status)
             }
             _ => return, // Don't spam for minor events
@@ -367,6 +369,17 @@ mod tests {
 
         assert_eq!(app.overlay, Overlay::None);
         assert!(app.pending_approval.is_some());
+    }
+
+    #[test]
+    fn kanban_daemon_starts_disabled() {
+        let app = TuiApp::new(NimiaConfig::default()).unwrap();
+
+        assert!(
+            !app.kanban_daemon_active
+                .load(std::sync::atomic::Ordering::Relaxed),
+            "auto-dispatch should require explicit user opt-in"
+        );
     }
 
     #[test]

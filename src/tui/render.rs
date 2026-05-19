@@ -4,40 +4,93 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+use super::kanban_view::{KanbanSnapshot, render_lines as render_kanban_lines};
 use super::state::ObservabilityMeta;
 use super::{SPINNER_FRAMES, TuiApp, status_bar, theme};
 
 impl TuiApp {
-    /// Render the inline viewport: spinner row, composer row, status row.
+    /// Render the inline viewport: optional Kanban panel, spinner row, composer row, status row.
     /// Chat transcript is emitted to native terminal scrollback.
     pub(super) fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-        self.render_status_indicator(frame, chunks[0]);
-        if self.pending_approval.is_some() {
-            self.render_approval_overlay(frame, chunks[1]);
+        if self.kanban_view.active {
+            let chunks = Layout::vertical([
+                Constraint::Min(8),
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Length(1),
+            ])
+            .split(area);
+            self.render_kanban_panel(frame, chunks[0]);
+            self.render_status_indicator(frame, chunks[1]);
+            if self.pending_approval.is_some() {
+                self.render_approval_overlay(frame, chunks[2]);
+            } else {
+                self.render_composer(frame, chunks[2]);
+            }
+            status_bar::render(
+                frame,
+                chunks[3],
+                &self.cwd,
+                self.active_backend,
+                self.active_model.as_deref(),
+                self.composer.is_searching(),
+                self.composer.search_query(),
+                self.running_turn,
+                self.queued_prompt.is_some(),
+                matches!(self.overlay, super::Overlay::QuitConfirm),
+                self.latest_observability.as_ref(),
+            );
         } else {
-            self.render_composer(frame, chunks[1]);
+            let chunks = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+            self.render_status_indicator(frame, chunks[0]);
+            if self.pending_approval.is_some() {
+                self.render_approval_overlay(frame, chunks[1]);
+            } else {
+                self.render_composer(frame, chunks[1]);
+            }
+            status_bar::render(
+                frame,
+                chunks[2],
+                &self.cwd,
+                self.active_backend,
+                self.active_model.as_deref(),
+                self.composer.is_searching(),
+                self.composer.search_query(),
+                self.running_turn,
+                self.queued_prompt.is_some(),
+                matches!(self.overlay, super::Overlay::QuitConfirm),
+                self.latest_observability.as_ref(),
+            );
         }
-        status_bar::render(
-            frame,
-            chunks[2],
-            &self.cwd,
-            self.active_backend,
-            self.active_model.as_deref(),
-            self.composer.is_searching(),
-            self.composer.search_query(),
-            self.running_turn,
-            self.queued_prompt.is_some(),
-            matches!(self.overlay, super::Overlay::QuitConfirm),
-            self.latest_observability.as_ref(),
-        );
+    }
+
+    fn render_kanban_panel(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::composer_border_style(true))
+            .title(Span::styled(" Kanban ", theme::system_notice_style()));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let mut state = self.kanban_view.clone();
+        let lines =
+            match KanbanSnapshot::load(self.kanban_store.as_ref(), state.board_slug.as_deref()) {
+                Ok(snapshot) => {
+                    render_kanban_lines(&mut state, &snapshot, inner.width, inner.height)
+                }
+                Err(err) => vec![format!("Kanban load failed: {}", err)],
+            };
+
+        let lines = lines.into_iter().map(Line::raw).collect::<Vec<_>>();
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
     }
 
     fn render_composer(&self, frame: &mut Frame, area: Rect) {

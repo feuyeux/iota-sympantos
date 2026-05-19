@@ -1,60 +1,33 @@
 # iota sympantos
 
-Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-code / codex / gemini / hermes / opencode），共享统一的记忆、技能与上下文层。
+Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-code / codex / gemini / hermes / opencode），共享统一的记忆、技能与上下文层。内置 Kanban 任务看板，支持 Agent 长期任务的调度、追踪与多节点同步。
 
 ## 核心功能
 
-- **跨后端记忆** — Rust 引擎层 SQLite 存储（SHA-256 去重、FTS5、6 召回桶）。任一后端写入的记忆可在其他后端召回注入。
-- **确定性技能** — YAML 声明的技能由 Rust 引擎分发，触发匹配与输出模板与后端无关，所有后端产出一致的结构化结果。
-- **iota-fun 多语言执行** — 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` 支持。
-- **Kanban 任务管理** — 内置任务看板系统，支持状态机、依赖管理、执行追踪和事件溯源。适用于 Agent 长期任务管理和复杂流水线编排。
-- **Daemon 热路径** — 可选 TCP daemon 保持 ACP 客户端预热；任何命令加 `--daemon/-d` 即可路由。
-- **交互式 TUI** — ratatui 循环，含多行编辑器、Markdown 渲染、流式输出与权限审批覆层。
-
-## 架构
-
-![Architecture Overview](images/architecture-diagram.png)
-
-| 层级 | 模块 |
+| 功能 | 说明 |
 |------|------|
-| **UI** | `cli/mod.rs`, `tui.rs` + `tui/` |
-| **编排** | `engine.rs`, `acp/`, `mcp/`, `context/`, `skill/` |
-| **存储** | `memory.rs`, `cache.rs`, `ledger.rs`, `approval.rs` |
-
-详见 [`docs/architecture.md`](docs/architecture.md) 和 [`docs/code-call-chains.md`](docs/code-call-chains.md)。
-
-## 文档
-
-| 文档 | 说明 |
-|------|------|
-| [`docs/architecture.md`](docs/architecture.md) | 系统架构设计 |
-| [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
-| [`docs/observability.md`](docs/observability.md) | logs/trace、RuntimeEvent、metrics、CacheStore 边界 |
-| [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
-| [`docs/hermes-kanban-guide.md`](docs/hermes-kanban-guide.md) | Kanban 功能完整指南 |
-| [`docs/hermes-kanban-example.md`](docs/hermes-kanban-example.md) | Hermes Agent 使用 Kanban 示例 |
-| [`docs/hermes-kanban-sequence-diagrams.md`](docs/hermes-kanban-sequence-diagrams.md) | Kanban 交互时序图 |
-| [`docs/kanban-architecture-deep-dive.md`](docs/kanban-architecture-deep-dive.md) | Kanban 架构深度解析 |
-
-## 功能实验室
-
-| # | 主题 | 报告 |
-|---|------|------|
-| 01 | 跨后端记忆延续 — 6 召回桶、SHA-256 去重、置信度过滤、token 预算 | [`gefsi/exp01-memory.md`](gefsi/exp01-memory.md) |
-| 02 | Skill + iota-fun 多语言执行 — 触发匹配、并行工具、编译缓存、5 后端一致性 | [`gefsi/exp02-skill-fun.md`](gefsi/exp02-skill-fun.md) |
+| **跨后端记忆** | SQLite 存储（SHA-256 去重、FTS5、6 召回桶），任一后端写入的记忆可在其他后端召回注入 |
+| **确定性技能** | YAML 声明，由 Rust 引擎分发；触发匹配与输出模板与后端无关 |
+| **iota-fun** | 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` |
+| **Kanban** | 内置任务看板：状态机、Dispatcher、Shadow 工作区、Event Sourcing、HTTP 同步 |
+| **Daemon 热路径** | 可选 TCP daemon 保持 ACP 客户端预热，`--daemon/-d` 路由 |
+| **TUI** | ratatui 内联视图，多行编辑器、Markdown 渲染、流式输出、Ctrl+C 双击退出 |
 
 ## 快速开始
 
-### 构建
-
 ```bash
-cargo build --offline
+cargo build --release
 cargo install --path .
+
+iota                                    # 交互式 TUI
+iota run codex "ping"                   # 单次 prompt
+iota run --backend claude "解释递归"    # 指定后端
+iota check                              # 检查后端配置
 ```
 
-### 配置
+### 配置文件
 
-配置文件：`~/.i6/nimia.yaml`，每个后端的关键字段：
+`~/.i6/nimia.yaml`，每个后端的关键字段：
 
 ```yaml
 codex:
@@ -62,9 +35,6 @@ codex:
   acp:
     command: npx
     args: ["-y", "@zed-industries/codex-acp@0.12.0"]
-  version_mapping:
-    acp: "0.12.0"
-    bin: "0.128.0"
   model:
     provider: ninerouter
     name: gh/gpt-5.5
@@ -72,45 +42,74 @@ codex:
     api_key: "<router-api-key>"
 ```
 
-`iota check` 查看所有后端的生效配置。
+`iota check` 查看所有后端生效配置。
 
 ### Hermes 后端
-
-需要先安装 Hermes Agent：
 
 ```bash
 pip install 'hermes-agent[acp]'
 ```
 
-### 运行
+## TUI 快捷键
 
-```bash
-iota                                              # 交互式 TUI
-iota run codex "ping"                             # 单次 prompt，直连
-iota run --daemon codex --timeout-ms 20000 "ping" # 经由 daemon（热路径）
-iota check                                        # 检查配置与后端状态
+| 快捷键 | 作用 |
+|--------|------|
+| `Enter` | 发送 prompt |
+| `Shift+Enter` | 插入换行 |
+| `Tab` | 运行中排队下一条 prompt |
+| `↑ / ↓` | 历史记录导航 |
+| `Ctrl+R` | 搜索历史 |
+| `Ctrl+B` | 切换后端 |
+| `Ctrl+E` | 导出对话记录 |
+| `Esc` | 中断当前请求 |
+| `?` | 显示帮助 |
+| `Ctrl+C` ×2 | 退出 |
+
+### Slash 命令
+
+```
+/backend [name]       查看或切换后端
+/claude /codex /gemini /hermes /opencode  直接切换
+/model                显示当前模型
+/goal [text]          查看或设置当前目标
+/status               显示会话状态
+/clear                清空对话视图
+/export               导出对话记录
+/quit                 退出确认
 ```
 
-`--timing` 将路由与 ACP 阶段耗时以 JSON 格式输出到 stderr。
+## 架构
 
-### 调试与运行
+```
+CLI / TUI
+    └── Engine（路由、记忆注入、技能分发）
+            ├── ACP 后端层（claude-code / codex / gemini / hermes / opencode）
+            ├── Kanban 层（Store → Dispatcher → Shadow → Worker）
+            └── Memory / Skill / MCP 层
+```
+
+详见 [`docs/architecture.md`](docs/architecture.md)、[`docs/code-call-chains.md`](docs/code-call-chains.md)。
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [`docs/architecture.md`](docs/architecture.md) | 系统架构设计 |
+| [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
+| [`docs/observability.md`](docs/observability.md) | logs / trace / metrics |
+| [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
+| [`docs/hermes-kanban-guide.md`](docs/hermes-kanban-guide.md) | Kanban 完整指南 |
+| [`docs/hermes-kanban-example.md`](docs/hermes-kanban-example.md) | Hermes Agent 使用 Kanban 示例 |
+| [`docs/hermes-kanban-sequence-diagrams.md`](docs/hermes-kanban-sequence-diagrams.md) | Kanban 交互时序图 |
+| [`docs/kanban-architecture-deep-dive.md`](docs/kanban-architecture-deep-dive.md) | Kanban 架构深度解析 |
+
+## 开发
 
 ```bash
-# 交互式 TUI
-cargo run --quiet
-
-# 带日志级别
-RUST_LOG=debug cargo run --quiet
-
-# 带 timing 输出运行单次 prompt
-cargo run --quiet -- run codex "ping" --timing
-
-# 运行测试
-cargo test
-
-# 仅构建检查（不执行）
+cargo test               # 367 tests
 cargo check --offline
-
-# 附加调试器
-cargo run --quiet --debug
+RUST_LOG=debug cargo run --quiet
+cargo run --quiet -- run codex "ping" --timing
 ```
+
+**Rust 1.95+，依赖：** tokio · ratatui · rusqlite · reqwest · axum · tracing · opentelemetry · serde
