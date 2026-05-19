@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(test)]
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -672,7 +673,13 @@ mod tests {
 
         let child = if cfg!(windows) {
             std::process::Command::new("powershell")
-                .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", "Start-Sleep -Seconds 30"])
+                .args([
+                    "-NoProfile",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    "Start-Sleep -Seconds 30",
+                ])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

@@ -12,8 +12,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Duration, sleep};
 
 use iota_sympantos::kanban::{
-    CreateTaskRequest, KanbanStore, KanbanUiEvent, RunStatus, SqliteKanbanStore, Status,
-    TaskFilter,
+    CreateTaskRequest, KanbanStore, KanbanUiEvent, RunStatus, SqliteKanbanStore, Status, TaskFilter,
 };
 
 #[tokio::main]
@@ -31,7 +30,7 @@ async fn main() -> Result<()> {
 
     // Store (in-memory for demo; swap ":memory:" for a file path to persist)
     let concrete = Arc::new(SqliteKanbanStore::open(Path::new(":memory:"))?);
-    let mut rx = concrete.subscribe();           // subscribe before coercion
+    let mut rx = concrete.subscribe(); // subscribe before coercion
     let store: Arc<dyn KanbanStore> = concrete;
 
     // 1. Create board + task from prompt
@@ -109,9 +108,9 @@ fn final_summary(store: &Arc<dyn KanbanStore>, task_id: u64, board_id: u64) -> R
     println!("==========================================");
     print_board(store, board_id)?;
 
-    let task     = store.get_task(task_id)?;
+    let task = store.get_task(task_id)?;
     let comments = store.list_comments(task_id)?;
-    let runs     = store.get_runs(task_id)?;
+    let runs = store.get_runs(task_id)?;
 
     println!("Task #{}", task.id);
     println!("  status   : {}", task.status);
@@ -154,7 +153,11 @@ fn handle_event(
                 &run_id[..run_id.len().min(8)]
             );
         }
-        KanbanUiEvent::RunCompleted { task_id, run_id, status } => {
+        KanbanUiEvent::RunCompleted {
+            task_id,
+            run_id,
+            status,
+        } => {
             println!(
                 "   * run finished task #{} / {} -> {}",
                 task_id,
@@ -223,7 +226,13 @@ fn print_board(store: &Arc<dyn KanbanStore>, board_id: u64) -> Result<()> {
         .iter()
         .map(|c| tasks.iter().filter(|t| t.status == *c).collect())
         .collect();
-    let rows = grouped.iter().map(|g| g.len()).max().unwrap_or(0).min(6).max(1);
+    let rows = grouped
+        .iter()
+        .map(|g| g.len())
+        .max()
+        .unwrap_or(0)
+        .min(6)
+        .max(1);
 
     for row in 0..rows {
         let mut line = String::from("|");

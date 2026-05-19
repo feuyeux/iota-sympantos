@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 
 use crate::kanban::{
     AdvancedBridge, KanbanStore, SqliteKanbanStore, default_pull_source, export_event_bundle,
-    import_event_bundle, pull_event_bundle, push_event_bundle, read_event_bundle,
-    serve_event_sync, write_event_bundle,
+    import_event_bundle, pull_event_bundle, push_event_bundle, read_event_bundle, serve_event_sync,
+    write_event_bundle,
 };
 
 pub(super) fn run_kanban_command(args: &[String]) -> Result<()> {

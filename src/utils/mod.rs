@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Returns the wall-clock milliseconds elapsed since `started`.
+#[allow(dead_code)]
 pub fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
@@ -18,6 +19,7 @@ pub fn now_ts() -> i64 {
 
 /// Summarizes a string to at most `limit` characters, collapsing whitespace.
 /// Appends "..." if the value was truncated.
+#[allow(dead_code)]
 pub fn summarize(value: &str, limit: usize) -> String {
     let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
     if compact.len() <= limit {

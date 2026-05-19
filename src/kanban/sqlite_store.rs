@@ -182,8 +182,9 @@ impl SqliteKanbanStore {
     /// caller can avoid advancing the peer cursor past missing state.
     pub fn replay_events_strict(&self, events: &[KanbanEvent]) -> Result<usize> {
         for event in events {
-            self.apply_event(event)
-                .with_context(|| format!("applying kanban event {} ({})", event.id, event.event_type))?;
+            self.apply_event(event).with_context(|| {
+                format!("applying kanban event {} ({})", event.id, event.event_type)
+            })?;
         }
         Ok(events.len())
     }

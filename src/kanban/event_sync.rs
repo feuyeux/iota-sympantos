@@ -118,7 +118,11 @@ pub fn import_event_bundle(
 
 pub fn default_pull_source(addr: &str) -> String {
     let trimmed = addr.trim();
-    let source = if trimmed.is_empty() { "unknown" } else { trimmed };
+    let source = if trimmed.is_empty() {
+        "unknown"
+    } else {
+        trimmed
+    };
     format!("peer:{source}")
 }
 
@@ -366,10 +370,22 @@ mod tests {
     fn import_cursors_are_isolated_by_peer_source() {
         let target = store();
 
-        target.set_sync_cursor(&default_pull_source("127.0.0.1:47662"), 10).unwrap();
+        target
+            .set_sync_cursor(&default_pull_source("127.0.0.1:47662"), 10)
+            .unwrap();
 
-        assert_eq!(target.sync_cursor(&default_pull_source("127.0.0.1:47662")).unwrap(), 10);
-        assert_eq!(target.sync_cursor(&default_pull_source("127.0.0.1:47663")).unwrap(), 0);
+        assert_eq!(
+            target
+                .sync_cursor(&default_pull_source("127.0.0.1:47662"))
+                .unwrap(),
+            10
+        );
+        assert_eq!(
+            target
+                .sync_cursor(&default_pull_source("127.0.0.1:47663"))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
