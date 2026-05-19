@@ -378,3 +378,135 @@ fn test_dispatch_rejects_invalid_status_task() {
         out
     );
 }
+
+// ---------------------------------------------------------------------------
+// Board column view tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_view_no_board() {
+    let store = test_store();
+    let result = exec("view", &store);
+    assert!(
+        result[0].contains("No boards found"),
+        "expected 'No boards found' message, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_view_empty_board() {
+    let store = test_store();
+    exec("board create dev Development", &store);
+    let result = exec("view dev", &store);
+    assert!(
+        result.iter().any(|l| l.contains("Development")),
+        "view should show board name, got: {:?}",
+        result
+    );
+    assert!(
+        result.iter().any(|l| l.contains("TRIAGE")),
+        "view should show TRIAGE column header, got: {:?}",
+        result
+    );
+    assert!(
+        result.iter().any(|l| l.contains("TODO")),
+        "view should show TODO column header, got: {:?}",
+        result
+    );
+    assert!(
+        result.iter().any(|l| l.contains("RUNNING")),
+        "view should show RUNNING column header, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_view_with_tasks() {
+    let store = test_store();
+    exec("board create dev Development", &store);
+    exec("create My Task", &store);
+    let result = exec("view dev", &store);
+    assert!(
+        result.iter().any(|l| l.contains("#1")),
+        "view should show task #1, got: {:?}",
+        result
+    );
+    assert!(
+        result.iter().any(|l| l.contains("TRIAGE(1)")),
+        "view should show TRIAGE(1), got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_view_default_board() {
+    let store = test_store();
+    exec("board create dev Development", &store);
+    exec("create Some Task", &store);
+    // Call view with no slug - should pick first board
+    let result = exec("view", &store);
+    assert!(
+        result.iter().any(|l| l.contains("Development")),
+        "view without slug should show first board, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_view_columns_alias() {
+    let store = test_store();
+    exec("board create dev Development", &store);
+    let result = exec("columns", &store);
+    assert!(
+        result.iter().any(|l| l.contains("Development")),
+        "columns alias should work like view, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_view_running_marker() {
+    let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = concrete.create_board("dev", "Development").unwrap();
+    concrete
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Active task".to_string(),
+            body: None,
+            status: Some(Status::Running),
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+    let store: Arc<dyn KanbanStore> = Arc::new(concrete);
+
+    let result = exec("view dev", &store);
+    assert!(
+        result.iter().any(|l| l.contains("#1*")),
+        "running tasks should have * marker, got: {:?}",
+        result
+    );
+    assert!(
+        result.iter().any(|l| l.contains("RUNNING(1)")),
+        "view should show RUNNING(1), got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_board_view_subdispatch() {
+    let store = test_store();
+    exec("board create dev Development", &store);
+    // "/kanban board view dev" should also work
+    let result = exec("board view dev", &store);
+    assert!(
+        result.iter().any(|l| l.contains("Development")),
+        "board view subcommand should work, got: {:?}",
+        result
+    );
+}
+

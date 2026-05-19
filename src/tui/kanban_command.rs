@@ -23,9 +23,10 @@ pub(super) fn execute_with_dispatcher(
     match subcmd {
         "list" | "ls" => cmd_list(&parts[1..], store, default_board),
         "boards" => cmd_boards(store),
-        "board" => cmd_board(&parts[1..], store),
+        "board" => cmd_board(&parts[1..], store, default_board),
         "create" | "new" | "add" => cmd_create(&parts[1..], store, default_board),
-        "show" | "view" => cmd_show(&parts[1..], store),
+        "view" | "columns" => cmd_view(&parts[1..], store, default_board),
+        "show" => cmd_show(&parts[1..], store),
         "move" | "mv" | "transition" => cmd_move(&parts[1..], store),
         "comment" | "note" => cmd_comment(&parts[1..], store),
         "assign" => cmd_assign(&parts[1..], store),
@@ -96,9 +97,10 @@ fn cmd_boards(store: &Arc<dyn KanbanStore>) -> Vec<String> {
     }
 }
 
-fn cmd_board(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
+fn cmd_board(args: &[&str], store: &Arc<dyn KanbanStore>, default_board: Option<&str>) -> Vec<String> {
     let subcmd = args.first().copied().unwrap_or("");
     match subcmd {
+        "view" => return cmd_view(&args[1..], store, default_board),
         "create" => {
             let slug = match args.get(1) {
                 Some(s) => *s,
@@ -115,6 +117,136 @@ fn cmd_board(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
         }
         _ => vec!["Usage: /kanban board create <slug> <name>".to_string()],
     }
+}
+
+fn cmd_view(
+    args: &[&str],
+    store: &Arc<dyn KanbanStore>,
+    default_board: Option<&str>,
+) -> Vec<String> {
+    // Determine which board to show
+    let board = if let Some(slug) = args.first().copied().or(default_board) {
+        store.get_board(slug).ok()
+    } else {
+        store.list_boards().ok().and_then(|bs| bs.into_iter().next())
+    };
+
+    let board = match board {
+        Some(b) => b,
+        None => {
+            return vec![
+                "No boards found. Create one with: /kanban board create <slug> <name>".to_string(),
+            ]
+        }
+    };
+
+    // Get all tasks for this board
+    let tasks = match store.list_tasks(TaskFilter {
+        board_id: Some(board.id),
+        limit: Some(200),
+        ..Default::default()
+    }) {
+        Ok(t) => t,
+        Err(e) => return vec![format!("Error: {}", e)],
+    };
+
+    // Columns to display (skip Archived for brevity)
+    let columns: &[Status] = &[
+        Status::Triage,
+        Status::Todo,
+        Status::Ready,
+        Status::Running,
+        Status::Blocked,
+        Status::Done,
+    ];
+
+    let grouped: Vec<Vec<&crate::kanban::Task>> = columns
+        .iter()
+        .map(|status| tasks.iter().filter(|t| t.status == *status).collect())
+        .collect();
+
+    // Column width adapts: minimum 11 chars content + 3 border/padding
+    let col_width: usize = 12;
+    let num_cols = columns.len();
+    // Each column occupies col_width+2 chars of content, separated by "│"
+    // Layout: "│" + (content + "│") * num_cols
+    let inner_width = (col_width + 2) * num_cols + 1; // +1 for leading │
+
+    let mut lines = Vec::new();
+
+    // Top border
+    let header_text = format!(" Board: {} ", board.name);
+    let border_fill = inner_width.saturating_sub(header_text.len() + 2); // -2 for ┌ and ┐
+    lines.push(format!(
+        "\u{250c}\u{2500}{}{}┐",
+        header_text,
+        "\u{2500}".repeat(border_fill)
+    ));
+
+    // Column headers with counts
+    let mut header_line = String::from("\u{2502}");
+    for (i, status) in columns.iter().enumerate() {
+        let count = grouped[i].len();
+        let label = format!("{}({})", status.as_str().to_uppercase(), count);
+        let padded = format!(" {:<width$}", label, width = col_width + 1);
+        header_line.push_str(&padded);
+        header_line.push('\u{2502}');
+    }
+    lines.push(header_line);
+
+    // Separator line under headers
+    let mut sep_line = String::from("\u{2502}");
+    for _i in 0..num_cols {
+        let sep = format!(" {:<width$}", "\u{2500}".repeat(col_width), width = col_width + 1);
+        sep_line.push_str(&sep);
+        sep_line.push('\u{2502}');
+    }
+    lines.push(sep_line);
+
+    // Task rows
+    let max_rows = grouped.iter().map(|col| col.len()).max().unwrap_or(0).min(15);
+
+    for row in 0..max_rows {
+        let mut task_line = String::from("\u{2502}");
+        for (i, col_tasks) in grouped.iter().enumerate() {
+            let cell = if row < col_tasks.len() {
+                let t = col_tasks[row];
+                let marker = if t.status == Status::Running { "*" } else { "" };
+                // Format: " #<id><marker> <title_truncated>"
+                let id_part = format!("#{}{}", t.id, marker);
+                let avail = col_width.saturating_sub(id_part.len() + 1); // +1 for space between id and title
+                let title: String = t.title.chars().take(avail).collect();
+                if title.is_empty() {
+                    format!(" {}", id_part)
+                } else {
+                    format!(" {} {}", id_part, title)
+                }
+            } else {
+                String::new()
+            };
+            let padded = format!("{:<width$}", cell, width = col_width + 2);
+            task_line.push_str(&padded);
+            task_line.push('\u{2502}');
+            let _ = i; // suppress unused warning
+        }
+        lines.push(task_line);
+    }
+
+    // If no tasks at all, add an empty row for visual completeness
+    if max_rows == 0 {
+        let mut empty_line = String::from("\u{2502}");
+        for _i in 0..num_cols {
+            empty_line.push_str(&format!("{:<width$}", "", width = col_width + 2));
+            empty_line.push('\u{2502}');
+        }
+        lines.push(empty_line);
+    }
+
+    // Bottom border
+    let bottom_width = inner_width - 2; // subtract ┘ and └
+    lines.push(format!("\u{2514}{}\u{2518}", "\u{2500}".repeat(bottom_width)));
+
+    lines
 }
 
 fn cmd_create(
@@ -379,6 +511,7 @@ fn cmd_help() -> Vec<String> {
     vec![
         "Kanban commands:".to_string(),
         "  /kanban list [status]       - List tasks (optionally filter by status)".to_string(),
+        "  /kanban view [board]        - Show board as column view".to_string(),
         "  /kanban boards              - List all boards".to_string(),
         "  /kanban board create <slug> <name> - Create a new board".to_string(),
         "  /kanban create <title>      - Create a new task".to_string(),
@@ -391,7 +524,7 @@ fn cmd_help() -> Vec<String> {
         "  /kanban help                - Show this help".to_string(),
         "".to_string(),
         "Statuses: triage, todo, ready, running, blocked, done, archived".to_string(),
-        "Aliases: /kb, /k".to_string(),
+        "Aliases: /kb, /k | view aliases: columns, board view".to_string(),
     ]
 }
 
