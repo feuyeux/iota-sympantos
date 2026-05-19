@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 
 use anyhow::Result;
 use crossterm::event::{Event as CEvent, EventStream, KeyEventKind};
@@ -95,6 +96,7 @@ fn spawn_kanban_dispatcher_task(
 ) -> tokio::task::JoinHandle<()> {
     let store = app.kanban_store.clone();
     let dispatcher = app.kanban_dispatcher.clone();
+    let daemon_active = app.kanban_daemon_active.clone();
     let interval = lock_or_recover(&dispatcher).tick_interval();
 
     tokio::spawn(async move {
@@ -103,6 +105,10 @@ fn spawn_kanban_dispatcher_task(
             tokio::select! {
                 _ = tick.tick() => {}
                 _ = &mut shutdown_rx => break,
+            }
+            // Skip the tick if daemon is paused
+            if !daemon_active.load(Ordering::Relaxed) {
+                continue;
             }
             let store = store.clone();
             let dispatcher = dispatcher.clone();

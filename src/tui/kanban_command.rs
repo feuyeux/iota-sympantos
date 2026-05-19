@@ -1,4 +1,5 @@
 use crate::kanban::{CreateTaskRequest, Dispatcher, KanbanStore, Status, TaskFilter, TaskPatch};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::{Mutex, TryLockError};
 
@@ -7,7 +8,7 @@ pub(super) fn execute(
     store: &Arc<dyn KanbanStore>,
     default_board: Option<&str>,
 ) -> Vec<String> {
-    execute_with_dispatcher(args, store, default_board, None)
+    execute_with_dispatcher(args, store, default_board, None, None)
 }
 
 pub(super) fn execute_with_dispatcher(
@@ -15,6 +16,7 @@ pub(super) fn execute_with_dispatcher(
     store: &Arc<dyn KanbanStore>,
     default_board: Option<&str>,
     dispatcher: Option<&Arc<Mutex<Dispatcher>>>,
+    daemon_active: Option<&Arc<AtomicBool>>,
 ) -> Vec<String> {
     let parts: Vec<&str> = args.split_whitespace().collect();
     let subcmd = parts.first().copied().unwrap_or("list");
@@ -27,7 +29,8 @@ pub(super) fn execute_with_dispatcher(
         "move" | "mv" | "transition" => cmd_move(&parts[1..], store),
         "comment" | "note" => cmd_comment(&parts[1..], store),
         "assign" => cmd_assign(&parts[1..], store),
-        "dispatch" | "run" => cmd_dispatch(store, dispatcher),
+        "dispatch" | "run" => cmd_dispatch(&parts[1..], store, dispatcher),
+        "daemon" => cmd_daemon(daemon_active),
         "help" | "?" => cmd_help(),
         _ => vec![format!(
             "Unknown kanban subcommand: {}. Try /kanban help",
@@ -255,9 +258,34 @@ fn cmd_assign(args: &[&str], store: &Arc<dyn KanbanStore>) -> Vec<String> {
 }
 
 fn cmd_dispatch(
+    args: &[&str],
     store: &Arc<dyn KanbanStore>,
     dispatcher: Option<&Arc<Mutex<Dispatcher>>>,
 ) -> Vec<String> {
+    // If a specific task ID is given, move it to ready first
+    if let Some(id_str) = args.first() {
+        let id_str = id_str.strip_prefix('#').unwrap_or(id_str);
+        if let Ok(id) = id_str.parse::<u64>() {
+            match store.get_task(id) {
+                Ok(task) => {
+                    if task.status == Status::Ready {
+                        // Already ready, just trigger tick below
+                    } else if task.status == Status::Todo {
+                        if let Err(e) = store.transition(id, Status::Ready) {
+                            return vec![format!("Cannot ready task #{}: {}", id, e)];
+                        }
+                    } else {
+                        return vec![format!(
+                            "Task #{} is {} — must be 'todo' or 'ready' to dispatch",
+                            id, task.status
+                        )];
+                    }
+                }
+                Err(_) => return vec![format!("Task #{} not found", id)],
+            }
+        }
+    }
+
     if let Some(dispatcher) = dispatcher {
         let mut dispatcher = match dispatcher.try_lock() {
             Ok(dispatcher) => dispatcher,
@@ -275,18 +303,37 @@ fn cmd_dispatch(
             }
         };
         return match dispatcher.tick(store.as_ref()) {
-            Ok(report) => vec![format!(
-                "Dispatch tick: spawned: {}, completed: {}, timed out: {}, spawn failures: {}, reclaimed: {}",
-                report.spawned,
-                report.completed,
-                report.timed_out,
-                report.spawn_failures,
-                report.reclaimed
-            )],
-            Err(e) => vec![format!("Dispatch failed: {}", e)],
+            Ok(report) => {
+                let mut lines = Vec::new();
+                if report.spawned > 0 {
+                    lines.push(format!("Dispatched {} task(s)", report.spawned));
+                }
+                if report.completed > 0 {
+                    lines.push(format!("{} task(s) completed", report.completed));
+                }
+                if report.timed_out > 0 {
+                    lines.push(format!("{} task(s) timed out", report.timed_out));
+                }
+                if report.spawn_failures > 0 {
+                    lines.push(format!("{} spawn failure(s)", report.spawn_failures));
+                }
+                if report.reclaimed > 0 {
+                    lines.push(format!("{} reclaimed", report.reclaimed));
+                }
+                if lines.is_empty() {
+                    lines.push("No ready tasks to dispatch.".to_string());
+                }
+                let active = dispatcher.active_worker_count();
+                if active > 0 {
+                    lines.push(format!("Active workers: {}", active));
+                }
+                lines
+            }
+            Err(e) => vec![format!("Dispatcher error: {}", e)],
         };
     }
 
+    // Fallback when no dispatcher is available: just list ready tasks
     let filter = TaskFilter {
         board_id: None,
         status: Some(Status::Ready),
@@ -314,6 +361,20 @@ fn cmd_dispatch(
     }
 }
 
+fn cmd_daemon(daemon_active: Option<&Arc<AtomicBool>>) -> Vec<String> {
+    let Some(flag) = daemon_active else {
+        return vec!["Daemon control not available in this context.".to_string()];
+    };
+    let was_active = flag.load(Ordering::Relaxed);
+    let new_active = !was_active;
+    flag.store(new_active, Ordering::Relaxed);
+    if new_active {
+        vec!["Kanban daemon started (auto-dispatch every 30s)".to_string()]
+    } else {
+        vec!["Kanban daemon stopped".to_string()]
+    }
+}
+
 fn cmd_help() -> Vec<String> {
     vec![
         "Kanban commands:".to_string(),
@@ -325,7 +386,8 @@ fn cmd_help() -> Vec<String> {
         "  /kanban move <id> <status>  - Transition task to a new status".to_string(),
         "  /kanban comment <id> <text> - Add a comment to a task".to_string(),
         "  /kanban assign <id> <user>  - Assign a task to a user".to_string(),
-        "  /kanban dispatch            - Tick dispatcher and show activity".to_string(),
+        "  /kanban dispatch [id]       - Tick dispatcher (or ready+dispatch one task)".to_string(),
+        "  /kanban daemon              - Toggle auto-dispatch daemon (30s interval)".to_string(),
         "  /kanban help                - Show this help".to_string(),
         "".to_string(),
         "Statuses: triage, todo, ready, running, blocked, done, archived".to_string(),

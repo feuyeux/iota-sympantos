@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::kanban::{
@@ -27,8 +28,8 @@ fn test_help() {
         out
     );
     assert!(
-        out.iter().any(|l| l.contains("Tick dispatcher")),
-        "help output should describe dispatch side effects, got: {:?}",
+        out.iter().any(|l| l.contains("dispatch") && l.contains("Tick dispatcher")),
+        "help output should describe dispatch, got: {:?}",
         out
     );
 }
@@ -244,11 +245,11 @@ fn test_dispatch_ticks_dispatcher() {
         ..Default::default()
     })));
 
-    let out = super::execute_with_dispatcher("dispatch", &store, None, Some(&dispatcher));
+    let out = super::execute_with_dispatcher("dispatch", &store, None, Some(&dispatcher), None);
 
     assert!(
-        out.iter().any(|l| l.contains("spawn failures: 1")),
-        "expected dispatcher report, got: {:?}",
+        out.iter().any(|l| l.contains("spawn failure")),
+        "expected dispatcher report with spawn failure, got: {:?}",
         out
     );
     assert_eq!(store.get_task(task_id).unwrap().status, Status::Ready);
@@ -265,7 +266,7 @@ fn test_dispatch_reports_busy_instead_of_blocking_on_dispatcher_lock() {
     })));
     let guard = dispatcher.lock().unwrap();
 
-    let out = super::execute_with_dispatcher("dispatch", &store, None, Some(&dispatcher));
+    let out = super::execute_with_dispatcher("dispatch", &store, None, Some(&dispatcher), None);
 
     drop(guard);
     assert!(
@@ -275,4 +276,105 @@ fn test_dispatch_reports_busy_instead_of_blocking_on_dispatcher_lock() {
         out
     );
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_daemon_toggle() {
+    let store = test_store();
+    let daemon_active = Arc::new(AtomicBool::new(true));
+
+    let out = super::execute_with_dispatcher("daemon", &store, None, None, Some(&daemon_active));
+    assert!(
+        out.iter().any(|l| l.contains("daemon stopped")),
+        "expected daemon stopped message, got: {:?}",
+        out
+    );
+    assert!(!daemon_active.load(std::sync::atomic::Ordering::Relaxed));
+
+    let out = super::execute_with_dispatcher("daemon", &store, None, None, Some(&daemon_active));
+    assert!(
+        out.iter().any(|l| l.contains("daemon started")),
+        "expected daemon started message, got: {:?}",
+        out
+    );
+    assert!(daemon_active.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+#[test]
+fn test_dispatch_with_task_id_readies_todo_task() {
+    let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = concrete.create_board("dev", "Development").unwrap();
+    let task_id = concrete
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Todo task".to_string(),
+            body: None,
+            status: Some(Status::Todo),
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+    let store: Arc<dyn KanbanStore> = Arc::new(concrete);
+    let tmp = std::env::temp_dir().join(format!("iota-kb-cmd-{}", uuid::Uuid::new_v4()));
+    let dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig {
+        max_concurrent: 1,
+        hermes_bin: Path::new("/missing/hermes-for-iota-test").to_path_buf(),
+        shadows_dir: tmp.clone(),
+        ..Default::default()
+    })));
+
+    let out = super::execute_with_dispatcher(
+        &format!("dispatch #{}", task_id),
+        &store,
+        None,
+        Some(&dispatcher),
+        None,
+    );
+
+    // Task should have been transitioned to ready, then dispatch attempted (spawn failure)
+    assert!(
+        out.iter().any(|l| l.contains("spawn failure")),
+        "expected spawn failure (hermes not found), got: {:?}",
+        out
+    );
+    // Task stays ready after failed spawn
+    assert_eq!(store.get_task(task_id).unwrap().status, Status::Ready);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_dispatch_rejects_invalid_status_task() {
+    let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = concrete.create_board("dev", "Development").unwrap();
+    let task_id = concrete
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Done task".to_string(),
+            body: None,
+            status: Some(Status::Done),
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+    let store: Arc<dyn KanbanStore> = Arc::new(concrete);
+
+    let out = super::execute_with_dispatcher(
+        &format!("dispatch {}", task_id),
+        &store,
+        None,
+        None,
+        None,
+    );
+
+    assert!(
+        out.iter().any(|l| l.contains("must be")),
+        "expected rejection message for done task, got: {:?}",
+        out
+    );
 }

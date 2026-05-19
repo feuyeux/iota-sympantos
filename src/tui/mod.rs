@@ -24,6 +24,7 @@ mod slash_command_tests;
 
 use std::io::{IsTerminal, Stdout};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -85,6 +86,8 @@ struct TuiApp {
     // Kanban store
     kanban_store: Arc<dyn KanbanStore>,
     kanban_dispatcher: Arc<Mutex<Dispatcher>>,
+    /// Whether auto-dispatch daemon is active (background task ticks the dispatcher).
+    kanban_daemon_active: Arc<AtomicBool>,
 
     // Conversation and input state
     history: HistoryState,
@@ -175,6 +178,7 @@ impl TuiApp {
             SqliteKanbanStore::open(&kanban_db_path).context("Failed to open kanban store")?,
         );
         let kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig::default())));
+        let kanban_daemon_active = Arc::new(AtomicBool::new(true));
 
         Ok(Self {
             engine,
@@ -182,6 +186,7 @@ impl TuiApp {
             cwd,
             kanban_store,
             kanban_dispatcher,
+            kanban_daemon_active,
             history: HistoryState::new(MAX_HISTORY),
             composer: Composer::new(),
             active_backend,
@@ -322,6 +327,7 @@ impl TuiApp {
                     &self.kanban_store,
                     None,
                     Some(&self.kanban_dispatcher),
+                    Some(&self.kanban_daemon_active),
                 );
                 for line in lines {
                     self.record_entry(ConversationEntry::SystemNotice { text: line });
