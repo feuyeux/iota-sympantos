@@ -8,7 +8,7 @@ use std::time::Duration;
 use super::shadow::{ShadowMaterializer, ShadowWatcher};
 use super::store::KanbanStore;
 use super::types::*;
-use super::worker::{WorkerConfig, WorkerEnv, WorkerHandle, build_worker_context};
+use super::worker::{WorkerConfig, WorkerEnv, WorkerHandle};
 
 // ---------------------------------------------------------------------------
 // DispatcherConfig
@@ -27,6 +27,10 @@ pub struct DispatcherConfig {
     pub hermes_bin: PathBuf,
     /// Directory where shadow databases are materialised.
     pub shadows_dir: PathBuf,
+    /// Extra env vars forwarded to every hermes worker (e.g. inference-provider config).
+    pub extra_env: std::collections::BTreeMap<String, String>,
+    /// When set, only spawn workers for this task ID (used by `iota kanban dispatch <id>`).
+    pub task_id_filter: Option<TaskId>,
 }
 
 impl Default for DispatcherConfig {
@@ -40,6 +44,8 @@ impl Default for DispatcherConfig {
             shadows_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".i6/kanban/shadows"),
+            extra_env: std::collections::BTreeMap::new(),
+            task_id_filter: None,
         }
     }
 }
@@ -73,6 +79,7 @@ impl Dispatcher {
         let materializer = ShadowMaterializer::new(config.shadows_dir.clone());
         let worker_config = WorkerConfig {
             hermes_bin: config.hermes_bin.clone(),
+            extra_env: config.extra_env.clone(),
         };
         Self {
             config,
@@ -115,28 +122,48 @@ impl Dispatcher {
             .max_concurrent
             .saturating_sub(self.workers.len());
         if available > 0 {
-            let ready_tasks = store.list_tasks(TaskFilter {
-                status: Some(Status::Ready),
-                limit: Some(available),
-                ..Default::default()
-            })?;
+            if let Some(filter_id) = self.config.task_id_filter {
+                // Single-task mode: query the target task directly to avoid
+                // limit() cutting it off when lower-id tasks are also ready.
+                if let Ok(task) = store.get_task(filter_id) {
+                    if task.status == Status::Ready && !self.workers.contains_key(&task.id) {
+                        match self.spawn_worker(&task, store) {
+                            Ok(()) => report.spawned += 1,
+                            Err(e) => {
+                                tracing::warn!(
+                                    task_id = task.id,
+                                    error = %e,
+                                    "failed to spawn worker"
+                                );
+                                report.spawn_failures += 1;
+                            }
+                        }
+                    }
+                }
+            } else {
+                let ready_tasks = store.list_tasks(TaskFilter {
+                    status: Some(Status::Ready),
+                    limit: Some(available),
+                    ..Default::default()
+                })?;
 
-            for task in ready_tasks {
-                if self.workers.len() >= self.config.max_concurrent {
-                    break;
-                }
-                if self.workers.contains_key(&task.id) {
-                    continue;
-                }
-                match self.spawn_worker(&task, store) {
-                    Ok(()) => report.spawned += 1,
-                    Err(e) => {
-                        tracing::warn!(
-                            task_id = task.id,
-                            error = %e,
-                            "failed to spawn worker"
-                        );
-                        report.spawn_failures += 1;
+                for task in ready_tasks {
+                    if self.workers.len() >= self.config.max_concurrent {
+                        break;
+                    }
+                    if self.workers.contains_key(&task.id) {
+                        continue;
+                    }
+                    match self.spawn_worker(&task, store) {
+                        Ok(()) => report.spawned += 1,
+                        Err(e) => {
+                            tracing::warn!(
+                                task_id = task.id,
+                                error = %e,
+                                "failed to spawn worker"
+                            );
+                            report.spawn_failures += 1;
+                        }
                     }
                 }
             }
@@ -372,27 +399,19 @@ impl Dispatcher {
                     anyhow::anyhow!("board {} not found for task {}", task.board_id, task.id)
                 })?;
 
-            // Materialise the shadow DB
+            // Materialise the shadow DB (includes a task_runs entry)
             let shadow_db = self.materializer.materialize(task, &board, store)?;
 
-            // Build the markdown context
-            let comments = store.list_comments(task.id)?;
-            let prior_runs: Vec<Run> = store
-                .get_runs(task.id)?
-                .into_iter()
-                .filter(|r| r.id != run_id)
-                .collect();
-            let context = build_worker_context(task, &comments, &prior_runs);
-
-            // Spawn the worker process
+            // Spawn the worker process (hermes reads context via kanban_show)
             let env = WorkerEnv {
                 task_id: task.id,
                 run_id: run_id.clone(),
+                shadow_run_id: shadow_db.run_id,
                 shadow_path: shadow_db.path.clone(),
                 board_slug: board.slug,
                 profile,
             };
-            let handle = WorkerHandle::spawn(&self.worker_config, env, &context)?;
+            let handle = WorkerHandle::spawn(&self.worker_config, env)?;
 
             // Create a watcher for the shadow DB
             let watcher = ShadowWatcher::new(shadow_db.path, task.id);
@@ -645,28 +664,28 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE task_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id INTEGER NOT NULL,
-                event_type TEXT NOT NULL,
-                payload TEXT NOT NULL DEFAULT '{}',
+                task_id TEXT NOT NULL,
+                run_id INTEGER,
+                kind TEXT NOT NULL,
+                payload TEXT,
                 created_at INTEGER NOT NULL
              );
              CREATE TABLE tasks (
-                id INTEGER PRIMARY KEY,
+                id TEXT PRIMARY KEY,
                 board_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 status TEXT NOT NULL,
                 tags TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                claim_ttl_secs INTEGER NOT NULL
+                updated_at INTEGER NOT NULL
              );",
         )
         .unwrap();
         conn.execute(
             "INSERT INTO tasks (id, board_id, title, status, tags,
-             created_at, updated_at, claim_ttl_secs)
-             VALUES (?1, ?2, 'test', 'done', '[]', 1, 1, 900)",
-            rusqlite::params![task_id as i64, board_id as i64],
+             created_at, updated_at)
+             VALUES (?1, ?2, 'test', 'done', '[]', 1, 1)",
+            rusqlite::params![task_id.to_string(), board_id as i64],
         )
         .unwrap();
         drop(conn);

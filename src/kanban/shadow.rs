@@ -6,7 +6,7 @@ use super::store::KanbanStore;
 use super::types::*;
 
 // ---------------------------------------------------------------------------
-// Shadow schema (hermes-compatible table names)
+// Shadow schema (hermes-compatible — matches hermes_cli/kanban_db.py)
 // ---------------------------------------------------------------------------
 
 const SHADOW_SCHEMA: &str = "
@@ -17,40 +17,71 @@ CREATE TABLE IF NOT EXISTS boards (
     created_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tasks (
-    id              INTEGER PRIMARY KEY,
-    board_id        INTEGER NOT NULL,
-    title           TEXT    NOT NULL,
-    body            TEXT,
-    status          TEXT    NOT NULL DEFAULT 'triage',
-    assignee        TEXT,
-    priority        INTEGER NOT NULL DEFAULT 0,
-    tags            TEXT    NOT NULL DEFAULT '[]',
-    workspace_kind  TEXT,
-    workspace_path  TEXT,
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL,
-    claimed_at      INTEGER,
-    claim_ttl_secs  INTEGER NOT NULL DEFAULT 900
+    id                   TEXT PRIMARY KEY,
+    board_id             INTEGER NOT NULL,
+    title                TEXT    NOT NULL,
+    body                 TEXT,
+    status               TEXT    NOT NULL DEFAULT 'triage',
+    assignee             TEXT,
+    priority             INTEGER NOT NULL DEFAULT 0,
+    tags                 TEXT    NOT NULL DEFAULT '[]',
+    workspace_kind       TEXT,
+    workspace_path       TEXT,
+    created_at           INTEGER NOT NULL,
+    updated_at           INTEGER NOT NULL,
+    started_at           INTEGER,
+    completed_at         INTEGER,
+    claimed_at           INTEGER,
+    claim_lock           TEXT,
+    claim_expires        INTEGER,
+    worker_pid           INTEGER,
+    current_run_id       INTEGER,
+    result               TEXT,
+    tenant               TEXT,
+    created_by           TEXT,
+    branch_name          TEXT,
+    max_runtime_seconds  INTEGER,
+    model_override       TEXT,
+    skills               TEXT,
+    session_id           TEXT
 );
 CREATE TABLE IF NOT EXISTS task_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id     INTEGER NOT NULL,
-    event_type  TEXT    NOT NULL,
-    payload     TEXT    NOT NULL DEFAULT '{}',
+    task_id     TEXT    NOT NULL,
+    run_id      INTEGER,
+    kind        TEXT    NOT NULL,
+    payload     TEXT,
     created_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_comments (
-    id          INTEGER PRIMARY KEY,
-    task_id     INTEGER NOT NULL,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT    NOT NULL,
     author      TEXT    NOT NULL,
     body        TEXT    NOT NULL,
     created_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS task_links (
-    from_id INTEGER NOT NULL,
-    to_id   INTEGER NOT NULL,
-    kind    TEXT    NOT NULL,
-    PRIMARY KEY (from_id, to_id, kind)
+    parent_id  TEXT NOT NULL,
+    child_id   TEXT NOT NULL,
+    PRIMARY KEY (parent_id, child_id)
+);
+CREATE TABLE IF NOT EXISTS task_runs (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id             TEXT NOT NULL,
+    profile             TEXT,
+    step_key            TEXT,
+    status              TEXT NOT NULL,
+    claim_lock          TEXT,
+    claim_expires       INTEGER,
+    worker_pid          INTEGER,
+    max_runtime_seconds INTEGER,
+    last_heartbeat_at   INTEGER,
+    started_at          INTEGER NOT NULL,
+    ended_at            INTEGER,
+    outcome             TEXT,
+    summary             TEXT,
+    metadata            TEXT,
+    error               TEXT
 );
 ";
 
@@ -62,6 +93,9 @@ pub struct ShadowDb {
     pub path: PathBuf,
     #[allow(dead_code)]
     pub task_id: TaskId,
+    /// The auto-increment run id in the shadow's `task_runs` table.
+    /// Hermes expects this as an integer in `HERMES_KANBAN_RUN_ID`.
+    pub run_id: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +112,12 @@ impl ShadowMaterializer {
     }
 
     /// Creates a shadow DB at `shadows_dir/<task_id>/kanban.db` populated
-    /// with the board, the task, its linked tasks, and its comments.
+    /// with the board, the task, its linked tasks, its comments, and a
+    /// running `task_runs` entry so hermes's kanban tools can find the
+    /// active run via `HERMES_KANBAN_RUN_ID`.
+    ///
+    /// Returns `ShadowDb` whose `run_id` is the auto-increment PK of the
+    /// run row (hermes expects an integer run id).
     pub fn materialize(
         &self,
         task: &Task,
@@ -107,10 +146,11 @@ impl ShadowMaterializer {
             params![board.id as i64, &board.slug, &board.name, board.created_at],
         )?;
 
-        // Insert main task
-        insert_task_into(&conn, task)?;
+        // Insert main task (with status=running, matching hermes's claim semantics)
+        let task_id_str = task.id.to_string();
+        insert_task_into(&conn, task, Some("running"))?;
 
-        // Insert linked tasks and the links themselves
+        // Insert linked tasks and the links (hermes schema: parent_id/child_id)
         let links = store.get_links(task.id)?;
         for link in &links {
             let other_id = if link.from_id == task.id {
@@ -119,13 +159,22 @@ impl ShadowMaterializer {
                 link.from_id
             };
             if let Ok(other_task) = store.get_task(other_id) {
-                insert_task_into(&conn, &other_task)?;
+                insert_task_into(&conn, &other_task, None)?;
             }
-            conn.execute(
-                "INSERT OR IGNORE INTO task_links (from_id, to_id, kind)
-                 VALUES (?1, ?2, ?3)",
-                params![link.from_id as i64, link.to_id as i64, link.kind.as_str()],
-            )?;
+            // In hermes schema: parent_id is the dependency (must finish first)
+            // and child_id is the dependent task.
+            let link_pair = match link.kind {
+                LinkKind::Blocks => Some((link.from_id.to_string(), link.to_id.to_string())),
+                LinkKind::Parent => Some((link.from_id.to_string(), link.to_id.to_string())),
+                LinkKind::Related => None, // hermes has no "related" link type
+            };
+            if let Some((parent, child)) = link_pair {
+                conn.execute(
+                    "INSERT OR IGNORE INTO task_links (parent_id, child_id)
+                     VALUES (?1, ?2)",
+                    params![parent, child],
+                )?;
+            }
         }
 
         // Insert comments for the main task
@@ -136,7 +185,7 @@ impl ShadowMaterializer {
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     comment.id as i64,
-                    comment.task_id as i64,
+                    &task_id_str,
                     &comment.author,
                     &comment.body,
                     comment.created_at,
@@ -144,9 +193,28 @@ impl ShadowMaterializer {
             )?;
         }
 
+        // Create a task_runs entry (hermes expects this for kanban_complete)
+        let now = crate::utils::now_ts();
+        let profile = task.assignee.as_deref().unwrap_or("default");
+        let claim_lock = format!("iota:{}", std::process::id());
+        conn.execute(
+            "INSERT INTO task_runs (task_id, profile, status, claim_lock, started_at)
+             VALUES (?1, ?2, 'running', ?3, ?4)",
+            params![&task_id_str, profile, &claim_lock, now],
+        )?;
+        let run_id = conn.last_insert_rowid();
+
+        // Point the task at the active run + set claim
+        conn.execute(
+            "UPDATE tasks SET current_run_id = ?1, claim_lock = ?2, status = 'running'
+             WHERE id = ?3",
+            params![run_id, &claim_lock, &task_id_str],
+        )?;
+
         Ok(ShadowDb {
             path: db_path,
             task_id: task.id,
+            run_id,
         })
     }
 
@@ -161,24 +229,25 @@ impl ShadowMaterializer {
     }
 }
 
-fn insert_task_into(conn: &Connection, task: &Task) -> Result<()> {
+fn insert_task_into(conn: &Connection, task: &Task, override_status: Option<&str>) -> Result<()> {
     let tags_json = serde_json::to_string(&task.tags)?;
     let workspace_path = task
         .workspace_path
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned());
+    let task_id_str = task.id.to_string();
+    let status = override_status.unwrap_or(task.status.as_str());
     conn.execute(
         "INSERT OR REPLACE INTO tasks
          (id, board_id, title, body, status, assignee, priority, tags,
-          workspace_kind, workspace_path, created_at, updated_at,
-          claimed_at, claim_ttl_secs)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+          workspace_kind, workspace_path, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
-            task.id as i64,
+            &task_id_str,
             task.board_id as i64,
             &task.title,
             &task.body,
-            task.status.as_str(),
+            status,
             &task.assignee,
             task.priority as i64,
             tags_json,
@@ -186,8 +255,6 @@ fn insert_task_into(conn: &Connection, task: &Task) -> Result<()> {
             workspace_path,
             task.created_at,
             task.updated_at,
-            task.claimed_at,
-            task.claim_ttl_secs,
         ],
     )?;
     Ok(())
@@ -225,16 +292,17 @@ impl ShadowWatcher {
         let conn = Connection::open(&self.db_path)
             .with_context(|| format!("opening shadow db {}", self.db_path.display()))?;
 
+        let task_id_str = self.task_id.to_string();
         let mut stmt = conn.prepare(
-            "SELECT id, task_id, event_type, payload
+            "SELECT id, task_id, kind, payload
              FROM task_events WHERE id > ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map(params![self.last_event_id], |row| {
             Ok(ShadowEvent {
                 id: row.get(0)?,
-                task_id: row.get::<_, i64>(1)? as u64,
+                task_id: self.task_id,
                 event_type: row.get(2)?,
-                payload: row.get(3)?,
+                payload: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             })
         })?;
 
@@ -247,7 +315,7 @@ impl ShadowWatcher {
         let status: Option<String> = conn
             .query_row(
                 "SELECT status FROM tasks WHERE id = ?1",
-                params![self.task_id as i64],
+                params![&task_id_str],
                 |row| row.get(0),
             )
             .ok();
@@ -408,7 +476,7 @@ mod tests {
         let task_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM tasks WHERE id = ?1",
-                params![task_id as i64],
+                params![task_id.to_string()],
                 |r| r.get(0),
             )
             .unwrap();
@@ -417,7 +485,7 @@ mod tests {
         let comment_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM task_comments WHERE task_id = ?1",
-                params![task_id as i64],
+                params![task_id.to_string()],
                 |r| r.get(0),
             )
             .unwrap();
@@ -481,21 +549,21 @@ mod tests {
         let conn = init_shadow_db(&db_path);
         conn.execute(
             "INSERT INTO tasks (id, board_id, title, status, tags,
-             created_at, updated_at, claim_ttl_secs)
-             VALUES (?1, 1, 'test', 'triage', '[]', ?2, ?2, 900)",
-            params![task_id as i64, now],
+             created_at, updated_at)
+             VALUES (?1, 1, 'test', 'triage', '[]', ?2, ?2)",
+            params![task_id.to_string(), now],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_events (task_id, event_type, payload, created_at)
+            "INSERT INTO task_events (task_id, kind, payload, created_at)
              VALUES (?1, 'heartbeat', '{}', ?2)",
-            params![task_id as i64, now],
+            params![task_id.to_string(), now],
         )
         .unwrap();
         conn.execute(
-            r#"INSERT INTO task_events (task_id, event_type, payload, created_at)
+            r#"INSERT INTO task_events (task_id, kind, payload, created_at)
              VALUES (?1, 'comment', '{"author":"bot","body":"done"}', ?2)"#,
-            params![task_id as i64, now],
+            params![task_id.to_string(), now],
         )
         .unwrap();
         drop(conn);
@@ -523,9 +591,9 @@ mod tests {
         let conn = init_shadow_db(&db_path);
         conn.execute(
             "INSERT INTO tasks (id, board_id, title, status, tags,
-             created_at, updated_at, claim_ttl_secs)
-             VALUES (?1, 1, 'test', 'done', '[]', ?2, ?2, 900)",
-            params![task_id as i64, now],
+             created_at, updated_at)
+             VALUES (?1, 1, 'test', 'done', '[]', ?2, ?2)",
+            params![task_id.to_string(), now],
         )
         .unwrap();
         drop(conn);
@@ -584,15 +652,15 @@ mod tests {
         let conn = init_shadow_db(&db_path);
         conn.execute(
             "INSERT INTO tasks (id, board_id, title, status, tags,
-             created_at, updated_at, claim_ttl_secs)
-             VALUES (?1, 1, 'test', 'running', '[]', ?2, ?2, 900)",
-            params![task_id as i64, now],
+             created_at, updated_at)
+             VALUES (?1, 1, 'test', 'running', '[]', ?2, ?2)",
+            params![task_id.to_string(), now],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_events (task_id, event_type, payload, created_at)
+            "INSERT INTO task_events (task_id, kind, payload, created_at)
              VALUES (?1, 'comment', '{bad-json', ?2)",
-            params![task_id as i64, now],
+            params![task_id.to_string(), now],
         )
         .unwrap();
         drop(conn);

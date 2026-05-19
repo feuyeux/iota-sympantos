@@ -130,3 +130,7 @@ fn read_prompt_from_stdin() -> Result<String> {
         .context("Failed to read prompt from stdin")?;
     Ok(input)
 }
+
+#[cfg(test)]
+#[path = "parser_tests.rs"]
+mod parser_tests;

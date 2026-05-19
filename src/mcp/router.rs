@@ -97,4 +97,4 @@ fn is_fun_tool(name: &str) -> bool {
 
 #[cfg(test)]
 #[path = "router_tests.rs"]
-mod tests;
+mod router_tests;

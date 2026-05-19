@@ -80,4 +80,4 @@ fn render_mcp_server(server: &AcpMcpServer, env_shape: AcpMcpEnvShape) -> Value 
 
 #[cfg(test)]
 #[path = "session_tests.rs"]
-mod tests;
+mod session_tests;

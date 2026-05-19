@@ -238,6 +238,82 @@ iota __daemon           # 内部 daemon 入口
 
 ---
 
+## 单元测试规范
+
+所有 `#[cfg(test)] mod tests {}` 内联测试块必须提取为独立文件，使用 `#[path]` 属性引用：
+
+```rust
+// 源文件 (module.rs)
+#[cfg(test)]
+#[path = "module_tests.rs"]
+mod tests;
+```
+
+```rust
+// 独立测试文件 (module_tests.rs)
+use super::*;
+
+#[test]
+fn my_test() { ... }
+```
+
+**规则：**
+- 测试文件命名：`<module_name>_tests.rs`
+- 测试文件放在同目录下
+- 使用 `use super::*` 导入父模块内容
+- 测试函数直接放在文件顶层，不嵌套 `mod inner {}`
+- `async fn` 测试使用 `#[tokio::test]` 宏，无需额外配置（自动继承 crate 的 edition）
+- 辅助函数（如 `process_exists`）直接放在文件内
+
+**已有规范化的测试文件：**
+- `tui/input_tests.rs` — 7 个测试
+- `tui/events_tests.rs` — 2 个测试
+- `tui/loop_tests.rs` — 3 个测试
+- `tui/kanban_view_tests.rs` — 4 个测试
+- `context/context_tests.rs`
+- `utils/tests.rs`
+- `runtime_event/tests.rs`
+- `kanban/worker_tests.rs` — 4 个测试
+
+---
+
+## 模块上下文规范（SKILL.md）
+
+每个 `src/<module>/` 目录可包含 `SKILL.md`，作用是让 AI coding 工具快速掌握该模块的代码结构、设计决策和关键类型，而无需阅读全部实现。
+
+**文件格式：**
+```yaml
+---
+name: <skill-name>
+description: Use when working on <module> ...
+triggers:
+  - src/<module>
+  - <keyword1>
+  - <keyword2>
+---
+
+# <module> — 一句话描述职责
+
+## Responsibilities
+- 职责1
+- 职责2
+
+## Sub-modules
+| Module | Purpose |
+| :------| :------|
+| ... | ... |
+
+## Key Types
+- `TypeName` — 描述
+```
+
+**规则：**
+- `triggers` 字段匹配 AI coding 工具的自动激活条件
+- 内容面向 AI 理解，简洁、结构化、避免实现细节
+- 人类可读文档放在 `docs/` 目录，不混在 `SKILL.md` 中
+
+---
+
 ## 安全要求
 
 - 绝不提交 API 密钥、Token、密码或任何敏感信息

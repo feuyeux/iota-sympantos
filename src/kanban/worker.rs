@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+#[cfg(test)]
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -12,6 +14,9 @@ use super::types::*;
 
 pub struct WorkerConfig {
     pub hermes_bin: PathBuf,
+    /// Extra environment variables forwarded to the hermes worker process.
+    /// Use this to inject inference-provider config (HERMES_INFERENCE_PROVIDER, etc.).
+    pub extra_env: BTreeMap<String, String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -20,7 +25,10 @@ pub struct WorkerConfig {
 
 pub struct WorkerEnv {
     pub task_id: TaskId,
+    /// The iota-side run ID (UUID string) for the main store.
     pub run_id: String,
+    /// The hermes-compatible integer run ID from the shadow's `task_runs` table.
+    pub shadow_run_id: i64,
     pub shadow_path: PathBuf,
     pub board_slug: String,
     pub profile: String,
@@ -37,26 +45,46 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
-    /// Spawn `hermes -p <profile>` with the required environment variables.
-    /// The context string is written to stdin.
-    pub fn spawn(config: &WorkerConfig, env: WorkerEnv, context: &str) -> Result<Self> {
+    /// Spawn `hermes -p <profile> --yolo -z "work kanban task <id>"` with
+    /// the full kanban toolset. Uses oneshot mode (`-z`) which bypasses
+    /// prompt_toolkit / terminal output — safe for piped stdout.
+    /// Hermes reads the task via `kanban_show` (which connects to the shadow
+    /// DB via `HERMES_KANBAN_DB`), executes the work, and calls
+    /// `kanban_complete(summary=..., metadata=...)` to transition the task
+    /// to done with structured handoff data.
+    pub fn spawn(config: &WorkerConfig, env: WorkerEnv) -> Result<Self> {
+        // Route stdout/stderr to log files alongside the shadow directory
+        // (not inside it, so cleanup won't delete them before we read).
+        let shadow_dir = env
+            .shadow_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let logs_dir = shadow_dir.parent().unwrap_or(shadow_dir);
+        let stderr_path = logs_dir.join(format!("{}.stderr.log", env.task_id));
+        let stdout_path = logs_dir.join(format!("{}.stdout.log", env.task_id));
+        let stderr_file = std::fs::File::create(&stderr_path)
+            .with_context(|| format!("creating stderr log {}", stderr_path.display()))?;
+        let stdout_file = std::fs::File::create(&stdout_path)
+            .with_context(|| format!("creating stdout log {}", stdout_path.display()))?;
+
+        let prompt = format!("work kanban task {}", env.task_id);
+
         let mut command = Command::new(&config.hermes_bin);
         command
-            .args(["-p", &env.profile])
+            .args(["-p", &env.profile, "--yolo", "-z", &prompt])
             .env("HERMES_KANBAN_TASK", env.task_id.to_string())
-            .env("HERMES_KANBAN_RUN_ID", &env.run_id)
+            .env("HERMES_KANBAN_RUN_ID", env.shadow_run_id.to_string())
             .env(
                 "HERMES_KANBAN_DB",
                 env.shadow_path.to_string_lossy().as_ref(),
             )
             .env("HERMES_KANBAN_BOARD", &env.board_slug)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .envs(&config.extra_env)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout_file))
+            .stderr(Stdio::from(stderr_file));
         configure_process_tree_root(&mut command);
-        let mut child = command.spawn().context("spawning hermes process")?;
-
-        write_context_or_kill(&mut child, context, write_child_stdin)?;
+        let child = command.spawn().context("spawning hermes process")?;
 
         Ok(Self {
             run_id: env.run_id,
@@ -134,6 +162,7 @@ fn kill_process_tree(child: &mut Child) -> Result<()> {
     }
 }
 
+#[cfg(test)]
 fn write_context_or_kill(
     child: &mut Child,
     context: &str,
@@ -147,6 +176,7 @@ fn write_context_or_kill(
     Ok(())
 }
 
+#[cfg(test)]
 fn write_child_stdin(child: &mut Child, context: &str) -> std::io::Result<()> {
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(context.as_bytes())?;
@@ -155,11 +185,12 @@ fn write_child_stdin(child: &mut Child, context: &str) -> std::io::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// build_worker_context
+// build_worker_context (test-only, retained for unit tests)
 // ---------------------------------------------------------------------------
 
 /// Build a markdown context string for hermes, including the task details,
 /// any prior runs, and any comments.
+#[cfg(test)]
 pub fn build_worker_context(task: &Task, comments: &[Comment], prior_runs: &[Run]) -> String {
     let body = task.body.as_deref().unwrap_or("");
     let mut out = format!("# Task: {}\n\n{}", task.title, body);
@@ -185,230 +216,6 @@ pub fn build_worker_context(task: &Task, comments: &[Comment], prior_runs: &[Run
     out
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_task() -> Task {
-        Task {
-            id: 1,
-            board_id: 1,
-            title: "Fix the bug".to_string(),
-            body: Some("There is a nasty bug to fix.".to_string()),
-            status: Status::Ready,
-            assignee: None,
-            priority: 0,
-            tags: vec![],
-            workspace_kind: None,
-            workspace_path: None,
-            created_at: 0,
-            updated_at: 0,
-            claimed_at: None,
-            claim_ttl_secs: 900,
-        }
-    }
-
-    #[test]
-    fn build_context_includes_task_and_comments() {
-        let task = make_task();
-        let comments = vec![Comment {
-            id: 1,
-            task_id: 1,
-            author: "alice".to_string(),
-            body: "Please fix urgently".to_string(),
-            created_at: 0,
-        }];
-        let ctx = build_worker_context(&task, &comments, &[]);
-        assert!(ctx.contains("Fix the bug"), "should include title");
-        assert!(
-            ctx.contains("There is a nasty bug to fix."),
-            "should include body"
-        );
-        assert!(ctx.contains("alice"), "should include comment author");
-        assert!(
-            ctx.contains("Please fix urgently"),
-            "should include comment body"
-        );
-    }
-
-    #[test]
-    fn build_context_includes_prior_runs() {
-        let task = make_task();
-        let runs = vec![Run {
-            id: "run-001".to_string(),
-            task_id: 1,
-            profile: "default".to_string(),
-            status: RunStatus::Failed,
-            started_at: 0,
-            finished_at: None,
-            last_heartbeat: 0,
-            exit_code: Some(1),
-            output_summary: Some("Hit an error".to_string()),
-        }];
-        let ctx = build_worker_context(&task, &[], &runs);
-        assert!(
-            ctx.contains("Prior attempts"),
-            "should include prior attempts section"
-        );
-        assert!(ctx.contains("run-001"), "should include run id");
-        assert!(ctx.contains("default"), "should include profile");
-        assert!(ctx.contains("failed"), "should include status");
-        assert!(ctx.contains("Hit an error"), "should include summary");
-    }
-
-    #[test]
-    fn kill_stops_child_process_tree() {
-        let tmp = std::env::temp_dir().join(format!("iota-worker-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let child_pid_path = tmp.join("child.pid");
-
-        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
-            (
-                "powershell",
-                vec![
-                    "-NoProfile".into(),
-                    "-WindowStyle".into(),
-                    "Hidden".into(),
-                    "-Command".into(),
-                    format!(
-                        "$p = Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
-                        child_pid_path.display()
-                    ),
-                ],
-            )
-        } else {
-            (
-                "sh",
-                vec![
-                    "-c".into(),
-                    format!("sleep 30 & echo $! > '{}'; wait", child_pid_path.display()),
-                ],
-            )
-        };
-
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        configure_process_tree_root(&mut command);
-        let child = command.spawn().unwrap();
-        let mut handle = WorkerHandle {
-            run_id: "run".to_string(),
-            child,
-            started_at: Instant::now(),
-        };
-
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
-        while !child_pid_path.exists() && Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(child_pid_path.exists(), "child pid file was not written");
-        let child_pid = std::fs::read_to_string(&child_pid_path)
-            .unwrap()
-            .trim()
-            .to_string();
-
-        handle.kill().unwrap();
-        let _ = handle.child.wait();
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        assert!(
-            !process_exists(&child_pid),
-            "worker kill should terminate descendant process {}",
-            child_pid
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn spawn_write_failure_kills_process_tree() {
-        let tmp = std::env::temp_dir().join(format!("iota-worker-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let child_pid_path = tmp.join("child.pid");
-
-        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
-            (
-                "powershell",
-                vec![
-                    "-NoProfile".into(),
-                    "-WindowStyle".into(),
-                    "Hidden".into(),
-                    "-Command".into(),
-                    format!(
-                        "$p = Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-WindowStyle','Hidden','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
-                        child_pid_path.display()
-                    ),
-                ],
-            )
-        } else {
-            (
-                "sh",
-                vec![
-                    "-c".into(),
-                    format!("sleep 30 & echo $! > '{}'; wait", child_pid_path.display()),
-                ],
-            )
-        };
-
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        configure_process_tree_root(&mut command);
-        let mut child = command.spawn().unwrap();
-
-        let deadline = Instant::now() + std::time::Duration::from_secs(5);
-        while !child_pid_path.exists() && Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(child_pid_path.exists(), "child pid file was not written");
-        let child_pid = std::fs::read_to_string(&child_pid_path)
-            .unwrap()
-            .trim()
-            .to_string();
-
-        let result = write_context_or_kill(&mut child, "x", |_child, _context| {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "test write failure",
-            ))
-        });
-
-        assert!(result.is_err());
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(
-            !process_exists(&child_pid),
-            "write failure cleanup should terminate descendant process {}",
-            child_pid
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    fn process_exists(pid: &str) -> bool {
-        if cfg!(windows) {
-            std::process::Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-Command",
-                    &format!("if (Get-Process -Id {} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}", pid),
-                ])
-                .status()
-                .map(|status| status.success())
-                .unwrap_or(false)
-        } else {
-            std::process::Command::new("kill")
-                .args(["-0", pid])
-                .status()
-                .map(|status| status.success())
-                .unwrap_or(false)
-        }
-    }
-}
+#[path = "worker_tests.rs"]
+mod worker_tests;

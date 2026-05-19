@@ -170,22 +170,22 @@ struct ShadowTaskRow {
     assignee: Option<String>,
 }
 
-fn read_shadow_task_ids(db_path: &Path) -> Result<Vec<i64>> {
+fn read_shadow_task_ids(db_path: &Path) -> Result<Vec<String>> {
     let conn = rusqlite::Connection::open(db_path)?;
     let mut stmt = conn.prepare("SELECT id FROM tasks")?;
     let ids = stmt
-        .query_map([], |row| row.get::<_, i64>(0))?
+        .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ids)
 }
 
-fn read_new_shadow_tasks(db_path: &Path, existing_ids: &[i64]) -> Result<Vec<ShadowTaskRow>> {
-    let existing_ids: HashSet<i64> = existing_ids.iter().copied().collect();
+fn read_new_shadow_tasks(db_path: &Path, existing_ids: &[String]) -> Result<Vec<ShadowTaskRow>> {
+    let existing_ids: HashSet<&str> = existing_ids.iter().map(|s| s.as_str()).collect();
     let conn = rusqlite::Connection::open(db_path)?;
     let mut stmt = conn.prepare("SELECT id, title, body, assignee FROM tasks ORDER BY id")?;
     let rows = stmt.query_map([], |row| {
         Ok((
-            row.get::<_, i64>(0)?,
+            row.get::<_, String>(0)?,
             ShadowTaskRow {
                 title: row.get(1)?,
                 body: row.get(2)?,
@@ -197,7 +197,7 @@ fn read_new_shadow_tasks(db_path: &Path, existing_ids: &[i64]) -> Result<Vec<Sha
     let mut tasks = Vec::new();
     for row in rows {
         let (id, task) = row?;
-        if !existing_ids.contains(&id) {
+        if !existing_ids.contains(id.as_str()) {
             tasks.push(task);
         }
     }
@@ -409,7 +409,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute_batch(
             "CREATE TABLE tasks (
-                id INTEGER PRIMARY KEY,
+                id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 body TEXT,
                 assignee TEXT
@@ -417,23 +417,23 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO tasks (id, title, body, assignee) VALUES (1, 'parent', NULL, NULL)",
+            "INSERT INTO tasks (id, title, body, assignee) VALUES ('1', 'parent', NULL, NULL)",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO tasks (id, title, body, assignee) VALUES (2, 'linked', NULL, NULL)",
+            "INSERT INTO tasks (id, title, body, assignee) VALUES ('2', 'linked', NULL, NULL)",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO tasks (id, title, body, assignee) VALUES (3, 'new child', 'body', 'alice')",
+            "INSERT INTO tasks (id, title, body, assignee) VALUES ('3', 'new child', 'body', 'alice')",
             [],
         )
         .unwrap();
         drop(conn);
 
-        let tasks = read_new_shadow_tasks(&db_path, &[1, 2]).unwrap();
+        let tasks = read_new_shadow_tasks(&db_path, &["1".to_string(), "2".to_string()]).unwrap();
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "new child");

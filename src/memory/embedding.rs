@@ -206,4 +206,4 @@ pub fn from_blob(bytes: &[u8]) -> Vec<f32> {
 
 #[cfg(test)]
 #[path = "embedding_tests.rs"]
-mod tests;
+mod embedding_tests;

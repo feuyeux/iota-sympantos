@@ -828,4 +828,5 @@ fn tool_update_ok(update: &Value, result: &Value) -> bool {
 }
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

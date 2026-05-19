@@ -95,4 +95,4 @@ pub fn format_acp_error(error: &AcpWireError) -> String {
 
 #[cfg(test)]
 #[path = "wire_tests.rs"]
-mod tests;
+mod wire_tests;

@@ -29,4 +29,5 @@ use wire::AcpWireMessage;
 pub const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 
 #[cfg(test)]
-mod tests;
+#[path = "acp_tests.rs"]
+mod acp_tests;

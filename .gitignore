@@ -17,3 +17,6 @@ nimia.yaml
 
 # Generated experiment logs
 gefsi/logs/
+$zigOut.pdb
+$zigOut
+logs/

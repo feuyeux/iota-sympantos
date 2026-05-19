@@ -53,4 +53,5 @@ pub fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
+#[path = "tests.rs"]
 mod tests;

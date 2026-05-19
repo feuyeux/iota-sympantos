@@ -299,4 +299,4 @@ fn summarize(value: &str, limit: usize) -> String {
 
 #[cfg(test)]
 #[path = "context_tests.rs"]
-mod tests;
+mod context_tests;

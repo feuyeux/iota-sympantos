@@ -60,3 +60,7 @@ impl fmt::Display for AcpBackend {
         f.write_str(value)
     }
 }
+
+#[cfg(test)]
+#[path = "backend_tests.rs"]
+mod backend_tests;

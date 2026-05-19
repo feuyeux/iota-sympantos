@@ -100,4 +100,4 @@ pub async fn pull_skill(source: &str, name: Option<&str>) -> Result<PathBuf> {
 
 #[cfg(test)]
 #[path = "cache_tests.rs"]
-mod tests;
+mod cache_tests;

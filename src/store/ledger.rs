@@ -193,4 +193,4 @@ impl SessionLedger {
 
 #[cfg(test)]
 #[path = "ledger_tests.rs"]
-mod tests;
+mod ledger_tests;

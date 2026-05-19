@@ -103,3 +103,7 @@ pub(super) fn acp_tool_call_parts(params: Option<&Value>) -> (String, Value) {
         .unwrap_or(Value::Null);
     (name, arguments)
 }
+
+#[cfg(test)]
+#[path = "message_tests.rs"]
+mod message_tests;

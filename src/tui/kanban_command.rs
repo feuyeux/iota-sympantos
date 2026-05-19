@@ -674,4 +674,4 @@ fn cmd_help() -> Vec<String> {
 
 #[cfg(test)]
 #[path = "kanban_command_tests.rs"]
-mod tests;
+mod kanban_command_tests;

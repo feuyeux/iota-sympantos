@@ -522,4 +522,4 @@ pub enum ComposerAction {
 
 #[cfg(test)]
 #[path = "input_tests.rs"]
-mod tests;
+mod input_tests;

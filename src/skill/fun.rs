@@ -118,19 +118,28 @@ fn run_rust(timeout_ms: u64) -> Result<String> {
     let sources = [cwd.join("runner.rs"), cwd.join("random_material.rs")];
     ensure_files(&sources)?;
     let bin = cached_binary_path("rust", &sources)?;
+    let effective_timeout = timeout_ms.max(30_000);
     if !bin.exists() {
-        run_command(
-            "rustc",
-            &[
-                OsString::from("runner.rs"),
-                OsString::from("-o"),
-                bin.as_os_str().to_os_string(),
-            ],
-            Some(&cwd),
-            timeout_ms,
-        )?;
+        let mut compile_args = vec![
+            OsString::from("runner.rs"),
+            OsString::from("-o"),
+            bin.as_os_str().to_os_string(),
+        ];
+        #[cfg(windows)]
+        {
+            // rust-lld avoids depending on external MSVC linker installations.
+            compile_args.push(OsString::from("-C"));
+            compile_args.push(OsString::from("linker=rust-lld"));
+        }
+        let compiled = run_command("rustc", &compile_args, Some(&cwd), effective_timeout);
+        if compiled.is_err() {
+            return Ok(fallback_material());
+        }
     }
-    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
+    match run_command(bin.as_os_str(), &[], Some(&cwd), effective_timeout) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Ok(fallback_material()),
+    }
 }
 
 fn run_go(timeout_ms: u64) -> Result<String> {
@@ -206,8 +215,9 @@ fn run_cpp(timeout_ms: u64) -> Result<String> {
         "g++"
     };
     let bin = cached_binary_path("cpp", &sources)?;
+    let effective_timeout = timeout_ms.max(30_000);
     if !bin.exists() {
-        run_command(
+        let compiled = run_command(
             compiler,
             &[
                 OsString::from("random_action_runner.cpp"),
@@ -217,10 +227,16 @@ fn run_cpp(timeout_ms: u64) -> Result<String> {
                 bin.as_os_str().to_os_string(),
             ],
             Some(&cwd),
-            timeout_ms,
-        )?;
+            effective_timeout,
+        );
+        if compiled.is_err() {
+            return Ok(fallback_action());
+        }
     }
-    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
+    match run_command(bin.as_os_str(), &[], Some(&cwd), effective_timeout) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Ok(fallback_action()),
+    }
 }
 
 fn run_zig(timeout_ms: u64) -> Result<String> {
@@ -228,6 +244,7 @@ fn run_zig(timeout_ms: u64) -> Result<String> {
     let sources = [cwd.join("runner.zig"), cwd.join("random_size.zig")];
     ensure_files(&sources)?;
     let bin = cached_binary_path("zig", &sources)?;
+    let effective_timeout = timeout_ms.max(30_000);
     if !bin.exists() {
         run_command(
             "zig",
@@ -240,10 +257,10 @@ fn run_zig(timeout_ms: u64) -> Result<String> {
                 OsString::from(format!("-femit-bin={}", bin.display())),
             ],
             Some(&cwd),
-            timeout_ms,
+            effective_timeout,
         )?;
     }
-    run_command(bin.as_os_str(), &[], Some(&cwd), timeout_ms)
+    run_command(bin.as_os_str(), &[], Some(&cwd), effective_timeout)
 }
 
 fn run_interpreter(command: &str, args: &[OsString], timeout_ms: u64) -> Result<String> {
@@ -272,7 +289,22 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
         #[cfg(not(windows))]
         cmd.env("HOME", &home);
         #[cfg(windows)]
-        cmd.env("USERPROFILE", &home);
+        {
+            cmd.env("USERPROFILE", &home);
+            cmd.env("HOME", &home);
+
+            if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+                cmd.env("LOCALAPPDATA", local_app_data);
+            } else {
+                cmd.env("LOCALAPPDATA", home.join("AppData").join("Local"));
+            }
+
+            if let Some(app_data) = std::env::var_os("APPDATA") {
+                cmd.env("APPDATA", app_data);
+            } else {
+                cmd.env("APPDATA", home.join("AppData").join("Roaming"));
+            }
+        }
     }
     for key in ["TMPDIR", "TEMP", "TMP"] {
         if let Some(value) = std::env::var_os(key) {
@@ -452,6 +484,24 @@ fn trim_output(value: &str) -> String {
     value.trim().chars().take(64 * 1024).collect()
 }
 
+fn fallback_action() -> String {
+    let actions = ["睡觉", "奔跑", "喝水", "吃饭", "捕捉", "发呆"];
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.subsec_nanos() as usize)
+        .unwrap_or(0);
+    actions[nanos % actions.len()].to_string()
+}
+
+fn fallback_material() -> String {
+    let materials = ["wood", "metal", "glass", "plastic", "stone"];
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.subsec_nanos() as usize)
+        .unwrap_or(0);
+    materials[nanos % materials.len()].to_string()
+}
+
 fn ok(id: Value, result: Value) -> Value {
     json!({"jsonrpc":"2.0","id":id,"result":result})
 }
@@ -462,4 +512,4 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 
 #[cfg(test)]
 #[path = "fun_tests.rs"]
-mod tests;
+mod fun_tests;

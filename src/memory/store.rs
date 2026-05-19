@@ -918,4 +918,4 @@ fn content_hash(content: &str) -> String {
 
 #[cfg(test)]
 #[path = "store_tests.rs"]
-mod tests;
+mod store_tests;

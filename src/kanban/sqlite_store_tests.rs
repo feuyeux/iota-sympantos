@@ -1,6 +1,6 @@
 use super::sqlite_store::SqliteKanbanStore;
-use super::store::KanbanStore;
 use super::types::*;
+use crate::kanban::store::KanbanStore;
 use std::path::Path;
 
 fn open_memory() -> SqliteKanbanStore {

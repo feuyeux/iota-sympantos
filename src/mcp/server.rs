@@ -298,4 +298,4 @@ fn error(id: Value, code: i64, message: &str) -> Value {
 
 #[cfg(test)]
 #[path = "server_tests.rs"]
-mod tests;
+mod server_tests;

@@ -340,4 +340,4 @@ pub fn default_memory_scope_id(scope: &MemoryScope, args: &Value, workspace: &Pa
 
 #[cfg(test)]
 #[path = "tool_dispatch_tests.rs"]
-mod tests;
+mod tool_dispatch_tests;
