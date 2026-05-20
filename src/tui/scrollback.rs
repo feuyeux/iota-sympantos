@@ -92,7 +92,7 @@ fn entry_to_lines(entry: &ConversationEntry) -> Vec<Line<'static>> {
 fn user_lines(text: &str, backend: Option<AcpBackend>) -> Vec<Line<'static>> {
     let label = if let Some(backend) = backend {
         Span::styled(
-            assistant_label(backend).to_string(),
+            format!("{}  ", assistant_label(backend)),
             theme::user_label_style(),
         )
     } else {

@@ -189,7 +189,6 @@ impl SqliteKanbanStore {
         Ok(events.len())
     }
 
-    #[allow(dead_code)]
     fn apply_event(&self, event: &KanbanEvent) -> Result<()> {
         match event.event_type.as_str() {
             EVT_BOARD_CREATED => {
@@ -523,7 +522,6 @@ impl SqliteKanbanStore {
         Ok(out)
     }
 
-    #[allow(dead_code)]
     fn delete_task_impl(&self, id: TaskId) -> Result<()> {
         let conn = self.lock_conn();
         let rows = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id as i64])?;
@@ -573,7 +571,6 @@ impl SqliteKanbanStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn remove_link_impl(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
         let conn = self.lock_conn();
         conn.execute(
@@ -683,7 +680,6 @@ impl SqliteKanbanStore {
 
     // -- Events ----------------------------------------------------------------
 
-    #[allow(dead_code)]
     fn append_event_impl(&self, event_type: &str, payload: &str) -> Result<EventId> {
         let now = now_ts();
         let conn = self.lock_conn();
@@ -694,7 +690,6 @@ impl SqliteKanbanStore {
         Ok(conn.last_insert_rowid() as u64)
     }
 
-    #[allow(dead_code)]
     fn events_since_impl(&self, cursor: EventId) -> Result<Vec<KanbanEvent>> {
         let conn = self.lock_conn();
         let mut stmt = conn.prepare(
@@ -1000,7 +995,6 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
     })
 }
 
-#[allow(dead_code)]
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<KanbanEvent> {
     Ok(KanbanEvent {
         id: row.get::<_, i64>(0)? as u64,

@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
-#[cfg(test)]
-use std::io::Write;
+
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Instant;
@@ -172,14 +171,6 @@ fn write_context_or_kill(
         let _ = kill_process_tree(child);
         let _ = child.wait();
         return Err(err).context("writing context to hermes stdin");
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-fn write_child_stdin(child: &mut Child, context: &str) -> std::io::Result<()> {
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(context.as_bytes())?;
     }
     Ok(())
 }

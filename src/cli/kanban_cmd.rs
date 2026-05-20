@@ -101,9 +101,8 @@ fn execute_kanban_command(
                 .decompose(task_id, store)
                 .with_context(|| format!("failed to decompose task #{task_id}"))?;
             Ok(vec![format!(
-                "Decomposed task #{} into {} child task(s): {}",
+                "Decomposed task #{} into subtask(s): {}",
                 result.parent_id,
-                result.child_ids.len(),
                 result
                     .child_ids
                     .iter()
@@ -354,7 +353,7 @@ fn default_kanban_dir() -> PathBuf {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  iota kanban create-board <slug> <name>\n  iota kanban create-task <board-id> <title>\n  iota kanban move <id> <status>\n  iota kanban dispatch <id> [--timeout <secs>]\n  iota kanban specify <id>\n  iota kanban decompose <id>\n  iota kanban export <path> [cursor]\n  iota kanban import <path>\n  iota kanban serve-sync [addr]\n  iota kanban pull <addr> [cursor]\n  iota kanban push <addr> [cursor]\n\nStatuses: triage -> todo -> ready -> running -> done -> archived (also: blocked)\n\ndispatch: spawns a hermes worker for a ready task, polls until done/blocked."
+    "Usage:\n  iota kanban create-board <slug> <name>\n  iota kanban create-task <board-id> <title>\n  iota kanban move <id> <status>\n  iota kanban delete-task <id>\n  iota kanban remove-link <from> <to> <kind>\n  iota kanban dispatch <id> [--timeout <secs>]\n  iota kanban specify <id>\n  iota kanban decompose <id>\n  iota kanban export <path> [cursor]\n  iota kanban import <path>\n  iota kanban serve-sync [addr]\n  iota kanban pull <addr> [cursor]\n  iota kanban push <addr> [cursor]\n\nStatuses: triage -> todo -> ready -> running -> done -> archived (also: blocked)\n\ndispatch: spawns a hermes worker for a ready task, polls until done/blocked."
 }
 
 #[cfg(test)]

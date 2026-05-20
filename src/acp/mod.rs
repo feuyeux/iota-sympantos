@@ -18,13 +18,6 @@ pub use types::{
 };
 
 pub use message::extract_text;
-#[cfg(test)]
-use message::{
-    acp_tool_call_parts, extract_final_text, is_terminal_result, permission_request_id,
-    text_from_session_update,
-};
-#[cfg(test)]
-use wire::AcpWireMessage;
 
 pub const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 

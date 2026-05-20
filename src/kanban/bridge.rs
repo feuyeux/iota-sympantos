@@ -14,13 +14,11 @@ pub struct AdvancedBridge {
     materializer: ShadowMaterializer,
 }
 
-#[allow(dead_code)]
 pub struct SpecifyResult {
     pub task_id: TaskId,
     pub spec_body: String,
 }
 
-#[allow(dead_code)]
 pub struct DecomposeResult {
     pub parent_id: TaskId,
     pub child_ids: Vec<TaskId>,

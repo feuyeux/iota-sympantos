@@ -8,7 +8,9 @@
       "WebFetch(domain:weather.com.cn)",
       "WebFetch(domain:www.weather.com.cn)",
       "Skill(keybindings-help)",
-      "Skill(keybindings-help:*)"
+      "Skill(keybindings-help:*)",
+      "Skill(superpowers:using-superpowers)",
+      "Skill(superpowers:using-superpowers:*)"
     ]
   }
 }
