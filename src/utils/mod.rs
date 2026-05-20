@@ -45,9 +45,7 @@ pub fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|err: PoisonError<MutexGuard<'_, T>>| {
-            eprintln!(
-                "[iota] warning: mutex was poisoned by a previous panic; recovering inner value"
-            );
+            tracing::warn!("mutex was poisoned by a previous panic; recovering inner value");
             err.into_inner()
         })
 }

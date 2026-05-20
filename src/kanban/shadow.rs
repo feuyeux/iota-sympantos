@@ -332,7 +332,14 @@ impl ShadowWatcher {
             // Do NOT hardcode self.task_id here — linked-task events have different task_ids,
             // and sync_events uses task_id to skip status_change for the main task only.
             let task_id_str: String = row.get(1)?;
-            let task_id: TaskId = task_id_str.parse().unwrap_or(self.task_id);
+            let task_id: TaskId = task_id_str.parse().unwrap_or_else(|_| {
+                tracing::warn!(
+                    raw_task_id = %task_id_str,
+                    fallback = self.task_id,
+                    "shadow event has unparseable task_id; using main task id as fallback"
+                );
+                self.task_id
+            });
             Ok(ShadowEvent {
                 id: row.get(0)?,
                 task_id,

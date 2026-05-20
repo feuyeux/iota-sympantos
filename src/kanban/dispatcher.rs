@@ -183,42 +183,36 @@ impl Dispatcher {
         let mut to_remove: Vec<TaskId> = Vec::new();
 
         for task_id in task_ids {
-            // Collect handle info -- drop the borrow before calling store methods
-            let (run_id, elapsed, exit_code) = {
-                let entry = self.workers.get_mut(&task_id).unwrap();
-                (
-                    entry.0.run_id.clone(),
-                    entry.0.elapsed_secs(),
-                    entry.0.is_finished(),
-                )
+            // Collect handle info and poll watcher in a single borrow, then
+            // release before calling store methods (which may re-lock internals).
+            let Some(entry) = self.workers.get_mut(&task_id) else {
+                continue; // entry was removed by a previous iteration (shouldn't happen)
             };
-
-            // Poll watcher for new shadow events
-            let (events, terminal_status) = {
-                let entry = self.workers.get_mut(&task_id).unwrap();
-                entry.1.poll().unwrap_or_default()
-            };
+            let run_id = entry.0.run_id.clone();
+            let elapsed = entry.0.elapsed_secs();
+            let exit_code = entry.0.is_finished();
+            let (events, terminal_status) = entry.1.poll().unwrap_or_default();
 
             // Sync events into the store
             if !events.is_empty() {
-                let entry = self.workers.get_mut(&task_id).unwrap();
-                match entry.1.sync_events(&events, store, &run_id) {
-                    Ok(()) => entry.1.mark_events_synced(&events),
-                    Err(e) => {
-                        tracing::warn!(
-                            task_id,
-                            run_id = %run_id,
-                            error = %e,
-                            "failed to sync shadow events"
-                        );
+                if let Some(entry) = self.workers.get_mut(&task_id) {
+                    match entry.1.sync_events(&events, store, &run_id) {
+                        Ok(()) => entry.1.mark_events_synced(&events),
+                        Err(e) => {
+                            tracing::warn!(
+                                task_id,
+                                run_id = %run_id,
+                                error = %e,
+                                "failed to sync shadow events"
+                            );
+                        }
                     }
                 }
             }
 
             // --- Claim TTL exceeded ---
             if elapsed > self.config.claim_ttl.as_secs() {
-                {
-                    let entry = self.workers.get_mut(&task_id).unwrap();
+                if let Some(entry) = self.workers.get_mut(&task_id) {
                     let _ = entry.0.kill();
                 }
                 let _ = store.complete_run(&run_id, RunStatus::TimedOut, None);
@@ -241,8 +235,7 @@ impl Dispatcher {
                 .unwrap_or(false);
 
             if heartbeat_expired {
-                {
-                    let entry = self.workers.get_mut(&task_id).unwrap();
+                if let Some(entry) = self.workers.get_mut(&task_id) {
                     let _ = entry.0.kill();
                 }
                 let _ = store.complete_run(&run_id, RunStatus::TimedOut, None);
@@ -256,8 +249,9 @@ impl Dispatcher {
             // --- Terminal status from shadow or process has exited ---
             if terminal_status.is_some() || exit_code.is_some() {
                 if terminal_status.is_some() && exit_code.is_none() {
-                    let entry = self.workers.get_mut(&task_id).unwrap();
-                    let _ = entry.0.kill();
+                    if let Some(entry) = self.workers.get_mut(&task_id) {
+                        let _ = entry.0.kill();
+                    }
                 }
                 let failed = exit_code.map(|c| c != 0).unwrap_or(false);
                 let rs = if failed {

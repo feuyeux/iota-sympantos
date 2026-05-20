@@ -14,6 +14,7 @@ pub fn validate_transition(from: Status, to: Status) -> Result<()> {
             | (Status::Running, Status::Blocked)
             | (Status::Running, Status::Ready)   // claim expired
             | (Status::Blocked, Status::Ready)
+            | (Status::Blocked, Status::Done)    // abandoned / manually resolved
             | (Status::Done, Status::Archived)
     );
 
@@ -47,6 +48,10 @@ mod tests {
         assert!(validate_transition(Status::Ready, Status::Archived).is_err());
         assert!(validate_transition(Status::Done, Status::Todo).is_err());
         assert!(validate_transition(Status::Archived, Status::Triage).is_err());
-        assert!(validate_transition(Status::Blocked, Status::Done).is_err());
+    }
+
+    #[test]
+    fn blocked_to_done_is_valid() {
+        assert!(validate_transition(Status::Blocked, Status::Done).is_ok());
     }
 }

@@ -1,8 +1,11 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::Arc;
+
+/// Read/write timeout for each event-sync TCP connection.
+const EVENT_SYNC_IO_TIMEOUT_SECS: u64 = 30;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
@@ -135,7 +138,7 @@ pub fn serve_event_sync<A: ToSocketAddrs>(store: Arc<SqliteKanbanStore>, addr: A
     for stream in listener.incoming() {
         let stream = stream.context("accepting kanban event sync connection")?;
         // Guard against a slow/hung peer blocking the server thread indefinitely.
-        let timeout = Some(std::time::Duration::from_secs(30));
+        let timeout = Some(std::time::Duration::from_secs(EVENT_SYNC_IO_TIMEOUT_SECS));
         let _ = stream.set_read_timeout(timeout);
         let _ = stream.set_write_timeout(timeout);
         handle_event_sync_stream(store.as_ref(), stream)?;
@@ -217,6 +220,9 @@ fn handle_event_sync_stream(store: &SqliteKanbanStore, mut stream: TcpStream) ->
     stream.write_all(response_json.as_bytes())?;
     stream.write_all(b"\n")?;
     stream.flush()?;
+    // Graceful half-close: signal EOF to the client so it can finish reading
+    // before the OS drops the connection.
+    let _ = stream.shutdown(Shutdown::Write);
     Ok(())
 }
 
@@ -333,7 +339,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_import_does_not_advance_source_cursor() {
+    fn unapplicable_event_is_skipped_and_cursor_still_advances() {
+        // import_event_bundle uses the lenient replay path so that re-importing
+        // an already-applied event (e.g. a transition that matches current state)
+        // does not fail.  An unapplicable event (here: update for a non-existent
+        // task) is warned and skipped, and the cursor still advances past the
+        // bundle so the same unapplicable event is not re-imported on the next pull.
         let target = store();
         let bundle = KanbanEventBundle {
             format_version: FORMAT_VERSION,
@@ -353,13 +364,12 @@ mod tests {
             }],
         };
 
-        let err = import_event_bundle(&target, &bundle).unwrap_err();
-
-        assert!(
-            err.to_string().contains("applying kanban event 2"),
-            "expected strict replay context in error, got: {err}"
-        );
-        assert_eq!(target.sync_cursor("node-a").unwrap(), 0);
+        let report = import_event_bundle(&target, &bundle).unwrap();
+        // The event was seen but not applied (skipped by lenient replay).
+        assert_eq!(report.events_seen, 1);
+        assert_eq!(report.events_applied, 0);
+        // Cursor advances so we do not re-import the same event on the next pull.
+        assert_eq!(target.sync_cursor("node-a").unwrap(), 2);
     }
 
     #[test]
