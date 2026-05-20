@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     assignee             TEXT,
     priority             INTEGER NOT NULL DEFAULT 0,
     tags                 TEXT    NOT NULL DEFAULT '[]',
-    workspace_kind       TEXT,
+    workspace_kind       TEXT    NOT NULL DEFAULT 'scratch',
     workspace_path       TEXT,
     created_at           INTEGER NOT NULL,
     updated_at           INTEGER NOT NULL,
@@ -40,11 +40,22 @@ CREATE TABLE IF NOT EXISTS tasks (
     tenant               TEXT,
     created_by           TEXT,
     branch_name          TEXT,
+    idempotency_key      TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_failure_error   TEXT,
     max_runtime_seconds  INTEGER,
-    model_override       TEXT,
+    last_heartbeat_at    INTEGER,
+    workflow_template_id TEXT,
+    current_step_key     TEXT,
     skills               TEXT,
+    model_override       TEXT,
+    max_retries          INTEGER,
     session_id           TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_tasks_idempotency ON tasks(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee_status ON tasks(assignee, status);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE TABLE IF NOT EXISTS task_events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id     TEXT    NOT NULL,
@@ -83,6 +94,25 @@ CREATE TABLE IF NOT EXISTS task_runs (
     metadata            TEXT,
     error               TEXT
 );
+CREATE TABLE IF NOT EXISTS kanban_notify_subs (
+    task_id       TEXT NOT NULL,
+    platform      TEXT NOT NULL,
+    chat_id       TEXT NOT NULL,
+    thread_id     TEXT NOT NULL DEFAULT '',
+    user_id       TEXT,
+    notifier_profile TEXT,
+    created_at    INTEGER NOT NULL,
+    last_event_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (task_id, platform, chat_id, thread_id)
+);
+CREATE INDEX IF NOT EXISTS idx_links_child ON task_links(child_id);
+CREATE INDEX IF NOT EXISTS idx_links_parent ON task_links(parent_id);
+CREATE INDEX IF NOT EXISTS idx_comments_task ON task_comments(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_task ON task_events(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_events_run ON task_events(run_id, id);
+CREATE INDEX IF NOT EXISTS idx_runs_task ON task_runs(task_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON task_runs(status);
+CREATE INDEX IF NOT EXISTS idx_notify_task ON kanban_notify_subs(task_id);
 ";
 
 // ---------------------------------------------------------------------------

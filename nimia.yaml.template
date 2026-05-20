@@ -91,6 +91,22 @@ hermes:
     - iota_skill_*
 
 
+kanban:
+  # Database and shadow directory (defaults shown)
+  db: ~/.i6/kanban/iota.db
+  shadows_dir: ~/.i6/kanban/shadows
+  dispatch:
+    # Default timeout (seconds) for `iota kanban dispatch <id>`
+    timeout: 600
+    # Max concurrent hermes workers in background dispatch mode
+    max_concurrent: 4
+    # Kill a worker after this many seconds regardless of heartbeats
+    claim_ttl: 900
+    # Kill a worker whose run has not heartbeated within this window (seconds)
+    heartbeat_timeout: 90
+    # hermes binary path (resolved from PATH if not absolute)
+    hermes_bin: hermes
+
 context_engine:
   enabled: true
   injection: auto

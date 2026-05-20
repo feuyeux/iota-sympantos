@@ -219,12 +219,12 @@ fn execute_kanban_command(
                 "Usage: iota kanban dispatch <id> [--timeout <secs>]",
             )?;
 
-            // Optional --timeout <secs> (default 300)
+            // Optional --timeout <secs> (default 600)
             let timeout_secs: u64 = args[2..]
                 .windows(2)
                 .find(|w| w[0] == "--timeout")
                 .and_then(|w| w[1].parse().ok())
-                .unwrap_or(300);
+                .unwrap_or(600);
 
             let task = store
                 .get_task(task_id)

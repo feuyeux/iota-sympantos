@@ -36,6 +36,7 @@ src/
 ├── context/             # Context Fabric: capsule composition, budget enforcement
 ├── daemon/              # Background daemon TCP server & engine pool
 ├── engine/              # IotaEngine orchestration, prompt execution, handoff
+├── kanban/              # Task board: event-sourced store, dispatcher, shadow DB hijack
 ├── mcp/                 # MCP protocol layer: server, router, tool dispatch, client
 ├── memory/              # Persistent memory store (FTS5 + embedding) & types
 ├── runtime_event/       # Unified event types for telemetry & routing

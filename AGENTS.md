@@ -49,6 +49,18 @@ iota-sympantos/
 │   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
 │   ├── context/
 │   │   └── mod.rs           # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
+│   ├── kanban/
+│   │   ├── mod.rs           # 模块入口 + re-exports
+│   │   ├── types.rs         # Task/Board/Run/Comment/Link 领域类型
+│   │   ├── store.rs         # KanbanStore trait（CRUD + event sourcing 接口）
+│   │   ├── sqlite_store.rs  # SqliteKanbanStore 实现（event-sourced）
+│   │   ├── state_machine.rs # 状态机（triage→todo→ready→running→done→archived + blocked）
+│   │   ├── event_sourcing.rs# Event replay、apply_event
+│   │   ├── dispatcher.rs    # Dispatcher — 调度 ready 任务给 hermes worker
+│   │   ├── worker.rs        # WorkerHandle — spawn/kill hermes -z 进程
+│   │   ├── shadow.rs        # ShadowMaterializer + ShadowWatcher（投影 + 回收）
+│   │   ├── bridge.rs        # AdvancedBridge（decompose/specify 编排）
+│   │   └── event_sync.rs    # 跨节点事件同步（export/import/serve/pull/push）
 │   ├── skill/
 │   │   ├── mod.rs           # SkillRegistry（分布式加载 + trigger 匹配）
 │   │   ├── runner.rs        # engine-run skill 执行
@@ -258,6 +270,7 @@ fn my_test() { ... }
 ```
 
 **规则：**
+
 - 测试文件命名：`<module_name>_tests.rs`
 - 测试文件放在同目录下
 - 使用 `use super::*` 导入父模块内容
@@ -266,6 +279,7 @@ fn my_test() { ... }
 - 辅助函数（如 `process_exists`）直接放在文件内
 
 **已有规范化的测试文件：**
+
 - `tui/input_tests.rs` — 7 个测试
 - `tui/events_tests.rs` — 2 个测试
 - `tui/loop_tests.rs` — 3 个测试
@@ -282,6 +296,7 @@ fn my_test() { ... }
 每个 `src/<module>/` 目录可包含 `SKILL.md`，作用是让 AI coding 工具快速掌握该模块的代码结构、设计决策和关键类型，而无需阅读全部实现。
 
 **文件格式：**
+
 ```yaml
 ---
 name: <skill-name>
@@ -308,6 +323,7 @@ triggers:
 ```
 
 **规则：**
+
 - `triggers` 字段匹配 AI coding 工具的自动激活条件
 - 内容面向 AI 理解，简洁、结构化、避免实现细节
 - 人类可读文档放在 `docs/` 目录，不混在 `SKILL.md` 中
