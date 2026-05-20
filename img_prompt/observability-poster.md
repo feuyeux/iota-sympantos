@@ -1,19 +1,29 @@
 # docs/observability.md poster prompt
 
-Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `observatory control room`, `signal routing diagram`, `fine cross-hatching`, `warm paper texture`.
+Selected GPT-Image2 template: `infographic-engine`
+
+Use style tags: `pen-and-ink technical story poster`, `signal routing diagram`, `hand-lettered annotations`, `fine cross-hatching`, `warm paper texture`.
 
 Create a vertical poster for the document `iota observability`.
 
-Scene: iota sits at a simple signal desk with two operating modes side by side. Left side (local): stderr tracing, daily files under `~/.i6/logs/`, and five SQLite stores under `~/.i6/context/` (events · observability · memory · approvals · sessions). Right side (Docker stack): signals flow through an OTel Collector into three destinations — Loki (logs), Jaeger (traces), Prometheus (metrics) — combined on a Grafana wall screen. A small label panel shows key addresses: `OTLP :4317`, `Loki :3100`, `Jaeger :16686`, `Prometheus :9090`, `Grafana :3000`. Below the desk, six RuntimeEvent packet types float as labeled envelopes: Output · ToolCall · TokenUsage · Memory · ApprovalRequest · Error.
+Scene: a simple signal desk with two operating modes side by side. Left side focuses on local files and SQLite databases. Right side shows signals flowing through an OTel Collector into Loki, Jaeger, and Prometheus, combined on a Grafana wall screen. In the center, RuntimeEvent packets flow from the engine to both local storage and OTLP export.
 
-A small analytics panel on the left shows ObservabilityStore query capabilities: `token_percentiles → P50/P95/P99`, `token_usage_between(from, to)`, `token_summary_since(ts)`. A warning badge labeled "computed > provider_total" is shown as a validation signal emitted during record_token_usage.
+Key telemetry displays:
 
-Three CLI commands shown as buttons: `iota observability logs <id>`, `iota observability trace <id>`, `iota observability tokens summary`.
+- Local logs: stderr tracing and daily files under `~/.i6/logs/`, override `IOTA_LOG_DIR`
+- Local stores: `~/.i6/context/`, SQLite databases `events.sqlite`, `memory.sqlite`, `approvals.sqlite`, `sessions.sqlite`
+- ObservabilityStore: `src/store/observability.rs`, token usage events, execution-level best-record dedupe, P50 / P95 / P99, `token_usage_between(from, to)`, `token_summary_since(ts)`, validation warning `computed > provider_total`
+- Docker stack: OTel Collector (`4317 / 4318`) · Loki (`3100`) · Jaeger (`16686`) · Prometheus (`9090`) · Grafana (`3000`)
+- OpenTelemetry files: `src/telemetry/mod.rs` · `src/telemetry/metrics.rs` · `src/telemetry/stderr.rs`
+- RuntimeEvent packets: `Output` · `Log` · `ToolCall` · `ToolResult` · `TokenUsage` · `Memory` · `ApprovalRequest` · `ApprovalDecision` · `Error`
+- CLI command buttons: `iota observability logging recent --limit N` · `iota observability logging events <execution_id>` · `iota observability tokens recent --limit N` · `iota observability tokens summary --since 1h` · `iota observability tokens export --format json` · `iota observability metrics --prometheus` · `iota observability logs <execution_id>` · `iota observability trace <trace_id>` · `iota logs <execution_id>` · `iota trace <trace_id>`
 
-Composition: portrait poster, 2:3 aspect ratio. Left half = local fallback, right half = Docker stack, OTel Collector as the bridge. Title `iota Observability` at top.
+Composition: portrait poster, 2:3 aspect ratio. Left half for local observability, right half for Docker stack, OTel Collector as the central bridge, RuntimeEvent envelopes in the center. Title `iota Observability` at top, subtitle `RuntimeEvent → ObservabilityStore → CLI queries / OTLP export` below.
 
-Style: meticulous black-and-white pen drawing, precise arrows, minimal magenta accent on live telemetry pulses. Clean and readable, not cluttered.
+Style: black ink illustration, crisp lines, engineering notebook feel, readable labels, magenta accent on live telemetry pulses and warning badge. Simple and uncluttered.
 
-Mood: transparent, investigative — every runtime signal traceable from source to storage.
+Mood: transparent and investigative, showing how every runtime signal is traceable from source to storage.
 
-Negative prompt: blurry dashboards, stock cloud icons, overbright neon, fake brand logos, random graphs, 3D render, old command names (iota logs, iota trace as top-level), obsolete modules (telemetry/console.rs, store/approval.rs, Promtail), missing token_percentiles panel.
+Text requirements: all visible text must be Chinese or English only. Preserve exact command names, file paths, ports, and environment variable names.
+
+Negative prompt: spaghetti arrows, unreadable text, cluttered icons, cyberpunk glow, photorealistic devices, fake brand logos, random graphs, obsolete module names, `telemetry/console.rs`, `store/approval.rs`, Promtail, wrong command labels, raw API keys, Korean text, non-Chinese non-English text.

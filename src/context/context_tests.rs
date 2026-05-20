@@ -62,11 +62,28 @@ fn working_memory_buffer_evicts_oldest_when_full() {
     buf.push_turn(AcpBackend::Codex, "turn one", "answer one");
     buf.push_turn(AcpBackend::Codex, "turn two", "answer two");
     buf.push_turn(AcpBackend::Codex, "turn three", "answer three");
-    // Only turns 2 and 3 should be present.
+    // Only turns 2 and 3 should be present, in chronological order.
     let rendered = buf.render(4000);
     assert!(!rendered.contains("turn one"));
     assert!(rendered.contains("turn two"));
     assert!(rendered.contains("turn three"));
+    let pos2 = rendered.find("turn two").unwrap();
+    let pos3 = rendered.find("turn three").unwrap();
+    assert!(pos2 < pos3);
+}
+
+#[test]
+fn working_memory_buffer_renders_chronologically() {
+    let mut buf = WorkingMemoryBuffer::new(5);
+    buf.push_turn(AcpBackend::Codex, "first", "one");
+    buf.push_turn(AcpBackend::Codex, "second", "two");
+    buf.push_turn(AcpBackend::Codex, "third", "three");
+    let rendered = buf.render(4000);
+    let idx_first = rendered.find("first").unwrap();
+    let idx_second = rendered.find("second").unwrap();
+    let idx_third = rendered.find("third").unwrap();
+    assert!(idx_first < idx_second);
+    assert!(idx_second < idx_third);
 }
 
 #[test]

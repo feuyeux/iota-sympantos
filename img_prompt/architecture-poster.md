@@ -1,25 +1,31 @@
 # docs/architecture.md poster prompt
 
-Use `gpt-image-2-style-library`: `pen-and-ink technical story poster`, `hand-drawn architectural cutaway`, `fine cross-hatching`, `precise black ink`, `warm paper texture`.
+Selected GPT-Image2 template: `poster-layout-system`
+
+Use style tags: `pen-and-ink technical story poster`, `hand-drawn architectural cutaway`, `hand-lettered annotations`, `fine cross-hatching`, `warm paper texture`.
 
 Create a vertical poster for the document `iota-sympantos architecture overview`.
 
-Scene: a compact Rust CLI/TUI control tower named `iota-sympantos` in the center. Five labeled rail lines run outward to five AI backend stations: Claude Code, Codex, Gemini CLI, Hermes, OpenCode. Below is a transparent underground cutaway with connected rooms: Context Fabric, SQLite stores, ACP JSON-RPC pipes, MCP sidecars, and telemetry instruments. Small engineers carry context capsules and approval stamps between rooms.
+Scene: a compact Rust CLI/TUI control tower named `iota-sympantos` in the center, with five labeled rail lines running outward to five AI backend stations: Claude Code, Codex, Gemini CLI, Hermes, OpenCode. Below the tower is a transparent underground cutaway with connected rooms representing Context Fabric, MemoryStore, CacheStore, ObservabilityStore, ApprovalStore, SessionLedger, ACP JSON-RPC pipes, MCP sidecars, Skill/Fn runners, Kanban dispatcher, Hermes worker, and telemetry instruments.
 
-The tower has 8 labeled floors:
-- Floor 1 Entry: main.rs · cli/mod.rs · tui/loop.rs · tui/input.rs
-- Floor 2 Daemon: daemon/mod.rs · pool.rs · TCP 127.0.0.1:47661
-- Floor 3 Engine: engine/mod.rs · prompt.rs · memory_ops.rs · runtime_event/mod.rs
-- Floor 4 Context: context/mod.rs · mcp/server.rs · store/memory.rs
-- Floor 5 ACP: acp/client.rs · stream_reader.rs · permission.rs
-- Floor 6 Backends: five platform stations
-- Floor 7 Skill: skill/mod.rs · skill/fun.rs · mcp/router.rs
-- Basement Store: store/cache.rs · store/observability.rs · approvals.rs · ledger.rs · telemetry/stderr.rs
+Nine labeled levels from top to bottom:
 
-Composition: portrait poster, 2:3 aspect ratio. Strong vertical hierarchy, Entry at top, Basement at bottom. Arrows, pipes, short labels. Title `iota-sympantos Architecture` hand-lettered at top. Magenta accent only on the main tower beacon and status rail.
+- Floor 1 Entry: `main.rs` · `cli/mod.rs` · `tui/loop.rs` · `tui/input.rs`
+- Floor 2 TUI: `tui/render.rs` · `scrollback.rs` · `events.rs` · `terminal_lifecycle.rs`
+- Floor 3 Daemon: `daemon/mod.rs` · `daemon/pool.rs` · TCP `127.0.0.1:47661`
+- Floor 4 Engine: `engine/mod.rs` · `engine/prompt.rs` · `engine/memory_ops.rs` · `runtime_event/mod.rs`
+- Floor 5 Context: `context/mod.rs` · `mcp/server.rs` · `memory/store.rs` · `memory/embedding.rs`
+- Floor 6 ACP: `acp/client.rs` · `acp/stream_reader.rs` · `acp/permission.rs` · `acp/session.rs`
+- Floor 7 Backends: Claude Code · Codex · Gemini CLI · Hermes · OpenCode
+- Floor 8 Skill / MCP / Fn: `skill/mod.rs` · `skill/fun.rs` · `mcp/router.rs` · `mcp/tool_dispatch.rs`
+- Basement Store / Telemetry: `store/cache.rs` · `store/observability.rs` · `store/approvals.rs` · `store/ledger.rs` · `telemetry/stderr.rs` · `telemetry/metrics.rs`
 
-Style: elegant black-and-white steel-nib pen drawing, dense but legible cross-hatching, technical diagram mixed with storybook world-building. No photorealism, no 3D render, no gradients.
+Composition: portrait poster, 2:3 aspect ratio. Strong vertical hierarchy with Entry at top and Store / Telemetry at bottom, floors connected by elevator shafts and pipelines, rails leading outward. Title `iota-sympantos Architecture` at top, subtitle `modules & integration layout` below.
 
-Mood: curious, organized, showing complex orchestration as a navigable machine-city.
+Style: black ink illustration, crisp lines, engineering notebook feel, readable labels, magenta accent on the main tower beacon, prompt capsule, and status rail. Simple and uncluttered.
 
-Negative prompt: blurry text, unreadable labels, crowded random symbols, neon cyberpunk, watercolor, oil paint, broken arrows, obsolete module names (tui.rs single-file, acp/mod.rs without client.rs, telemetry/console.rs).
+Mood: curious and organized, showing complex orchestration as a navigable machine-city.
+
+Text requirements: all visible text must be Chinese or English only. Preserve exact file names and command labels.
+
+Negative prompt: spaghetti arrows, unreadable text, cluttered icons, cyberpunk glow, photorealistic devices, obsolete module names, `tui.rs` as a single-file TUI, `telemetry/console.rs`, `skill/sandbox_executor.rs`, `context/server.rs`, fake cloud logos, raw API keys, Korean text, non-Chinese non-English text.

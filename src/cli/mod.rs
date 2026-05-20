@@ -70,6 +70,9 @@ pub async fn run() -> Result<()> {
                 return daemon::run_daemon(config, &daemon_addr, acp::DEFAULT_TIMEOUT_MS, false)
                     .await;
             }
+            "__bench_cache" => {
+                return run_caching_benchmark().await;
+            }
             "check" => {
                 let use_daemon = daemon_cmd::has_daemon_flag(&args[1..]);
                 if use_daemon {
@@ -167,4 +170,68 @@ mod tests {
         let args = vec!["--daemon".to_string(), "5".to_string()];
         assert_eq!(super::parse_rounds(&args), Some(5));
     }
+}
+
+async fn run_caching_benchmark() -> Result<()> {
+    let config = config::read_config()?;
+    let cwd = std::env::current_dir()?;
+    let backend = acp::AcpBackend::ClaudeCode;
+
+    println!("=== STARTING CACHING BENCHMARK (3 TURNS) ===");
+    let mut engine =
+        crate::engine::IotaEngine::create_session(config, false, acp::DEFAULT_TIMEOUT_MS, None);
+
+    let prompts = vec![
+        "Write a 1-line welcome message for a developer tool.",
+        "Add a 1-line joke about debugging to that welcome message.",
+        "Combine them into a single, cohesive welcome banner.",
+    ];
+
+    for (i, prompt) in prompts.iter().enumerate() {
+        let turn_num = i + 1;
+        println!("\n--- Turn {} ---", turn_num);
+        println!("Prompt: \"{}\"", prompt);
+
+        let start = std::time::Instant::now();
+        let output = engine.run(backend, cwd.clone(), prompt, None).await?;
+        let elapsed = start.elapsed().as_millis();
+
+        println!("Response: {}", output.text.trim());
+        println!("Latency (Wall): {} ms", elapsed);
+        println!("Timing Breakdown:");
+        println!("  Client Started: {}", output.timing.client_started);
+        println!("  Process Spawned: {}", output.timing.process_spawned);
+        println!("  Process Spawn (ms): {:?}", output.timing.process_spawn_ms);
+        println!("  Init (ms): {:?}", output.timing.init_ms);
+        println!("  Session Reused: {}", output.timing.session_reused);
+        println!("  Session New (ms): {:?}", output.timing.session_new_ms);
+        println!("  Prompt execution (ms): {}", output.timing.prompt_ms);
+        println!("  Total (ms): {}", output.timing.total_ms);
+
+        let mut tokens_found = false;
+        if let Some(ref exec_id) = output.execution_id {
+            if let Ok(store) = crate::store::observability::ObservabilityStore::open(
+                &crate::store::observability::ObservabilityStore::default_path()?,
+            ) {
+                if let Ok(records) = store.token_usage_for_execution(exec_id) {
+                    if let Some(t) = records.iter().find(|r| r.input_tokens.is_some()) {
+                        println!("Tokens:");
+                        println!("  Input: {:?}", t.input_tokens);
+                        println!("  Cache Read: {:?}", t.cache_read_input_tokens);
+                        println!("  Cache Creation: {:?}", t.cache_creation_input_tokens);
+                        println!("  Output: {:?}", t.output_tokens);
+                        println!("  Total: {:?}", t.normalized_total_tokens);
+                        tokens_found = true;
+                    }
+                }
+            }
+        }
+        if !tokens_found {
+            println!("Tokens: NOT FOUND IN OBSERVABILITY STORE");
+        }
+    }
+
+    engine.shutdown().await;
+    println!("\n=== BENCHMARK COMPLETED ===");
+    Ok(())
 }

@@ -93,11 +93,24 @@ impl ContextEngine {
             capsule.push_str(&format!("You are currently using: {}\n", model.trim()));
             capsule.push_str("</model>\n\n");
         }
+        if let Some(skills) = input.skills {
+            let index = skills.skill_index(input.backend, self.budgets.skills_chars);
+            if !index.is_empty() {
+                capsule.push_str("<skills>\n");
+                capsule.push_str(&index);
+                capsule.push_str("</skills>\n\n");
+            }
+        }
         if let Some(memory) = input.memory {
             capsule.push_str(&trim_section(
                 &render_memory(memory),
                 self.budgets.memory_chars,
             ));
+        }
+        if let Some(handoff) = input.handoff.filter(|value| !value.trim().is_empty()) {
+            capsule.push_str("<handoff>\n");
+            capsule.push_str(&trim_section(handoff, self.budgets.handoff_chars));
+            capsule.push_str("</handoff>\n\n");
         }
         let working_memory = input
             .working_memory
@@ -112,19 +125,6 @@ impl ContextEngine {
             capsule.push_str("<workspace>\n");
             capsule.push_str(&trim_section(&workspace, self.budgets.workspace_chars));
             capsule.push_str("</workspace>\n\n");
-        }
-        if let Some(skills) = input.skills {
-            let index = skills.skill_index(input.backend, self.budgets.skills_chars);
-            if !index.is_empty() {
-                capsule.push_str("<skills>\n");
-                capsule.push_str(&index);
-                capsule.push_str("</skills>\n\n");
-            }
-        }
-        if let Some(handoff) = input.handoff.filter(|value| !value.trim().is_empty()) {
-            capsule.push_str("<handoff>\n");
-            capsule.push_str(&trim_section(handoff, self.budgets.handoff_chars));
-            capsule.push_str("</handoff>\n\n");
         }
         capsule.push_str("</iota-context>\n\nUser request:\n");
         capsule.push_str(input.prompt);
@@ -192,18 +192,21 @@ impl WorkingMemoryBuffer {
     }
 
     pub fn render(&self, budget: usize) -> String {
-        let mut output = String::new();
+        let mut selected = Vec::new();
+        let mut current_len = 0;
         for turn in self.turns.iter().rev() {
             let line = format!(
                 "- [{}] user: {}; assistant: {}\n",
                 turn.backend, turn.prompt_summary, turn.output_summary
             );
-            if output.len() + line.len() > budget {
+            if current_len + line.len() > budget {
                 break;
             }
-            output.push_str(&line);
+            current_len += line.len();
+            selected.push(line);
         }
-        output
+        selected.reverse();
+        selected.join("")
     }
 }
 

@@ -80,6 +80,8 @@ pip install 'hermes-agent[acp]'
 
 ## 架构
 
+![Runtime architecture](images/architecture-diagram.png)
+
 ```
 CLI / TUI
     └── Engine（路由、记忆注入、技能分发）
@@ -89,6 +91,28 @@ CLI / TUI
 ```
 
 详见 [`docs/architecture.md`](docs/architecture.md)、[`docs/code-call-chains.md`](docs/code-call-chains.md)。
+
+## 视觉资料
+
+### Architecture Poster
+
+![Architecture poster](images/architecture-poster.png)
+
+### Code Call Chains Poster
+
+![Code call chains poster](images/code-call-chains-poster.png)
+
+### Debugging Poster
+
+![Debugging poster](images/debugging-poster.png)
+
+### Observability Poster
+
+![Observability poster](images/observability-poster.png)
+
+### Daemon Benchmark
+
+![Daemon benchmark](images/daemon-benchmark.svg)
 
 ## 文档
 
