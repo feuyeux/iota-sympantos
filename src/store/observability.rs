@@ -223,10 +223,10 @@ impl ObservabilityStore {
                 .or_default()
                 .add(event);
         }
-        return Ok(by_backend
+        Ok(by_backend
             .into_iter()
             .map(|(backend, acc)| acc.finish(backend))
-            .collect());
+            .collect())
     }
 
     #[allow(dead_code)]

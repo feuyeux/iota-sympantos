@@ -130,6 +130,11 @@ fn configure_process_tree_root(command: &mut Command) {
     }
     #[cfg(not(unix))]
     {
+        // On Windows, we rely on `taskkill /T /F` in kill_process_tree to recursively
+        // terminate the entire process tree. There is no cross-platform way to set a
+        // new process group without the windows-sys crate (CREATE_NEW_PROCESS_GROUP),
+        // so we accept the current behaviour: explicit kill() uses taskkill, and Drop
+        // also calls kill_process_tree to clean up.
         let _ = command;
     }
 }

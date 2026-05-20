@@ -122,7 +122,7 @@ fn cmd_board(
 ) -> Vec<String> {
     let subcmd = args.first().copied().unwrap_or("");
     match subcmd {
-        "view" => return cmd_view(&args[1..], store, default_board),
+        "view" => cmd_view(&args[1..], store, default_board),
         "create" => {
             let slug = match args.get(1) {
                 Some(s) => *s,

@@ -111,15 +111,7 @@ fn kill_stops_child_process_tree() {
         started_at: Instant::now(),
     };
 
-    let deadline = Instant::now() + std::time::Duration::from_secs(5);
-    while !child_pid_path.exists() && Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    assert!(child_pid_path.exists(), "child pid file was not written");
-    let child_pid = std::fs::read_to_string(&child_pid_path)
-        .unwrap()
-        .trim()
-        .to_string();
+    let child_pid = read_pid_file_with_retry(&child_pid_path);
 
     handle.kill().unwrap();
     let _ = handle.child.wait();
@@ -172,15 +164,7 @@ fn spawn_write_failure_kills_process_tree() {
     configure_process_tree_root(&mut command);
     let mut child = command.spawn().unwrap();
 
-    let deadline = Instant::now() + std::time::Duration::from_secs(5);
-    while !child_pid_path.exists() && Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    assert!(child_pid_path.exists(), "child pid file was not written");
-    let child_pid = std::fs::read_to_string(&child_pid_path)
-        .unwrap()
-        .trim()
-        .to_string();
+    let child_pid = read_pid_file_with_retry(&child_pid_path);
 
     let result = write_context_or_kill(&mut child, "x", |_child, _context| {
         Err(std::io::Error::new(
@@ -220,4 +204,28 @@ fn process_exists(pid: &str) -> bool {
             .map(|status| status.success())
             .unwrap_or(false)
     }
+}
+
+fn read_pid_file_with_retry(path: &std::path::Path) -> String {
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if path.exists() {
+            match std::fs::read_to_string(path) {
+                Ok(content) => {
+                    let trimmed = content.trim().to_string();
+                    if !trimmed.is_empty() {
+                        return trimmed;
+                    }
+                }
+                Err(_) => {
+                    // Ignore sharing violations or file lock issues temporarily and retry
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::fs::read_to_string(path)
+        .expect("Failed to read PID file after retries")
+        .trim()
+        .to_string()
 }

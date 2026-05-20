@@ -38,8 +38,8 @@ impl Default for DispatcherConfig {
         Self {
             tick_interval: Duration::from_secs(30),
             max_concurrent: 4,
-            claim_ttl: Duration::from_secs(900), // 15 min
-            heartbeat_timeout: Duration::from_secs(90),
+            claim_ttl: Duration::from_secs(900),         // 15 min
+            heartbeat_timeout: Duration::from_secs(300), // 5 min — hermes -z runs can take >90s
             hermes_bin: PathBuf::from("hermes"),
             shadows_dir: dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
@@ -125,18 +125,19 @@ impl Dispatcher {
             if let Some(filter_id) = self.config.task_id_filter {
                 // Single-task mode: query the target task directly to avoid
                 // limit() cutting it off when lower-id tasks are also ready.
-                if let Ok(task) = store.get_task(filter_id) {
-                    if task.status == Status::Ready && !self.workers.contains_key(&task.id) {
-                        match self.spawn_worker(&task, store) {
-                            Ok(()) => report.spawned += 1,
-                            Err(e) => {
-                                tracing::warn!(
-                                    task_id = task.id,
-                                    error = %e,
-                                    "failed to spawn worker"
-                                );
-                                report.spawn_failures += 1;
-                            }
+                if let Ok(task) = store.get_task(filter_id)
+                    && task.status == Status::Ready
+                    && !self.workers.contains_key(&task.id)
+                {
+                    match self.spawn_worker(&task, store) {
+                        Ok(()) => report.spawned += 1,
+                        Err(e) => {
+                            tracing::warn!(
+                                task_id = task.id,
+                                error = %e,
+                                "failed to spawn worker"
+                            );
+                            report.spawn_failures += 1;
                         }
                     }
                 }
@@ -279,6 +280,15 @@ impl Dispatcher {
                         _ => {}
                     }
                 } else {
+                    // Process exited with code 0 but hermes never wrote a terminal status
+                    // to the shadow DB (e.g. it completed internal work without calling
+                    // kanban_complete).  Treat as Done rather than leaving the task
+                    // Running with no active worker.
+                    tracing::debug!(
+                        task_id,
+                        run_id = %run_id,
+                        "worker exited 0 without shadow terminal status; marking Done"
+                    );
                     let _ = store.transition(task_id, Status::Done);
                 }
                 let _ = self.materializer.cleanup(task_id);
@@ -350,10 +360,14 @@ impl Dispatcher {
             let Some(claimed_at) = task.claimed_at else {
                 continue;
             };
-            let ttl = std::cmp::min(
-                task.claim_ttl_secs.max(0),
-                self.config.claim_ttl.as_secs() as i64,
-            );
+            let config_ttl = self.config.claim_ttl.as_secs() as i64;
+            // 0 means "not configured on this task" — fall back to the dispatcher's
+            // global config TTL rather than treating it as "expire immediately".
+            let ttl = if task.claim_ttl_secs > 0 {
+                std::cmp::min(task.claim_ttl_secs, config_ttl)
+            } else {
+                config_ttl
+            };
             if now - claimed_at >= ttl {
                 for run in store
                     .get_runs(task.id)?
@@ -455,7 +469,7 @@ mod tests {
         assert_eq!(cfg.tick_interval, Duration::from_secs(30));
         assert_eq!(cfg.max_concurrent, 4);
         assert_eq!(cfg.claim_ttl, Duration::from_secs(900));
-        assert_eq!(cfg.heartbeat_timeout, Duration::from_secs(90));
+        assert_eq!(cfg.heartbeat_timeout, Duration::from_secs(300));
         assert_eq!(cfg.hermes_bin, PathBuf::from("hermes"));
     }
 

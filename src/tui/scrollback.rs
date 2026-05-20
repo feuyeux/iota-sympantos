@@ -220,6 +220,60 @@ fn observability_line(meta: &ObservabilityMeta) -> Option<String> {
         })
 }
 
+/// Insert a help block describing the keyboard shortcuts.
+pub(super) fn insert_help<B: Backend>(terminal: &mut Terminal<B>) -> std::io::Result<()> {
+    let items: &[(&str, &str)] = &[
+        ("Enter", "Send prompt"),
+        ("Shift+Enter", "Insert newline"),
+        ("Tab", "Queue prompt while running"),
+        ("↑ / ↓", "History recall"),
+        ("Ctrl+R", "Search history"),
+        ("Ctrl+K / Ctrl+Y", "Kill / yank"),
+        ("Ctrl+W", "Delete word backward"),
+        ("Alt+B / Alt+F", "Word backward / forward"),
+        ("Ctrl+E", "Export transcript to file"),
+        ("Ctrl+B", "Cycle backend"),
+        ("/backend", "List enabled backends"),
+        ("/backend <name>", "Switch backend"),
+        (
+            "/codex",
+            "Switch directly; also /claude, /gemini, /hermes, /opencode",
+        ),
+        ("/model", "Show active backend model"),
+        ("/goal", "Show current goal"),
+        ("/goal <text>", "Set current goal"),
+        ("/goal clear", "Clear current goal"),
+        ("/status", "Show iota session status"),
+        ("/export", "Export transcript to file"),
+        ("/clear", "Clear transcript view"),
+        ("/quit", "Open quit confirmation"),
+        (
+            "Backend commands",
+            "Known provider slash commands pass through as prompts",
+        ),
+        (
+            "Custom commands",
+            "Unknown slash commands pass through for provider-specific handlers",
+        ),
+        ("Ctrl+L", "Clear transcript view"),
+        ("Esc", "Interrupt running turn"),
+        ("?", "Show this help"),
+        ("Ctrl+C", "Quit (press twice)"),
+    ];
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        "── Keyboard Shortcuts ──",
+        theme::system_notice_style(),
+    ))];
+    for (k, v) in items {
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:18}", k), theme::tool_call_style()),
+            Span::styled(v.to_string(), theme::assistant_text_style()),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    insert_lines(terminal, lines)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::acp::AcpBackend;
@@ -310,58 +364,4 @@ mod tests {
             "2255c021: total 4634ms · in 277 · cache r24154/w3215 · out 85 · think 32 · 27763 tokens"
         );
     }
-}
-
-/// Insert a help block describing the keyboard shortcuts.
-pub(super) fn insert_help<B: Backend>(terminal: &mut Terminal<B>) -> std::io::Result<()> {
-    let items: &[(&str, &str)] = &[
-        ("Enter", "Send prompt"),
-        ("Shift+Enter", "Insert newline"),
-        ("Tab", "Queue prompt while running"),
-        ("↑ / ↓", "History recall"),
-        ("Ctrl+R", "Search history"),
-        ("Ctrl+K / Ctrl+Y", "Kill / yank"),
-        ("Ctrl+W", "Delete word backward"),
-        ("Alt+B / Alt+F", "Word backward / forward"),
-        ("Ctrl+E", "Export transcript to file"),
-        ("Ctrl+B", "Cycle backend"),
-        ("/backend", "List enabled backends"),
-        ("/backend <name>", "Switch backend"),
-        (
-            "/codex",
-            "Switch directly; also /claude, /gemini, /hermes, /opencode",
-        ),
-        ("/model", "Show active backend model"),
-        ("/goal", "Show current goal"),
-        ("/goal <text>", "Set current goal"),
-        ("/goal clear", "Clear current goal"),
-        ("/status", "Show iota session status"),
-        ("/export", "Export transcript to file"),
-        ("/clear", "Clear transcript view"),
-        ("/quit", "Open quit confirmation"),
-        (
-            "Backend commands",
-            "Known provider slash commands pass through as prompts",
-        ),
-        (
-            "Custom commands",
-            "Unknown slash commands pass through for provider-specific handlers",
-        ),
-        ("Ctrl+L", "Clear transcript view"),
-        ("Esc", "Interrupt running turn"),
-        ("?", "Show this help"),
-        ("Ctrl+C", "Quit (press twice)"),
-    ];
-    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
-        "── Keyboard Shortcuts ──",
-        theme::system_notice_style(),
-    ))];
-    for (k, v) in items {
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {:18}", k), theme::tool_call_style()),
-            Span::styled(v.to_string(), theme::assistant_text_style()),
-        ]));
-    }
-    lines.push(Line::raw(""));
-    insert_lines(terminal, lines)
 }

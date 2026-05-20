@@ -252,7 +252,7 @@ fn render_columns(
         .join(" ");
     lines.push(fit_line(header, width));
 
-    for idx in 0..STATUS_COLUMNS.len() {
+    for (idx, col) in STATUS_COLUMNS.iter().enumerate() {
         let tasks = tasks_for_column(state, snapshot, idx);
         if tasks.is_empty() {
             continue;
@@ -269,7 +269,7 @@ fn render_columns(
             .collect::<Vec<_>>()
             .join("  ");
         lines.push(fit_line(
-            format!("{} {:<8} {}", prefix, STATUS_COLUMNS[idx].as_str(), summary),
+            format!("{} {:<8} {}", prefix, col.as_str(), summary),
             width,
         ));
     }

@@ -328,9 +328,14 @@ impl ShadowWatcher {
              FROM task_events WHERE id > ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map(params![self.last_event_id], |row| {
+            // Read the actual task_id from the DB row (column 1, stored as TEXT in shadow schema).
+            // Do NOT hardcode self.task_id here — linked-task events have different task_ids,
+            // and sync_events uses task_id to skip status_change for the main task only.
+            let task_id_str: String = row.get(1)?;
+            let task_id: TaskId = task_id_str.parse().unwrap_or(self.task_id);
             Ok(ShadowEvent {
                 id: row.get(0)?,
-                task_id: self.task_id,
+                task_id,
                 event_type: row.get(2)?,
                 payload: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             })

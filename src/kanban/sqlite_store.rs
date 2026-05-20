@@ -87,11 +87,11 @@ pub struct SqliteKanbanStore {
 
 impl SqliteKanbanStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if path != Path::new(":memory:") {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating kanban db dir {}", parent.display()))?;
-            }
+        if path != Path::new(":memory:")
+            && let Some(parent) = path.parent()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating kanban db dir {}", parent.display()))?;
         }
         let conn = Connection::open(path)
             .with_context(|| format!("opening kanban db {}", path.display()))?;

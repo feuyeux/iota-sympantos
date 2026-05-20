@@ -102,7 +102,11 @@ pub fn import_event_bundle(
         .cloned()
         .collect();
     let events_skipped = events_seen.saturating_sub(new_events.len());
-    let events_applied = store.replay_events_strict(&new_events)?;
+    // Use the non-strict (warn-on-error) variant so duplicate imports from a peer are
+    // idempotent.  `replay_events_strict` would fail on a re-imported
+    // EVT_TASK_TRANSITIONED whose target state already matches the current state,
+    // making recovery after a partial import impossible.
+    let events_applied = store.replay_events(&new_events)?;
     for event in &new_events {
         store.append_event(&event.event_type, &event.payload)?;
     }
@@ -130,6 +134,10 @@ pub fn serve_event_sync<A: ToSocketAddrs>(store: Arc<SqliteKanbanStore>, addr: A
     let listener = TcpListener::bind(addr).context("binding kanban event sync listener")?;
     for stream in listener.incoming() {
         let stream = stream.context("accepting kanban event sync connection")?;
+        // Guard against a slow/hung peer blocking the server thread indefinitely.
+        let timeout = Some(std::time::Duration::from_secs(30));
+        let _ = stream.set_read_timeout(timeout);
+        let _ = stream.set_write_timeout(timeout);
         handle_event_sync_stream(store.as_ref(), stream)?;
     }
     Ok(())

@@ -465,13 +465,13 @@ impl TuiApp {
         }
         let prefix = &text[1..];
         let completions = slash_completions(prefix, self.active_backend);
-        if let Some(&first) = completions.first() {
-            if first != prefix {
-                let completed = format!("/{}", first);
-                self.composer.cursor = completed.chars().count();
-                self.composer.text = completed;
-                return true;
-            }
+        if let Some(&first) = completions.first()
+            && first != prefix
+        {
+            let completed = format!("/{}", first);
+            self.composer.cursor = completed.chars().count();
+            self.composer.text = completed;
+            return true;
         }
         false
     }
@@ -664,7 +664,5 @@ pub async fn run(config: NimiaConfig) -> Result<()> {
     // Emit the iota banner once so it lives in normal terminal scrollback.
     let _ = scrollback::insert_lines(&mut terminal, scrollback::banner_lines());
 
-    let result = r#loop::run_loop(&mut terminal, &mut app, approval_rx).await;
-
-    result
+    r#loop::run_loop(&mut terminal, &mut app, approval_rx).await
 }

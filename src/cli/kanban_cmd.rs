@@ -290,13 +290,9 @@ fn execute_kanban_command(
                                 "Task #{task_id} dispatch complete: archived"
                             )]);
                         }
-                        Status::Ready => {
-                            if prev_status == Status::Running {
-                                // Worker exited non-zero — task reset to ready.
-                                println!(
-                                    "  [dispatch] worker exited non-zero (task reset to ready)"
-                                );
-                            }
+                        Status::Ready if prev_status == Status::Running => {
+                            // Worker exited non-zero — task reset to ready.
+                            println!("  [dispatch] worker exited non-zero (task reset to ready)");
                         }
                         _ => {}
                     }

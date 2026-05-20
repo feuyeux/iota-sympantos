@@ -60,10 +60,8 @@ pub fn render(
             "  running…",
             theme::status_bar_hint_style(),
         )))
-    } else if let Some(observability) = latest_observability {
-        Some(Line::from(observability_spans(observability)))
     } else {
-        None
+        latest_observability.map(|observability| Line::from(observability_spans(observability)))
     };
 
     let hints_width: usize = KEY_HINTS.iter().map(|(k, h)| k.len() + h.len() + 5).sum();

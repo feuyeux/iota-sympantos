@@ -131,13 +131,13 @@ impl TuiApp {
             .iter()
             .enumerate()
             .map(|(row_idx, line_text)| {
-                if row_idx == cur_row {
-                    if let Some(ref g) = ghost {
-                        return Line::from(vec![
-                            Span::raw(line_text.clone()),
-                            Span::styled(g.clone(), theme::ghost_text_style()),
-                        ]);
-                    }
+                if row_idx == cur_row
+                    && let Some(ref g) = ghost
+                {
+                    return Line::from(vec![
+                        Span::raw(line_text.clone()),
+                        Span::styled(g.clone(), theme::ghost_text_style()),
+                    ]);
                 }
                 Line::raw(line_text.clone())
             })

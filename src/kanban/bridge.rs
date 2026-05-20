@@ -56,7 +56,7 @@ impl AdvancedBridge {
         let board = self.get_board_for_task(&task, store)?;
         let shadow = self.materializer.materialize(&task, &board, store)?;
 
-        let result = (|| -> Result<Output> {
+        let result = {
             let mut command = Command::new(&self.hermes_bin);
             command
                 .args(["kanban", "specify", &task_id.to_string(), "--json"])
@@ -64,7 +64,7 @@ impl AdvancedBridge {
                 .env("HERMES_KANBAN_BOARD", &board.slug);
             run_with_timeout(&mut command, self.timeout)
                 .with_context(|| "failed to run hermes kanban specify")
-        })();
+        };
         let cleanup_result = self.materializer.cleanup(task_id);
         let output = result?;
         cleanup_result?;
