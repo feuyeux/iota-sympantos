@@ -137,3 +137,10 @@ cargo run --quiet -- run codex "ping" --timing
 ```
 
 **Rust 1.95+，依赖：** tokio · ratatui · rusqlite · reqwest · axum · tracing · opentelemetry · serde
+
+---
+
+- `nimia`  词源：*μνημεία*
+- `iota` 词源：*ιώτα*
+- `sýmpantos` 词源：*σύμπαντος*
+- `gefsi` 词源： `γεύση`

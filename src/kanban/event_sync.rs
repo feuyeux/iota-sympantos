@@ -105,10 +105,6 @@ pub fn import_event_bundle(
         .cloned()
         .collect();
     let events_skipped = events_seen.saturating_sub(new_events.len());
-    // Use the non-strict (warn-on-error) variant so duplicate imports from a peer are
-    // idempotent.  `replay_events_strict` would fail on a re-imported
-    // EVT_TASK_TRANSITIONED whose target state already matches the current state,
-    // making recovery after a partial import impossible.
     let events_applied = store.replay_events(&new_events)?;
     for event in &new_events {
         store.append_event(&event.event_type, &event.payload)?;

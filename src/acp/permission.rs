@@ -37,12 +37,6 @@ pub async fn install_tui_approval_channel(tx: mpsc::Sender<ApprovalRequest>) {
     *approval_lock().write().await = Some(tx);
 }
 
-/// Remove the approval channel (e.g. when the TUI exits).
-#[allow(dead_code)]
-pub async fn uninstall_tui_approval_channel() {
-    *approval_lock().write().await = None;
-}
-
 pub async fn answer_permission_request(
     stdin: &mut ChildStdin,
     id: Value,

@@ -177,18 +177,6 @@ impl SqliteKanbanStore {
         Ok(applied)
     }
 
-    /// Replay a sequence of events for sync import.
-    /// Unlike `replay_events`, this fails on the first unapplied event so the
-    /// caller can avoid advancing the peer cursor past missing state.
-    pub fn replay_events_strict(&self, events: &[KanbanEvent]) -> Result<usize> {
-        for event in events {
-            self.apply_event(event).with_context(|| {
-                format!("applying kanban event {} ({})", event.id, event.event_type)
-            })?;
-        }
-        Ok(events.len())
-    }
-
     fn apply_event(&self, event: &KanbanEvent) -> Result<()> {
         match event.event_type.as_str() {
             EVT_BOARD_CREATED => {
