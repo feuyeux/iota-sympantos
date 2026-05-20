@@ -176,70 +176,76 @@ impl IotaEngine {
             }
         }
 
-        let memory = self.memory_store.as_ref().and_then(|store| {
-            // Recall all configured memory buckets for the user/project/session capsule.
-            let thresholds = *self.effective_config.recall_thresholds();
-            let project_id = cwd.display().to_string();
+        // Run memory recall and git status concurrently — both are blocking I/O
+        // operations that are independent of each other.
+        let memory_store_c = self.memory_store.clone();
+        let thresholds = *self.effective_config.recall_thresholds();
+        let project_id = cwd.display().to_string();
+        let session_id_for_recall = self.engine_session_id.clone();
+        let cwd_for_git = cwd.clone();
+
+        let memory_task = tokio::task::spawn_blocking(move || {
+            memory_store_c.as_ref().and_then(|store| {
+                store
+                    .recall_buckets_with_thresholds(
+                        "local-user",
+                        &project_id,
+                        &session_id_for_recall,
+                        thresholds,
+                    )
+                    .ok()
+            })
+        });
+        let workspace_task =
+            tokio::task::spawn_blocking(move || crate::context::render_workspace(&cwd_for_git));
+
+        self.log_engine_event(
+            execution_id.as_deref(),
+            backend,
+            "info",
+            "memory.recall.started",
+            serde_json::json!({
+                "user_id": "local-user",
+                "project_id": cwd.display().to_string(),
+            }),
+        );
+        tracing::info!(
+            user_id = "local-user",
+            project_id = %cwd.display(),
+            "memory.recall.started"
+        );
+
+        // Await both concurrently.
+        let (memory_result, workspace_result) = tokio::join!(memory_task, workspace_task);
+        let memory = memory_result.unwrap_or(None);
+        let workspace_str = workspace_result.unwrap_or_default();
+
+        if let Some(ref buckets) = memory {
             self.log_engine_event(
                 execution_id.as_deref(),
                 backend,
                 "info",
-                "memory.recall.started",
+                "memory.recall.completed",
                 serde_json::json!({
-                    "user_id": "local-user",
-                    "project_id": project_id.clone(),
+                    "identity_count": buckets.identity.len(),
+                    "preference_count": buckets.preference.len(),
+                    "strategic_count": buckets.strategic.len(),
+                    "domain_count": buckets.domain.len(),
+                    "procedural_count": buckets.procedural.len(),
+                    "episodic_count": buckets.episodic.len(),
                 }),
             );
             tracing::info!(
-                user_id = "local-user",
-                project_id = %project_id,
-                "memory.recall.started"
+                identity_count = buckets.identity.len(),
+                preference_count = buckets.preference.len(),
+                strategic_count = buckets.strategic.len(),
+                domain_count = buckets.domain.len(),
+                procedural_count = buckets.procedural.len(),
+                episodic_count = buckets.episodic.len(),
+                "memory.recall.completed"
             );
-            match store.recall_buckets_with_thresholds(
-                "local-user",
-                &project_id,
-                &self.engine_session_id,
-                thresholds,
-            ) {
-                Ok(buckets) => {
-                    self.log_engine_event(
-                        execution_id.as_deref(),
-                        backend,
-                        "info",
-                        "memory.recall.completed",
-                        serde_json::json!({
-                            "identity_count": buckets.identity.len(),
-                            "preference_count": buckets.preference.len(),
-                            "strategic_count": buckets.strategic.len(),
-                            "domain_count": buckets.domain.len(),
-                            "procedural_count": buckets.procedural.len(),
-                            "episodic_count": buckets.episodic.len(),
-                        }),
-                    );
-                    tracing::info!(
-                        identity_count = buckets.identity.len(),
-                        preference_count = buckets.preference.len(),
-                        strategic_count = buckets.strategic.len(),
-                        domain_count = buckets.domain.len(),
-                        procedural_count = buckets.procedural.len(),
-                        episodic_count = buckets.episodic.len(),
-                        "memory.recall.completed"
-                    );
-                    Some(buckets)
-                }
-                Err(err) => {
-                    self.log_engine_event(
-                        execution_id.as_deref(),
-                        backend,
-                        "warn",
-                        "memory.recall.failed",
-                        serde_json::json!({"error": err.to_string()}),
-                    );
-                    tracing::warn!(error = %err, "memory.recall.failed");
-                    None
-                }
-            }
-        });
+        }
+
         let memory_event = memory.as_ref().map(|buckets| {
             // Keep a structured event showing which memories were injected into the prompt.
             RuntimeEvent::Memory(MemoryEvent {
@@ -286,8 +292,8 @@ impl IotaEngine {
                 events,
             ));
         }
-        // compose_effective_prompt runs `git status` which is a blocking syscall.
-        // Off-load it to the blocking thread pool to avoid stalling the tokio worker.
+        // Compose the effective prompt — git status is already pre-computed so this
+        // is now a pure CPU operation (no blocking I/O).
         let context_engine = self.context_engine.clone();
         let session_id_c = self.engine_session_id.clone();
         let model_c = model.clone();
@@ -296,23 +302,18 @@ impl IotaEngine {
         let handoff_c = handoff.clone();
         let prompt_c = prompt.to_string();
         let cwd_c = cwd.clone();
-        let effective_prompt = tokio::task::spawn_blocking(move || {
-            // ComposeInput borrows cloned values inside the blocking closure so git/status work
-            // does not stall the async runtime worker.
-            context_engine.compose_effective_prompt(ComposeInput {
-                backend,
-                cwd: &cwd_c,
-                session_id: &session_id_c,
-                model: model_c.as_deref(),
-                prompt: &prompt_c,
-                memory: memory.as_ref(),
-                skills: Some(&skills_c),
-                working_memory: &working_memory_c,
-                handoff: handoff_c.as_deref(),
-            })
-        })
-        .await
-        .context("context composition task panicked")?;
+        let effective_prompt = context_engine.compose_effective_prompt(ComposeInput {
+            backend,
+            cwd: &cwd_c,
+            session_id: &session_id_c,
+            model: model_c.as_deref(),
+            prompt: &prompt_c,
+            memory: memory.as_ref(),
+            skills: Some(&skills_c),
+            working_memory: &working_memory_c,
+            handoff: handoff_c.as_deref(),
+            workspace: Some(&workspace_str),
+        });
 
         let client_started = self.ensure_acp_client(backend, cwd.clone()).await?;
         let key = super::AcpClientKey {

@@ -584,7 +584,7 @@ impl MemoryStore {
         let type_value = memory_type.map(MemoryType::as_str);
         let conn = crate::utils::lock_or_recover(&self.conn);
         let mut stmt = conn.prepare(
-            "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory\n             WHERE scope = ?1 AND scope_id = ?2 AND (?3 IS NULL OR facet = ?3) AND (?4 IS NULL OR type = ?4) AND confidence >= ?5 AND expires_at > ?6\n             ORDER BY confidence DESC, updated_at DESC, created_at DESC LIMIT ?7",
+            "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory\n             WHERE scope = ?1 AND scope_id = ?2 AND (?3 IS NULL OR facet = ?3) AND (?4 IS NULL OR type = ?4) AND confidence >= ?5 AND expires_at > ?6\n             ORDER BY confidence DESC, content_hash ASC LIMIT ?7",
         )?;
         rows_to_records(stmt.query_map(
             params![
@@ -739,8 +739,7 @@ fn finalize_query_records(mut records: Vec<MemoryRecord>, limit: usize) -> Vec<M
             .confidence
             .partial_cmp(&left.confidence)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| right.updated_at.cmp(&left.updated_at))
-            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| left.id.cmp(&right.id))
     });
     records.dedup_by(|left, right| left.id == right.id);
     records.truncate(limit);

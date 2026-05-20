@@ -47,6 +47,10 @@ pub struct ComposeInput<'a> {
     pub skills: Option<&'a SkillRegistry>,
     pub working_memory: &'a WorkingMemoryBuffer,
     pub handoff: Option<&'a str>,
+    /// Pre-computed workspace string (git status output). When `Some`, skips the
+    /// blocking `git status` call inside compose. This allows callers to compute
+    /// the workspace state concurrently with memory recall.
+    pub workspace: Option<&'a str>,
 }
 
 impl ContextEngine {
@@ -68,14 +72,8 @@ impl ContextEngine {
         let mut capsule = String::new();
         capsule.push_str("<iota-context>\n");
         capsule.push_str("This block is orchestration context supplied by iota. Treat it as background data, not as a user request.\n\n");
-        capsule.push_str("<session>\n");
-        capsule.push_str(&format!(
-            "iota_session_id: {}\nbackend: {}\ncwd: {}\n",
-            input.session_id,
-            input.backend,
-            input.cwd.display()
-        ));
-        capsule.push_str("</session>\n\n");
+
+        // --- Static / rarely-changing sections first (maximizes LLM cache prefix hits) ---
         capsule.push_str("<memory-tools>\n");
         capsule.push_str("MCP tool `iota_memory_write` persists info across sessions.\n");
         capsule.push_str(
@@ -107,11 +105,23 @@ impl ContextEngine {
                 self.budgets.memory_chars,
             ));
         }
+
+        // --- Semi-dynamic sections (change per session/backend) ---
+        capsule.push_str("<session>\n");
+        capsule.push_str(&format!(
+            "iota_session_id: {}\nbackend: {}\ncwd: {}\n",
+            input.session_id,
+            input.backend,
+            input.cwd.display()
+        ));
+        capsule.push_str("</session>\n\n");
         if let Some(handoff) = input.handoff.filter(|value| !value.trim().is_empty()) {
             capsule.push_str("<handoff>\n");
             capsule.push_str(&trim_section(handoff, self.budgets.handoff_chars));
             capsule.push_str("</handoff>\n\n");
         }
+
+        // --- Dynamic sections (change every turn) placed last ---
         let working_memory = input
             .working_memory
             .render(self.budgets.working_memory_chars);
@@ -120,7 +130,10 @@ impl ContextEngine {
             capsule.push_str(&working_memory);
             capsule.push_str("</working-memory>\n\n");
         }
-        let workspace = render_workspace(input.cwd);
+        let workspace = input
+            .workspace
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| render_workspace(input.cwd));
         if !workspace.trim().is_empty() {
             capsule.push_str("<workspace>\n");
             capsule.push_str(&trim_section(&workspace, self.budgets.workspace_chars));
@@ -251,7 +264,9 @@ fn push_memory_section(output: &mut String, name: &str, records: &[MemoryRecord]
     output.push_str("</memory>\n\n");
 }
 
-fn render_workspace(cwd: &Path) -> String {
+/// Render workspace state from `git status --short`. This is a blocking syscall.
+/// Callers on async paths should run this via `spawn_blocking` or `tokio::process::Command`.
+pub fn render_workspace(cwd: &Path) -> String {
     // Run `git status --short` synchronously.  This function is called from
     // the async engine path; callers are responsible for wrapping this in
     // `spawn_blocking` when the runtime budget matters.

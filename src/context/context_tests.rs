@@ -17,6 +17,7 @@ fn disabled_context_returns_prompt_unchanged() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        workspace: None,
     });
     assert_eq!(prompt, "ping");
 }
@@ -38,6 +39,7 @@ fn enabled_context_wraps_prompt() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        workspace: None,
     });
     assert!(prompt.contains("<iota-context>"));
     assert!(prompt.ends_with("ping"));
@@ -117,6 +119,7 @@ fn context_with_model_includes_model_section() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        workspace: None,
     });
     assert!(prompt.contains("gpt-4o"));
 }
@@ -138,6 +141,7 @@ fn context_with_handoff_includes_handoff_section() {
         skills: None,
         working_memory: &working_memory,
         handoff: Some("Previous session: implemented auth module"),
+        workspace: None,
     });
     assert!(prompt.contains("<handoff>"));
     assert!(prompt.contains("auth module"));
