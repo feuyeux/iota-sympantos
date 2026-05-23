@@ -20,7 +20,7 @@ cli::run()
   -> match first arg:
        "run"                -> ACP prompt path
        "context-mcp"        -> mcp::server::run_stdio()
-       "fun-mcp"            -> skill::fun_server::run_stdio()
+       "fun-mcp"            -> skill::fun::run_stdio()
        "observability"      -> run_observability_command()
        "logs"                -> run_logs_command()
        "trace"               -> run_trace_command()
@@ -574,7 +574,7 @@ resources/read
 ```text
 iota fun-mcp
   -> cli::run()
-  -> skill::fun_server::run_stdio()
+  -> skill::fun::run_stdio()
 ```
 
 JSON-RPC methods：
@@ -956,7 +956,7 @@ embed(content)
 | `crates/iota-core/src/skill/mod.rs` | skill 加载、trigger、backend compatibility | 5,7,8,12 |
 | `crates/iota-core/src/skill/runner.rs` | engine-run MCP skill | 7 |
 | `crates/iota-core/src/skill/cache.rs` | skill pull/cache | 12 |
-| `crates/iota-core/src/skill/fun_server.rs` | iota-fun MCP server 和语言执行 | 7,9 |
+| `crates/iota-core/src/skill/fun.rs` | iota-fun MCP server 和语言执行 | 7,9 |
 | `crates/iota-core/src/mcp/client.rs` | stdio MCP client | 7 |
 | `crates/iota-core/src/mcp/router.rs` | ACP tool-call 拦截 | 6,11 |
 | `crates/iota-core/src/memory/store.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
@@ -978,8 +978,8 @@ embed(content)
 | `session_new_params_with_options()` | delegated child process | ACP backend | MCP servers | `mcpServers` tells backend how to spawn sidecars |
 | `mcp::client::call_stdio()` | child process + stdio | skill runner | MCP server | initialize/tools/call |
 | `mcp::server::run_stdio()` | stdio server | ACP backend or skill runner | iota-context | MCP tools/resources |
-| `skill::fun_server::run_stdio()` | stdio server | ACP backend or skill runner | iota-fun | MCP tools |
-| `skill::fun_server::run_command()` | child process | iota-fun | language runtime/compiler | execute code snippets |
+| `skill::fun::run_stdio()` | stdio server | ACP backend or skill runner | iota-fun | MCP tools |
+| `skill::fun::run_command()` | child process | iota-fun | language runtime/compiler | execute code snippets |
 | `context::render_workspace()` | child process | context engine | `git` | `git status --short` |
 | `skill::cache::pull_skill()` | network/filesystem | CLI | HTTP(S) URL or local path | fetch/copy skill |
 | `EmbeddingEngine::embed_api()` | network | memory store | Ollama-compatible API | `/api/embeddings` |

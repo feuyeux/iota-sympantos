@@ -138,7 +138,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 | `crates/iota-core/src/acp/permission.rs` | 处理 `session/request_permission`；`iota_*`、`mcp__iota-*` 或 backend `tool_whitelist` 命中时自动批准；否则走 TUI 或 stdin；记录 approval 事件 | `store::approval`, `runtime_event` |
 | `crates/iota-core/src/mcp/client.rs` | engine-run skill 使用的 stdio MCP client；启动 server、initialize、tools/call | 无项目级依赖 |
 | `crates/iota-core/src/mcp/server.rs` | `iota-context` MCP stdio server；JSON-RPC 协议适配，工具执行委托 `tool_dispatch` | `mcp::tool_dispatch`, `runtime_event`, `memory`, `store::ledger`, `skill` |
-| `crates/iota-core/src/mcp/router.rs` | 拦截 ACP 侧 `tools/call` / `mcp/tools/call` / `mcp/tool_call`；委托 `tool_dispatch` 执行 iota 工具，拒绝外部工具 | `mcp::tool_dispatch`, `memory`, `store::ledger`, `skill`, `skill::fun_server` |
+| `crates/iota-core/src/mcp/router.rs` | 拦截 ACP 侧 `tools/call` / `mcp/tools/call` / `mcp/tool_call`；委托 `tool_dispatch` 执行 iota 工具，拒绝外部工具 | `mcp::tool_dispatch`, `memory`, `store::ledger`, `skill`, `skill::fun` |
 | `crates/iota-core/src/mcp/tool_dispatch.rs` | 共享工具派发逻辑：`ToolContext` 依赖注入、`dispatch_tool()` 统一入口、所有解析器和验证器 | `memory`, `store::ledger`, `skill` |
 | `crates/iota-core/src/runtime_event/mod.rs` | 把 ACP update、complete、permission、usage、tool、error 统一为 `RuntimeEvent` | `acp::extract_text` |
 
@@ -152,7 +152,7 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 | `crates/iota-core/src/skill/mod.rs` | 加载 workspace `skills/`、workspace `.iota/skills`、配置 roots、`~/.i6/skills`；解析 YAML frontmatter；按 backend 和 trigger 匹配 | `acp::AcpBackend` |
 | `crates/iota-core/src/skill/runner.rs` | 执行 `execution.mode = mcp` skill；可顺序或并行调用 MCP tools；渲染 template | `mcp::client`, `runtime_event`, `skill` |
 | `crates/iota-core/src/skill/cache.rs` | 从本地路径或 HTTP(S) 拉取 skill，并写入 `~/.i6/skills` | filesystem/network |
-| `crates/iota-core/src/skill/fun_server.rs` | `iota-fun` MCP stdio server；运行 `fun.python/typescript/rust/go/java/cpp/zig` | 外部解释器/编译器 |
+| `crates/iota-core/src/skill/fun.rs` | `iota-fun` MCP stdio server；运行 `fun.python/typescript/rust/go/java/cpp/zig` | 外部解释器/编译器 |
 Context Fabric 提供 prompt 背景和可确定工具。
 
 ### Store
@@ -368,7 +368,7 @@ Memory search 支持 `keyword`、`vector`、`hybrid`。Vector 数据写入 `memo
 | MCP sidecar via backend | ACP backend | `iota context-mcp` / `iota fun-mcp` | backend-controlled stdio MCP |
 | MCP sidecar via skill | `skill::runner` | MCP server | child process stdio JSON-RPC |
 | Workspace summary | `context::render_workspace` | `git status --short` | child process |
-| Function tools | `skill::fun_server` | python/node/rustc/go/javac/java/clang++/g++/zig/binary | child process |
+| Function tools | `skill::fun` | python/node/rustc/go/javac/java/clang++/g++/zig/binary | child process |
 | Skill pull | CLI | local file or HTTP(S) URL | filesystem/network |
 | SQLite stores | engine/MCP/CLI | `~/.i6/context/*.sqlite` | filesystem |
 
