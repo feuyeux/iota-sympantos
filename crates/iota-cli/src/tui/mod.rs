@@ -36,13 +36,15 @@ use tokio::sync::broadcast as tokio_broadcast;
 use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::task::JoinHandle;
 
-use crate::acp::permission::{ApprovalRequest, install_tui_approval_channel};
-use crate::acp::{ALL_BACKENDS, AcpBackend};
-use crate::config::{NimiaConfig, backend_config, configured_model};
-use crate::engine::IotaEngine;
-use crate::kanban::{AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
-use crate::telemetry::metrics;
 use input::Composer;
+use iota_core::acp::permission::{ApprovalRequest, install_tui_approval_channel};
+use iota_core::acp::{ALL_BACKENDS, AcpBackend};
+use iota_core::config::{NimiaConfig, backend_config, configured_model};
+use iota_core::engine::IotaEngine;
+use iota_core::kanban::{
+    AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore,
+};
+use iota_core::telemetry::metrics;
 use kanban_view::KanbanViewState;
 use render::observability_line;
 use slash_command::{SlashAction, parse_slash_command, slash_completions};
@@ -94,7 +96,7 @@ struct TuiApp {
     /// Whether auto-dispatch daemon is active (background task ticks the dispatcher).
     kanban_daemon_active: Arc<AtomicBool>,
     /// Broadcast receiver for real-time kanban UI events.
-    kanban_event_rx: tokio_broadcast::Receiver<crate::kanban::KanbanUiEvent>,
+    kanban_event_rx: tokio_broadcast::Receiver<iota_core::kanban::KanbanUiEvent>,
 
     // Conversation and input state
     history: HistoryState,

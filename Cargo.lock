@@ -961,6 +961,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "futures-util",
+ "hostname",
  "iota-core",
  "pulldown-cmark",
  "ratatui",

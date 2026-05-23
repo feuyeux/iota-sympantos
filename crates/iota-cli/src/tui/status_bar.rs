@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::state::ObservabilityMeta;
-use crate::acp::AcpBackend;
+use iota_core::acp::AcpBackend;
 
 use super::theme;
 

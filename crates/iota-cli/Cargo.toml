@@ -10,6 +10,7 @@ chrono.workspace = true
 crossterm.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
+hostname.workspace = true
 iota-core = { path = "../iota-core" }
 pulldown-cmark.workspace = true
 ratatui.workspace = true

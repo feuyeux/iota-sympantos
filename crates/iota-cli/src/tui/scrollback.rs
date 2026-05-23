@@ -10,7 +10,7 @@ use ratatui::backend::Backend;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use crate::acp::AcpBackend;
+use iota_core::acp::AcpBackend;
 
 use super::state::{ConversationEntry, ObservabilityMeta};
 use super::{markdown, theme};
@@ -276,7 +276,7 @@ pub(super) fn insert_help<B: Backend>(terminal: &mut Terminal<B>) -> std::io::Re
 
 #[cfg(test)]
 mod tests {
-    use crate::acp::AcpBackend;
+    use iota_core::acp::AcpBackend;
 
     use super::*;
 

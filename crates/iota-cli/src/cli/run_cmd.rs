@@ -1,8 +1,8 @@
 use anyhow::Result;
 
-use crate::acp;
-use crate::config;
-use crate::engine::IotaEngine;
+use iota_core::acp;
+use iota_core::config;
+use iota_core::engine::IotaEngine;
 
 pub(super) async fn run_direct(options: &acp::AcpRunOptions) -> Result<()> {
     let config = config::read_config()?;

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::acp::AcpBackend;
+use iota_core::acp::AcpBackend;
 
 #[derive(Debug, Clone, Default)]
 pub struct ObservabilityMeta {

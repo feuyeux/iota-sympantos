@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::skill;
+use iota_core::skill;
 
 pub(super) async fn run_skill_command(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {

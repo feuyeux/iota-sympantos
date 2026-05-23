@@ -1,4 +1,4 @@
-use crate::acp::AcpBackend;
+use iota_core::acp::AcpBackend;
 
 const BACKEND_CLAUDE: u8 = 1 << 0;
 const BACKEND_CODEX: u8 = 1 << 1;

@@ -6,9 +6,9 @@ use crossterm::event::{Event as CEvent, EventStream, KeyEventKind};
 use futures_util::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::acp::{AcpBackend, AcpPromptOutput};
-use crate::kanban::TickReport;
-use crate::utils::lock_or_recover;
+use iota_core::acp::{AcpBackend, AcpPromptOutput};
+use iota_core::kanban::TickReport;
+use iota_core::utils::lock_or_recover;
 
 use super::events::LoopSignal;
 use super::state::{ConversationEntry, ObservabilityMeta};
@@ -176,8 +176,8 @@ impl TuiApp {
         }
     }
 
-    fn run_loop_handle_kanban_ui_event(&mut self, event: crate::kanban::KanbanUiEvent) {
-        use crate::kanban::KanbanUiEvent;
+    fn run_loop_handle_kanban_ui_event(&mut self, event: iota_core::kanban::KanbanUiEvent) {
+        use iota_core::kanban::KanbanUiEvent;
         let text = match event {
             KanbanUiEvent::TaskCreated { id, title } => {
                 format!("Task #{} created: {}", id, title)
@@ -320,7 +320,7 @@ impl TuiApp {
 
 fn observability_from_output(output: &AcpPromptOutput) -> ObservabilityMeta {
     let token_usage = output.events.iter().rev().find_map(|event| match event {
-        crate::runtime_event::RuntimeEvent::TokenUsage(usage) => Some(usage),
+        iota_core::runtime_event::RuntimeEvent::TokenUsage(usage) => Some(usage),
         _ => None,
     });
     ObservabilityMeta {

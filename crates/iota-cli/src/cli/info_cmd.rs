@@ -1,9 +1,9 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::acp;
-use crate::config::{self, NimiaConfig};
-use crate::daemon;
+use iota_core::acp;
+use iota_core::config::{self, NimiaConfig};
+use iota_core::daemon;
 
 #[derive(Serialize)]
 struct CombinedInfo {

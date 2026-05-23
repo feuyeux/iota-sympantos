@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::config::NimiaConfig;
-use crate::kanban::{CreateTaskRequest, SqliteKanbanStore, Status, store::KanbanStore};
+use iota_core::config::NimiaConfig;
+use iota_core::kanban::{CreateTaskRequest, SqliteKanbanStore, Status, store::KanbanStore};
 
 fn app_with_task() -> (TuiApp, u64) {
     let mut app = TuiApp::new(NimiaConfig::default()).unwrap();

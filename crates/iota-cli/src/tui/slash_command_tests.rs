@@ -1,5 +1,5 @@
-use crate::acp::AcpBackend;
-use crate::config::{BackendConfig, NimiaConfig};
+use iota_core::acp::AcpBackend;
+use iota_core::config::{BackendConfig, NimiaConfig};
 
 use super::slash_command::{SlashAction, parse_slash_command};
 use super::{ConversationEntry, TuiApp};

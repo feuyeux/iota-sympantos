@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use std::process::Stdio;
 
-use crate::acp;
-use crate::config::{self, NimiaConfig};
-use crate::daemon::{self, DaemonPromptRequest};
-use crate::engine::IotaEngine;
+use iota_core::acp;
+use iota_core::config::{self, NimiaConfig};
+use iota_core::daemon::{self, DaemonPromptRequest};
+use iota_core::engine::IotaEngine;
 
 pub(super) async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Result<()> {
     let request = DaemonPromptRequest {
@@ -104,7 +104,7 @@ pub(super) async fn run_cold_benchmark(config: NimiaConfig, rounds: usize) -> Re
             let mut engine = IotaEngine::new(config.clone(), false, acp::DEFAULT_TIMEOUT_MS);
             let started = std::time::Instant::now();
             let result = engine.run_prompt_text(backend, cwd.clone(), "ping").await;
-            let elapsed = crate::utils::elapsed_ms(started);
+            let elapsed = iota_core::utils::elapsed_ms(started);
             engine.shutdown().await;
             let status = if result.is_ok() { "ok" } else { "error" };
             println!("{},{},{},{}", backend, round, elapsed, status);
@@ -135,7 +135,7 @@ pub(super) async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) ->
             };
             let started = std::time::Instant::now();
             let result = send_prompt_autostart_daemon(&daemon_addr, &request).await;
-            let elapsed = crate::utils::elapsed_ms(started);
+            let elapsed = iota_core::utils::elapsed_ms(started);
             let status = match &result {
                 Ok(response) if response.ok => "ok",
                 _ => "error",
@@ -173,7 +173,7 @@ pub(super) async fn run_warm_benchmark(config: NimiaConfig, rounds: usize) -> Re
             }
             let started = std::time::Instant::now();
             let result = engine.run_prompt_text(backend, cwd.clone(), "ping").await;
-            let elapsed = crate::utils::elapsed_ms(started);
+            let elapsed = iota_core::utils::elapsed_ms(started);
             let status = if result.is_ok() { "ok" } else { "error" };
             println!("{},{},{},{}", backend, round, elapsed, status);
             if let Err(err) = result {

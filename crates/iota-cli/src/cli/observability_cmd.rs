@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 
-use crate::store::observability::{ObservabilityStore, StoredTokenUsage, TokenUsageSummary};
+use iota_core::store::observability::{ObservabilityStore, StoredTokenUsage, TokenUsageSummary};
 
 #[derive(Debug, PartialEq, Eq)]
 enum ObservabilityCommand {
@@ -107,7 +107,7 @@ pub(super) async fn run_observability_command(args: &[String]) -> Result<()> {
             print_token_recent(&store, limit, json)
         }
         ObservabilityCommand::TokensSummary { since_secs, json } => {
-            let since_ts = crate::utils::now_ts() - since_secs;
+            let since_ts = iota_core::utils::now_ts() - since_secs;
             let summaries = store.token_summary_since(since_ts)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&summaries)?);

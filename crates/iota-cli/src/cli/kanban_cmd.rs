@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 
-use crate::acp::AcpBackend;
-use crate::config::{self, backend_config, backend_process_env_with_context};
-use crate::kanban::types::Status;
-use crate::kanban::{
+use iota_core::acp::AcpBackend;
+use iota_core::config::{self, backend_config, backend_process_env_with_context};
+use iota_core::kanban::types::Status;
+use iota_core::kanban::{
     AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore,
     default_pull_source, export_event_bundle, import_event_bundle, pull_event_bundle,
     push_event_bundle, read_event_bundle, serve_event_sync, write_event_bundle,
@@ -53,7 +53,7 @@ fn execute_kanban_command(
                 .filter(|s| !s.is_empty())
                 .context("Usage: iota kanban create-task <board-id> <title>")?
                 .join(" ");
-            use crate::kanban::types::{CreateTaskRequest, Status as KStatus};
+            use iota_core::kanban::types::{CreateTaskRequest, Status as KStatus};
             let req = CreateTaskRequest {
                 board_id,
                 title: title.clone(),
@@ -242,7 +242,7 @@ fn execute_kanban_command(
             let hermes_env = config::read_config()
                 .ok()
                 .map(|cfg| {
-                    let default_section = crate::config::BackendConfig::default();
+                    let default_section = iota_core::config::BackendConfig::default();
                     let section = backend_config(&cfg, AcpBackend::Hermes);
                     let section_ref = section.unwrap_or(&default_section);
                     backend_process_env_with_context(AcpBackend::Hermes, section_ref, None)
@@ -355,7 +355,7 @@ fn usage() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kanban::{CreateTaskRequest, Status};
+    use iota_core::kanban::{CreateTaskRequest, Status};
 
     fn fake_hermes_echo_spec(tmp: &Path) -> PathBuf {
         if cfg!(windows) {

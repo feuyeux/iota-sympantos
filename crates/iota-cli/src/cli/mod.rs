@@ -1,12 +1,12 @@
 use anyhow::Result;
 
-use crate::acp;
-use crate::config;
-use crate::daemon;
-use crate::mcp::server as mcp_server;
-use crate::skill::fun;
-use crate::telemetry::{self, TelemetryConfig};
 use crate::tui;
+use iota_core::acp;
+use iota_core::config;
+use iota_core::daemon;
+use iota_core::mcp::server as mcp_server;
+use iota_core::skill::fun;
+use iota_core::telemetry::{self, TelemetryConfig};
 
 mod daemon_cmd;
 mod info_cmd;
@@ -179,7 +179,7 @@ async fn run_caching_benchmark() -> Result<()> {
 
     println!("=== STARTING CACHING BENCHMARK (3 TURNS) ===");
     let mut engine =
-        crate::engine::IotaEngine::create_session(config, false, acp::DEFAULT_TIMEOUT_MS, None);
+        iota_core::engine::IotaEngine::create_session(config, false, acp::DEFAULT_TIMEOUT_MS, None);
 
     let prompts = vec![
         "Write a 1-line welcome message for a developer tool.",
@@ -210,8 +210,8 @@ async fn run_caching_benchmark() -> Result<()> {
 
         let mut tokens_found = false;
         if let Some(ref exec_id) = output.execution_id {
-            if let Ok(store) = crate::store::observability::ObservabilityStore::open(
-                &crate::store::observability::ObservabilityStore::default_path()?,
+            if let Ok(store) = iota_core::store::observability::ObservabilityStore::open(
+                &iota_core::store::observability::ObservabilityStore::default_path()?,
             ) {
                 if let Ok(records) = store.token_usage_for_execution(exec_id) {
                     if let Some(t) = records.iter().find(|r| r.input_tokens.is_some()) {
