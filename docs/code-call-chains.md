@@ -963,8 +963,8 @@ embed(content)
 | `crates/iota-core/src/memory/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
 | `crates/iota-core/src/store/cache.rs` | execution lifecycle | 1,3,4,12 |
 | `crates/iota-core/src/store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
-| `store/approvals.rs` | approval 事件和风险分类 | 11 |
-| `utils.rs` | 时间、摘要、lock recovery | 多条链路 |
+| `crates/iota-core/src/store/approvals.rs` | approval 事件和风险分类 | 11 |
+| `crates/iota-core/src/utils/mod.rs` | 时间、摘要、lock recovery | 多条链路 |
 
 ## 进程间和外部调用清单
 
