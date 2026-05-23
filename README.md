@@ -144,3 +144,5 @@ cargo run --quiet -- run codex "ping" --timing
 - `iota` 词源：*ιώτα*
 - `sýmpantos` 词源：*σύμπαντος*
 - `gefsi` 词源： `γεύση`
+
+https://v2.tauri.app/release/
