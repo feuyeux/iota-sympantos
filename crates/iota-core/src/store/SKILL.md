@@ -1,8 +1,8 @@
 ---
 name: iota-src-store
-description: Use when working on SQLite-backed cache, approval policy persistence, session ledger storage, token observability, execution idempotency, or files under src/store.
+description: Use when working on SQLite-backed cache, approval policy persistence, session ledger storage, token observability, execution idempotency, or files under crates/iota-core/src/store.
 triggers:
-  - src/store
+  - crates/iota-core/src/store
   - CacheStore
   - ApprovalStore
   - SessionLedger

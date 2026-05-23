@@ -1,8 +1,8 @@
 ---
 name: iota-src-tui
-description: Use when working on ratatui interactive UI, composer key handling, markdown rendering, overlays, terminal lifecycle, frame loop, or files under src/tui.
+description: Use when working on ratatui interactive UI, composer key handling, markdown rendering, overlays, terminal lifecycle, frame loop, or files under crates/iota-cli/src/tui.
 triggers:
-  - src/tui
+  - crates/iota-cli/src/tui
   - TUI
   - ratatui
   - input

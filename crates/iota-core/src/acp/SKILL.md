@@ -1,8 +1,8 @@
 ---
 name: iota-src-acp
-description: Use when working on ACP backend processes, JSON-RPC wire handling, session lifecycle, permissions, backend aliases, streaming responses, or files under src/acp.
+description: Use when working on ACP backend processes, JSON-RPC wire handling, session lifecycle, permissions, backend aliases, streaming responses, or files under crates/iota-core/src/acp.
 triggers:
-  - src/acp
+  - crates/iota-core/src/acp
   - AcpBackend
   - AcpClient
   - ACP

@@ -1,8 +1,8 @@
 ---
 name: iota-src-memory
-description: Use when working on persistent memory records, recall buckets, SQLite FTS5 search, TF-IDF embeddings, merge modes, or files under src/memory.
+description: Use when working on persistent memory records, recall buckets, SQLite FTS5 search, TF-IDF embeddings, merge modes, or files under crates/iota-core/src/memory.
 triggers:
-  - src/memory
+  - crates/iota-core/src/memory
   - MemoryStore
   - MemoryRecord
   - RecallBuckets

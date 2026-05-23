@@ -1,8 +1,8 @@
 ---
 name: iota-src-engine
-description: Use when working on IotaEngine orchestration, prompt turns, ACP client reuse, context injection, memory writes, session ledger, handoffs, or files under src/engine.
+description: Use when working on IotaEngine orchestration, prompt turns, ACP client reuse, context injection, memory writes, session ledger, handoffs, or files under crates/iota-core/src/engine.
 triggers:
-  - src/engine
+  - crates/iota-core/src/engine
   - IotaEngine
   - ClientKey
   - run_with_timing

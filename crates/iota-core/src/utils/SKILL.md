@@ -1,8 +1,8 @@
 ---
 name: iota-src-utils
-description: Use when working on shared utility helpers, elapsed timing, timestamp helpers, summary truncation, mutex recovery, or files under src/utils.
+description: Use when working on shared utility helpers, elapsed timing, timestamp helpers, summary truncation, mutex recovery, or files under crates/iota-core/src/utils.
 triggers:
-  - src/utils
+  - crates/iota-core/src/utils
   - elapsed_ms
   - now_ts
   - summarize

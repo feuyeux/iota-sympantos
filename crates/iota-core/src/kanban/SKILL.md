@@ -2,7 +2,7 @@
 name: kanban
 description: Use when working on kanban task board, dispatch, shadow DB materialization, hermes worker lifecycle, event sourcing, or cross-node sync.
 triggers:
-  - src/kanban
+  - crates/iota-core/src/kanban
   - kanban
   - dispatch
   - shadow

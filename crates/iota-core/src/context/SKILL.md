@@ -1,8 +1,8 @@
 ---
 name: iota-src-context
-description: Use when working on Context Fabric prompt capsules, memory/skill/workspace injection, working memory, context budgets, or files under src/context.
+description: Use when working on Context Fabric prompt capsules, memory/skill/workspace injection, working memory, context budgets, or files under crates/iota-core/src/context.
 triggers:
-  - src/context
+  - crates/iota-core/src/context
   - ContextEngine
   - ComposeInput
   - WorkingMemoryBuffer

@@ -1,8 +1,8 @@
 ---
 name: iota-src-runtime-event
-description: Use when working on normalized runtime events, ACP-to-event mapping, telemetry/TUI routing events, token usage, approvals, or files under src/runtime_event.
+description: Use when working on normalized runtime events, ACP-to-event mapping, telemetry/TUI routing events, token usage, approvals, or files under crates/iota-core/src/runtime_event.
 triggers:
-  - src/runtime_event
+  - crates/iota-core/src/runtime_event
   - RuntimeEvent
   - OutputEvent
   - ToolCallEvent

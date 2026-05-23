@@ -1,8 +1,8 @@
 ---
 name: iota-src-cli
-description: Use when working on iota CLI commands, argument dispatch, run/check/bench/memory/skill commands, daemon routing, or files under src/cli.
+description: Use when working on iota CLI commands, argument dispatch, run/check/bench/memory/skill commands, daemon routing, or files under crates/iota-cli/src/cli.
 triggers:
-  - src/cli
+  - crates/iota-cli/src/cli
   - iota run
   - iota check
   - bench-cold

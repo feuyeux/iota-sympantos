@@ -1,8 +1,8 @@
 ---
 name: iota-src-config
-description: Use when working on nimia.yaml loading, backend environment mapping, model provider config, context budgets, path expansion, or files under src/config.
+description: Use when working on nimia.yaml loading, backend environment mapping, model provider config, context budgets, path expansion, or files under crates/iota-core/src/config.
 triggers:
-  - src/config
+  - crates/iota-core/src/config
   - nimia.yaml
   - NimiaConfig
   - BackendConfig

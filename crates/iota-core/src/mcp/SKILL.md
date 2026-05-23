@@ -1,8 +1,8 @@
 ---
 name: iota-src-mcp
-description: Use when working on MCP stdio server/client code, iota-context tools, ACP tool-call interception, shared tool dispatch, or files under src/mcp.
+description: Use when working on MCP stdio server/client code, iota-context tools, ACP tool-call interception, shared tool dispatch, or files under crates/iota-core/src/mcp.
 triggers:
-  - src/mcp
+  - crates/iota-core/src/mcp
   - MCP
   - iota-context
   - iota_memory_write

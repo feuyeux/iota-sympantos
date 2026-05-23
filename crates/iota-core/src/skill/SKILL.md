@@ -1,8 +1,8 @@
 ---
 name: iota-src-skill
-description: Use when working on skill registry loading, trigger matching, advisory or MCP skill execution, skill cache, sandbox executor, or files under src/skill.
+description: Use when working on skill registry loading, trigger matching, advisory or MCP skill execution, skill cache, sandbox executor, or files under crates/iota-core/src/skill.
 triggers:
-  - src/skill
+  - crates/iota-core/src/skill
   - SkillRegistry
   - SkillExecution
   - SkillExecutionMode

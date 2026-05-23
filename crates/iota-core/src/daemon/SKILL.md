@@ -1,8 +1,8 @@
 ---
 name: iota-src-daemon
-description: Use when working on the internal TCP daemon, EnginePool reuse by cwd, daemon prompt protocol, warm ACP clients, or files under src/daemon.
+description: Use when working on the internal TCP daemon, EnginePool reuse by cwd, daemon prompt protocol, warm ACP clients, or files under crates/iota-core/src/daemon.
 triggers:
-  - src/daemon
+  - crates/iota-core/src/daemon
   - EnginePool
   - DaemonPromptRequest
   - DaemonPromptResponse

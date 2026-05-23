@@ -1,8 +1,8 @@
 ---
 name: iota-src-telemetry
-description: Use when working on OpenTelemetry setup, OTLP export, stderr logging, metrics counters/histograms, telemetry shutdown, or files under src/telemetry.
+description: Use when working on OpenTelemetry setup, OTLP export, stderr logging, metrics counters/histograms, telemetry shutdown, or files under crates/iota-core/src/telemetry.
 triggers:
-  - src/telemetry
+  - crates/iota-core/src/telemetry
   - TelemetryConfig
   - OtelGuard
   - IotaMetrics
