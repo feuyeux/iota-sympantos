@@ -5,11 +5,11 @@
 ## 入口总览
 
 ```text
-src/main.rs
+crates/iota-cli/src/main.rs
   -> cli::run()
 ```
 
-`main.rs` 只注册模块并启动 Tokio runtime。所有用户可见入口由 `src/cli/mod.rs` 分发。
+`crates/iota-cli/src/main.rs` 启动 Tokio runtime。所有用户可见入口由 `crates/iota-cli/src/cli/mod.rs` 分发。
 
 ## CLI 命令分发
 
@@ -20,7 +20,7 @@ cli::run()
   -> match first arg:
        "run"                -> ACP prompt path
        "context-mcp"        -> mcp::server::run_stdio()
-       "fun-mcp"            -> skill::fun_server::run_stdio()
+       "fun-mcp"            -> skill::fun::run_stdio()
        "observability"      -> run_observability_command()
        "logs"                -> run_logs_command()
        "trace"               -> run_trace_command()
@@ -181,11 +181,11 @@ initialize
 
 | 模块 | 调用点 | 职责 |
 | :---| :---| :---|
-| `acp/wire.rs` | `read_prompt_events_for_id()`, `wait_for_response()` | 带 timeout 的 line read、JSON parse、response id 判断、error 格式化 |
-| `runtime_event.rs` | ACP event loop | update/complete/permission/usage/tool/error 到 `RuntimeEvent` |
-| `acp/permission.rs` | permission request | 自动批准 iota tool/whitelist，或走 TUI/stdin |
-| `mcp/router.rs` | ACP tool-call event | 路由 iota tools，拒绝外部 tools |
-| `acp/session.rs` | `ensure_session_timed()` | 渲染 `cwd` 和 `mcpServers` |
+| `crates/iota-core/src/acp/wire.rs` | `read_prompt_events_for_id()`, `wait_for_response()` | 带 timeout 的 line read、JSON parse、response id 判断、error 格式化 |
+| `crates/iota-core/src/runtime_event/` | ACP event loop | update/complete/permission/usage/tool/error 到 `RuntimeEvent` |
+| `crates/iota-core/src/acp/permission.rs` | permission request | 自动批准 iota tool/whitelist，或走 TUI/stdin |
+| `crates/iota-core/src/mcp/router.rs` | ACP tool-call event | 路由 iota tools，拒绝外部 tools |
+| `crates/iota-core/src/acp/session.rs` | `ensure_session_timed()` | 渲染 `cwd` 和 `mcpServers` |
 
 ## 链路 3：CLI 经 daemon 运行
 
@@ -574,7 +574,7 @@ resources/read
 ```text
 iota fun-mcp
   -> cli::run()
-  -> skill::fun_server::run_stdio()
+  -> skill::fun::run_stdio()
 ```
 
 JSON-RPC methods：
@@ -927,44 +927,44 @@ embed(content)
 
 | 模块 | 主要职责 | 覆盖链路 |
 | :---| :---| :---|
-| `main.rs` | Tokio 入口 | 入口总览 |
-| `cli/mod.rs` | 命令分发、daemon autostart、bench、logs/trace、native、skill | 1,3,4,12 |
-| `config.rs` | `~/.i6/nimia.yaml`、EffectiveConfig、backend command/env、MCP/session options、embedding config | 1,2,3,10 |
-| `engine.rs` | 核心编排、memory、skill、context、ACP pool、store 写回 | 1,3,4,5,6,7 |
-| `acp/mod.rs` | ACP backend、子进程、JSON-RPC、prompt event loop | 1,2 |
-| `acp/session.rs` | session/new 和 mcpServers | 2,10 |
-| `acp/wire.rs` | ACP line read/parse/id/error | 2 |
-| `acp/permission.rs` | ACP permission、auto approve、TUI/stdin approval | 4,11 |
-| `runtime_event.rs` | 事件归一化 | 1,2,11,12 |
-| `daemon/mod.rs` | daemon TCP server、warm/prompt、graceful shutdown | 3 |
-| `daemon/pool.rs` | 按 cwd 复用 IotaEngine | 3 |
-| `daemon/proto.rs` | daemon wire types | 3 |
-| `tui/mod.rs` | TUI 模块入口，`run()` bootstrap | 4 |
-| `tui/input.rs` | 输入编辑器 | 4 |
-| `tui/markdown.rs` | Markdown 渲染 | 4 |
-| `tui/scrollback.rs` | 终端内联滚动区 | 4 |
-| `tui/status_bar.rs` | 状态栏 | 4 |
-| `tui/render.rs` | 主渲染器 | 4 |
-| `tui/state.rs` | 对话和观测状态 | 4 |
-| `tui/loop.rs` | Tokio event loop | 4 |
-| `tui/events.rs` | TUI 事件定义 | 4 |
-| `tui/terminal_lifecycle.rs` | 终端生命周期 | 4 |
-| `tui/theme.rs` | TUI 样式 | 4 |
-| `context/mod.rs` | context capsule、WorkingMemoryBuffer、workspace summary | 5 |
-| `mcp/server.rs` | iota-context MCP server（协议适配，委托 tool_dispatch） | 6,8 |
-| `mcp/tool_dispatch.rs` | 共享工具派发逻辑（server 和 router 共用） | 6,8,11 |
-| `skill/mod.rs` | skill 加载、trigger、backend compatibility | 5,7,8,12 |
-| `skill/runner.rs` | engine-run MCP skill | 7 |
-| `skill/cache.rs` | skill pull/cache | 12 |
-| `skill/fun_server.rs` | iota-fun MCP server 和语言执行 | 7,9 |
-| `mcp/client.rs` | stdio MCP client | 7 |
-| `mcp/router.rs` | ACP tool-call 拦截 | 6,11 |
-| `store/memory.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
-| `store/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
-| `store/cache.rs` | execution lifecycle | 1,3,4,12 |
-| `store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
-| `store/approvals.rs` | approval 事件和风险分类 | 11 |
-| `utils.rs` | 时间、摘要、lock recovery | 多条链路 |
+| `crates/iota-cli/src/main.rs` | Tokio 入口 | 入口总览 |
+| `crates/iota-cli/src/cli/mod.rs` | 命令分发、daemon autostart、bench、logs/trace、native、skill | 1,3,4,12 |
+| `crates/iota-core/src/config/` | `~/.i6/nimia.yaml`、EffectiveConfig、backend command/env、MCP/session options、embedding config | 1,2,3,10 |
+| `crates/iota-core/src/engine/` | 核心编排、memory、skill、context、ACP pool、store 写回 | 1,3,4,5,6,7 |
+| `crates/iota-core/src/acp/mod.rs` | ACP backend、子进程、JSON-RPC、prompt event loop | 1,2 |
+| `crates/iota-core/src/acp/session.rs` | session/new 和 mcpServers | 2,10 |
+| `crates/iota-core/src/acp/wire.rs` | ACP line read/parse/id/error | 2 |
+| `crates/iota-core/src/acp/permission.rs` | ACP permission、auto approve、TUI/stdin approval | 4,11 |
+| `crates/iota-core/src/runtime_event/` | 事件归一化 | 1,2,11,12 |
+| `crates/iota-core/src/daemon/mod.rs` | daemon TCP server、warm/prompt、graceful shutdown | 3 |
+| `crates/iota-core/src/daemon/pool.rs` | 按 cwd 复用 IotaEngine | 3 |
+| `crates/iota-core/src/daemon/proto.rs` | daemon wire types | 3 |
+| `crates/iota-cli/src/tui/mod.rs` | TUI 模块入口，`run()` bootstrap | 4 |
+| `crates/iota-cli/src/tui/input.rs` | 输入编辑器 | 4 |
+| `crates/iota-cli/src/tui/markdown.rs` | Markdown 渲染 | 4 |
+| `crates/iota-cli/src/tui/scrollback.rs` | 终端内联滚动区 | 4 |
+| `crates/iota-cli/src/tui/status_bar.rs` | 状态栏 | 4 |
+| `crates/iota-cli/src/tui/render.rs` | 主渲染器 | 4 |
+| `crates/iota-cli/src/tui/state.rs` | 对话和观测状态 | 4 |
+| `crates/iota-cli/src/tui/loop.rs` | Tokio event loop | 4 |
+| `crates/iota-cli/src/tui/events.rs` | TUI 事件定义 | 4 |
+| `crates/iota-cli/src/tui/terminal_lifecycle.rs` | 终端生命周期 | 4 |
+| `crates/iota-cli/src/tui/theme.rs` | TUI 样式 | 4 |
+| `crates/iota-core/src/context/mod.rs` | context capsule、WorkingMemoryBuffer、workspace summary | 5 |
+| `crates/iota-core/src/mcp/server.rs` | iota-context MCP server（协议适配，委托 tool_dispatch） | 6,8 |
+| `crates/iota-core/src/mcp/tool_dispatch.rs` | 共享工具派发逻辑（server 和 router 共用） | 6,8,11 |
+| `crates/iota-core/src/skill/mod.rs` | skill 加载、trigger、backend compatibility | 5,7,8,12 |
+| `crates/iota-core/src/skill/runner.rs` | engine-run MCP skill | 7 |
+| `crates/iota-core/src/skill/cache.rs` | skill pull/cache | 12 |
+| `crates/iota-core/src/skill/fun.rs` | iota-fun MCP server 和语言执行 | 7,9 |
+| `crates/iota-core/src/mcp/client.rs` | stdio MCP client | 7 |
+| `crates/iota-core/src/mcp/router.rs` | ACP tool-call 拦截 | 6,11 |
+| `crates/iota-core/src/memory/store.rs` | memory taxonomy、recall、search、merge、TTL | 5,6,8,11 |
+| `crates/iota-core/src/memory/embedding.rs` | API/local embedding、cosine、blob encode/decode | 6 |
+| `crates/iota-core/src/store/cache.rs` | execution lifecycle | 1,3,4,12 |
+| `crates/iota-core/src/store/ledger.rs` | session/backend session/turn/handoff | 1,5,8,11 |
+| `crates/iota-core/src/store/approvals.rs` | approval 事件和风险分类 | 11 |
+| `crates/iota-core/src/utils/mod.rs` | 时间、摘要、lock recovery | 多条链路 |
 
 ## 进程间和外部调用清单
 
@@ -978,8 +978,8 @@ embed(content)
 | `session_new_params_with_options()` | delegated child process | ACP backend | MCP servers | `mcpServers` tells backend how to spawn sidecars |
 | `mcp::client::call_stdio()` | child process + stdio | skill runner | MCP server | initialize/tools/call |
 | `mcp::server::run_stdio()` | stdio server | ACP backend or skill runner | iota-context | MCP tools/resources |
-| `skill::fun_server::run_stdio()` | stdio server | ACP backend or skill runner | iota-fun | MCP tools |
-| `skill::fun_server::run_command()` | child process | iota-fun | language runtime/compiler | execute code snippets |
+| `skill::fun::run_stdio()` | stdio server | ACP backend or skill runner | iota-fun | MCP tools |
+| `skill::fun::run_command()` | child process | iota-fun | language runtime/compiler | execute code snippets |
 | `context::render_workspace()` | child process | context engine | `git` | `git status --short` |
 | `skill::cache::pull_skill()` | network/filesystem | CLI | HTTP(S) URL or local path | fetch/copy skill |
 | `EmbeddingEngine::embed_api()` | network | memory store | Ollama-compatible API | `/api/embeddings` |

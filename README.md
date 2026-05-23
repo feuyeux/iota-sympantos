@@ -132,8 +132,8 @@ CLI / TUI
 ```bash
 cargo test               # 367 tests
 cargo check --offline
-RUST_LOG=debug cargo run --quiet
-cargo run --quiet -- run codex "ping" --timing
+RUST_LOG=debug cargo run -p iota-cli --quiet
+cargo run -p iota-cli --quiet -- run codex "ping" --timing
 ```
 
 **Rust 1.95+，依赖：** tokio · ratatui · rusqlite · reqwest · axum · tracing · opentelemetry · serde
