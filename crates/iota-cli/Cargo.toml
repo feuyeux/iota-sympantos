@@ -1,0 +1,23 @@
+[package]
+name = "iota-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+crossterm.workspace = true
+futures-util.workspace = true
+iota-core = { path = "../iota-core" }
+pulldown-cmark.workspace = true
+ratatui.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+
+[[bin]]
+name = "iota"
+path = "src/main.rs"
