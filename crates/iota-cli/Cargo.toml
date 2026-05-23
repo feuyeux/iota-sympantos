@@ -8,15 +8,23 @@ rust-version.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 crossterm.workspace = true
+dirs.workspace = true
 futures-util.workspace = true
 iota-core = { path = "../iota-core" }
 pulldown-cmark.workspace = true
 ratatui.workspace = true
+reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
+urlencoding.workspace = true
+uuid.workspace = true
+
+[build-dependencies]
+chrono.workspace = true
 
 [[bin]]
 name = "iota"
