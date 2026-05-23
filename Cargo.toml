@@ -2,6 +2,7 @@
 members = [
     "crates/iota-core",
     "crates/iota-cli",
+    "crates/iota-desktop/src-tauri",
 ]
 resolver = "3"
 
