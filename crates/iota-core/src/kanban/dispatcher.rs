@@ -194,18 +194,18 @@ impl Dispatcher {
             let (events, terminal_status) = entry.1.poll().unwrap_or_default();
 
             // Sync events into the store
-            if !events.is_empty() {
-                if let Some(entry) = self.workers.get_mut(&task_id) {
-                    match entry.1.sync_events(&events, store, &run_id) {
-                        Ok(()) => entry.1.mark_events_synced(&events),
-                        Err(e) => {
-                            tracing::warn!(
-                                task_id,
-                                run_id = %run_id,
-                                error = %e,
-                                "failed to sync shadow events"
-                            );
-                        }
+            if !events.is_empty()
+                && let Some(entry) = self.workers.get_mut(&task_id)
+            {
+                match entry.1.sync_events(&events, store, &run_id) {
+                    Ok(()) => entry.1.mark_events_synced(&events),
+                    Err(e) => {
+                        tracing::warn!(
+                            task_id,
+                            run_id = %run_id,
+                            error = %e,
+                            "failed to sync shadow events"
+                        );
                     }
                 }
             }
@@ -248,10 +248,11 @@ impl Dispatcher {
 
             // --- Terminal status from shadow or process has exited ---
             if terminal_status.is_some() || exit_code.is_some() {
-                if terminal_status.is_some() && exit_code.is_none() {
-                    if let Some(entry) = self.workers.get_mut(&task_id) {
-                        let _ = entry.0.kill();
-                    }
+                if terminal_status.is_some()
+                    && exit_code.is_none()
+                    && let Some(entry) = self.workers.get_mut(&task_id)
+                {
+                    let _ = entry.0.kill();
                 }
                 let failed = exit_code.map(|c| c != 0).unwrap_or(false);
                 let rs = if failed {

@@ -163,15 +163,6 @@ fn parse_rounds(args: &[String]) -> Option<usize> {
         .find_map(|value| value.parse::<usize>().ok())
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn parse_rounds_skips_daemon_flags() {
-        let args = vec!["--daemon".to_string(), "5".to_string()];
-        assert_eq!(super::parse_rounds(&args), Some(5));
-    }
-}
-
 async fn run_caching_benchmark() -> Result<()> {
     let config = config::read_config()?;
     let cwd = std::env::current_dir()?;
@@ -181,7 +172,7 @@ async fn run_caching_benchmark() -> Result<()> {
     let mut engine =
         iota_core::engine::IotaEngine::create_session(config, false, acp::DEFAULT_TIMEOUT_MS, None);
 
-    let prompts = vec![
+    let prompts = [
         "Write a 1-line welcome message for a developer tool.",
         "Add a 1-line joke about debugging to that welcome message.",
         "Combine them into a single, cohesive welcome banner.",
@@ -209,22 +200,20 @@ async fn run_caching_benchmark() -> Result<()> {
         println!("  Total (ms): {}", output.timing.total_ms);
 
         let mut tokens_found = false;
-        if let Some(ref exec_id) = output.execution_id {
-            if let Ok(store) = iota_core::store::observability::ObservabilityStore::open(
+        if let Some(ref exec_id) = output.execution_id
+            && let Ok(store) = iota_core::store::observability::ObservabilityStore::open(
                 &iota_core::store::observability::ObservabilityStore::default_path()?,
-            ) {
-                if let Ok(records) = store.token_usage_for_execution(exec_id) {
-                    if let Some(t) = records.iter().find(|r| r.input_tokens.is_some()) {
-                        println!("Tokens:");
-                        println!("  Input: {:?}", t.input_tokens);
-                        println!("  Cache Read: {:?}", t.cache_read_input_tokens);
-                        println!("  Cache Creation: {:?}", t.cache_creation_input_tokens);
-                        println!("  Output: {:?}", t.output_tokens);
-                        println!("  Total: {:?}", t.normalized_total_tokens);
-                        tokens_found = true;
-                    }
-                }
-            }
+            )
+            && let Ok(records) = store.token_usage_for_execution(exec_id)
+            && let Some(t) = records.iter().find(|r| r.input_tokens.is_some())
+        {
+            println!("Tokens:");
+            println!("  Input: {:?}", t.input_tokens);
+            println!("  Cache Read: {:?}", t.cache_read_input_tokens);
+            println!("  Cache Creation: {:?}", t.cache_creation_input_tokens);
+            println!("  Output: {:?}", t.output_tokens);
+            println!("  Total: {:?}", t.normalized_total_tokens);
+            tokens_found = true;
         }
         if !tokens_found {
             println!("Tokens: NOT FOUND IN OBSERVABILITY STORE");
@@ -235,3 +224,7 @@ async fn run_caching_benchmark() -> Result<()> {
     println!("\n=== BENCHMARK COMPLETED ===");
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

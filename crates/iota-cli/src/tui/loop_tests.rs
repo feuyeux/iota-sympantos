@@ -43,6 +43,7 @@ fn tick_drives_kanban_dispatcher_lifecycle() {
     std::fs::create_dir_all(&tmp).unwrap();
     app.kanban_store = Arc::new(SqliteKanbanStore::open(&tmp.join("store.db")).unwrap());
     app.kanban_dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig {
+        hermes_bin: PathBuf::from("/missing/hermes-for-iota-test"),
         shadows_dir: tmp.join("shadows"),
         ..Default::default()
     })));
@@ -62,9 +63,6 @@ fn tick_drives_kanban_dispatcher_lifecycle() {
             workspace_path: None,
         })
         .unwrap();
-    lock_or_recover(&app.kanban_dispatcher)
-        .set_hermes_bin_for_tests(PathBuf::from("/missing/hermes-for-iota-test"));
-
     let result = {
         let store = app.kanban_store.clone();
         lock_or_recover(&app.kanban_dispatcher).tick(store.as_ref())

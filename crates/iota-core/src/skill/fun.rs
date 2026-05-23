@@ -120,20 +120,28 @@ fn run_rust(timeout_ms: u64) -> Result<String> {
     let bin = cached_binary_path("rust", &sources)?;
     let effective_timeout = timeout_ms.max(30_000);
     if !bin.exists() {
-        let mut compile_args = vec![
+        let compile_args = vec![
             OsString::from("runner.rs"),
             OsString::from("-o"),
             bin.as_os_str().to_os_string(),
         ];
         #[cfg(windows)]
         {
+            let mut compile_args = compile_args;
             // rust-lld avoids depending on external MSVC linker installations.
             compile_args.push(OsString::from("-C"));
             compile_args.push(OsString::from("linker=rust-lld"));
+            let compiled = run_command("rustc", &compile_args, Some(&cwd), effective_timeout);
+            if compiled.is_err() {
+                return Ok(fallback_material());
+            }
         }
-        let compiled = run_command("rustc", &compile_args, Some(&cwd), effective_timeout);
-        if compiled.is_err() {
-            return Ok(fallback_material());
+        #[cfg(not(windows))]
+        {
+            let compiled = run_command("rustc", &compile_args, Some(&cwd), effective_timeout);
+            if compiled.is_err() {
+                return Ok(fallback_material());
+            }
         }
     }
     match run_command(bin.as_os_str(), &[], Some(&cwd), effective_timeout) {
