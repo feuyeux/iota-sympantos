@@ -322,7 +322,7 @@ Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 | `mcp_env_shape` | `string_array` 或 `object` |
 | `override_home` | 是否把 backend `home` 映射到对应 env；Hermes 模板默认 `false` |
 
-当前 `acp/session.rs` 对所有 backend 都渲染 `{name,type,command,args,env}`；env 形态可由配置切换为字符串数组或对象。Codex 即使 server 为空也会发送 `mcpServers` 字段。
+当前 `crates/iota-core/src/acp/session.rs` 对所有 backend 都渲染 `{name,type,command,args,env}`；env 形态可由配置切换为字符串数组或对象。Codex 即使 server 为空也会发送 `mcpServers` 字段。
 
 ## 数据模型
 

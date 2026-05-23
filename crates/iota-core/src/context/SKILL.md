@@ -20,7 +20,7 @@ Composes the `<iota-context>` XML capsule injected into every prompt, assembling
 - Manage working memory buffer (circular buffer of recent turns)
 - Enforce character budgets per section (memory, skills, working memory)
 
-> **Note:** The MCP sidecar (`iota-context`) that was formerly in `context/server.rs` now lives in [`mcp/server.rs`](../mcp/SKILL.md).
+> **Note:** The MCP sidecar (`iota-context`) that was formerly in `crates/iota-core/src/context/server.rs` now lives in [`crates/iota-core/src/mcp/server.rs`](../mcp/SKILL.md).
 
 ## Key Types
 
