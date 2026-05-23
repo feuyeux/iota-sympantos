@@ -53,7 +53,7 @@ crates/
                                       ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
 │ Presentation                                                               │
-│   crates/iota-cli/src/cli/            crates/iota-cli/src/tui.rs + tui/*    │
+│   crates/iota-cli/src/cli/            crates/iota-cli/src/tui/mod.rs + tui/*    │
 │   CLI command routing                 interactive terminal UI              │
 └────────────────────────────────────────────────────────────────────────────┘
                     │                                     │
@@ -103,7 +103,7 @@ crates/
 | :---| :---| :---|
 | `crates/iota-cli/src/cli/mod.rs` | 解析命令并分发 `run/check/tui/bench/observability/logs/trace/context-mcp/fun-mcp/skill/__daemon`；负责 daemon autostart 和 CLI 输出 | `config`, `engine`, `daemon`, `acp`, `store`, `skill`, `tui` |
 | `crates/iota-cli/src/cli/observability_cmd.rs` | `iota observability logging/tokens/metrics`；查询本地 token usage、backend summary、JSON export 和 Prometheus 文本指标 | `store::observability` |
-| `crates/iota-cli/src/tui.rs` | 终端生命周期、事件循环、prompt 队列、后台 engine task、流式输出、approval 浮层、pager/help/quit overlay | `engine`, `acp::permission`, `tui/*` |
+| `crates/iota-cli/src/tui/mod.rs` | 终端生命周期、事件循环、prompt 队列、后台 engine task、流式输出、approval 浮层、pager/help/quit overlay | `engine`, `acp::permission`, `tui/*` |
 | `crates/iota-cli/src/tui/input.rs` | 多行编辑、历史、搜索、词移动和 kill buffer | 无项目级依赖 |
 | `crates/iota-cli/src/tui/markdown.rs` | Markdown 渲染为 ratatui 文本行 | 无项目级依赖 |
 | `crates/iota-cli/src/tui/scrollback.rs` | 终端内联滚动区管理（无 alt-screen，原生终端滚动/copy/selection） | 无项目级依赖 |
@@ -388,9 +388,9 @@ config/utils -> shared support
 
 约束：
 
-- `crates/iota-core/src/acp/` 不依赖 `crates/iota-core/src/engine/`、`crates/iota-core/src/daemon/`、`crates/iota-cli/src/cli/` 或 `crates/iota-cli/src/tui.rs`。
+- `crates/iota-core/src/acp/` 不依赖 `crates/iota-core/src/engine/`、`crates/iota-core/src/daemon/`、`crates/iota-cli/src/cli/` 或 `crates/iota-cli/src/tui/mod.rs`。
 - Store 模块不调用 UI、daemon、ACP client 或 MCP client。
-- TUI 子组件保持在 `crates/iota-cli/src/tui/`，顶层 `crates/iota-cli/src/tui.rs` 只负责组合、事件循环和终端生命周期。
+- TUI 子组件保持在 `crates/iota-cli/src/tui/`，顶层 `crates/iota-cli/src/tui/mod.rs` 只负责组合、事件循环和终端生命周期。
 - 外部进程、TCP、网络和 SQLite 边界在文档和实现中保持显式。
 - 所有路径处理使用 `Path`/`PathBuf`；home 目录通过 `dirs::home_dir()` 解析。
 
@@ -400,7 +400,7 @@ config/utils -> shared support
 | :---| :---| :---|
 | 新 ACP 后端 | `crates/iota-core/src/acp/mod.rs`, `crates/iota-core/src/config/`, `nimia.yaml.template` | 增加 enum、alias、默认命令、`ALL_BACKENDS`、backend config/env/home 映射 |
 | 新 CLI 命令 | `crates/iota-cli/src/cli/mod.rs` | 添加 match arm 和 handler，复用 service/context/store |
-| 新 TUI 组件 | `crates/iota-cli/src/tui/*`, `crates/iota-cli/src/tui.rs` | 状态和渲染下沉到子模块，顶层只组合 |
+| 新 TUI 组件 | `crates/iota-cli/src/tui/*`, `crates/iota-cli/src/tui/mod.rs` | 状态和渲染下沉到子模块，顶层只组合 |
 | 新 RuntimeEvent | `crates/iota-core/src/runtime_event/`, 相关生产方 | 增加事件类型；按需接入 CLI/TUI 输出 |
 | 新 memory 能力 | `crates/iota-core/src/memory/`, `crates/iota-core/src/mcp/tool_dispatch.rs` | Store 拥有 schema/query，tool_dispatch 暴露工具 |
 | 新 MCP 工具 | `crates/iota-core/src/mcp/tool_dispatch.rs`，`crates/iota-core/src/mcp/server.rs` tools()，必要时 `crates/iota-core/src/mcp/router.rs` | 添加 descriptor、dispatch handler、路由策略 |

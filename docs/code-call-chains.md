@@ -939,7 +939,7 @@ embed(content)
 | `crates/iota-core/src/daemon/mod.rs` | daemon TCP server、warm/prompt、graceful shutdown | 3 |
 | `crates/iota-core/src/daemon/pool.rs` | 按 cwd 复用 IotaEngine | 3 |
 | `crates/iota-core/src/daemon/proto.rs` | daemon wire types | 3 |
-| `crates/iota-cli/src/tui.rs` | TUI 模块入口，`run()` bootstrap | 4 |
+| `crates/iota-cli/src/tui/mod.rs` | TUI 模块入口，`run()` bootstrap | 4 |
 | `crates/iota-cli/src/tui/input.rs` | 输入编辑器 | 4 |
 | `crates/iota-cli/src/tui/markdown.rs` | Markdown 渲染 | 4 |
 | `crates/iota-cli/src/tui/scrollback.rs` | 终端内联滚动区 | 4 |
