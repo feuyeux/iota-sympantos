@@ -44,7 +44,7 @@
 - Create: `crates/iota-core/Cargo.toml`
 - Create: `crates/iota-cli/Cargo.toml`
 
-- [ ] **Step 1: Inspect current manifest before editing**
+- [x] **Step 1: Inspect current manifest before editing**
 
 Run:
 
@@ -54,7 +54,7 @@ sed -n '1,220p' Cargo.toml
 
 Expected: The manifest has `[package]`, `[dependencies]`, `[build-dependencies]`, `[lib]`, and `[[bin]]`.
 
-- [ ] **Step 2: Replace root `Cargo.toml` with workspace manifest**
+- [x] **Step 2: Replace root `Cargo.toml` with workspace manifest**
 
 Set `Cargo.toml` to:
 
@@ -102,7 +102,7 @@ urlencoding = "2.1"
 uuid = { version = "1.8", features = ["v4", "serde"] }
 ```
 
-- [ ] **Step 3: Create `crates/iota-core/Cargo.toml`**
+- [x] **Step 3: Create `crates/iota-core/Cargo.toml`**
 
 Set `crates/iota-core/Cargo.toml` to:
 
@@ -146,7 +146,7 @@ name = "iota_core"
 path = "src/lib.rs"
 ```
 
-- [ ] **Step 4: Create `crates/iota-cli/Cargo.toml`**
+- [x] **Step 4: Create `crates/iota-cli/Cargo.toml`**
 
 Set `crates/iota-cli/Cargo.toml` to:
 
@@ -176,7 +176,7 @@ name = "iota"
 path = "src/main.rs"
 ```
 
-- [ ] **Step 5: Run metadata to verify manifest shape**
+- [x] **Step 5: Run metadata to verify manifest shape**
 
 Run:
 
@@ -186,7 +186,7 @@ cargo metadata --no-deps --format-version 1
 
 Expected: FAIL is acceptable before source moves if Cargo complains about missing `src/lib.rs` or `src/main.rs` under the new crate directories. Manifest syntax errors are not acceptable.
 
-- [ ] **Step 6: Commit manifest setup**
+- [x] **Step 6: Commit manifest setup**
 
 Run:
 
@@ -205,7 +205,7 @@ Expected: One commit containing only manifest additions/changes.
 - Modify: `crates/iota-core/src/lib.rs`
 - Modify: `crates/iota-cli/src/main.rs`
 
-- [ ] **Step 1: Create member source directories**
+- [x] **Step 1: Create member source directories**
 
 Run:
 
@@ -215,7 +215,7 @@ mkdir -p crates/iota-core/src crates/iota-cli/src
 
 Expected: Both source directories exist.
 
-- [ ] **Step 2: Move core modules**
+- [x] **Step 2: Move core modules**
 
 Run:
 
@@ -238,7 +238,7 @@ git mv src/lib.rs crates/iota-core/src/lib.rs
 
 Expected: Core directories and their adjacent `*_tests.rs` files move together.
 
-- [ ] **Step 3: Move app modules**
+- [x] **Step 3: Move app modules**
 
 Run:
 
@@ -250,7 +250,7 @@ git mv src/tui crates/iota-cli/src/tui
 
 Expected: App directories and their adjacent `*_tests.rs` files move together.
 
-- [ ] **Step 4: Remove the now-empty root `src` directory if empty**
+- [x] **Step 4: Remove the now-empty root `src` directory if empty**
 
 Run:
 
@@ -260,7 +260,7 @@ rmdir src
 
 Expected: PASS if `src` is empty. If it fails, run `find src -maxdepth 2 -type f | sort` and classify any remaining files before moving them.
 
-- [ ] **Step 5: Replace `crates/iota-core/src/lib.rs` module exports**
+- [x] **Step 5: Replace `crates/iota-core/src/lib.rs` module exports**
 
 Set `crates/iota-core/src/lib.rs` to:
 
@@ -280,7 +280,7 @@ pub mod telemetry;
 pub mod utils;
 ```
 
-- [ ] **Step 6: Replace `crates/iota-cli/src/main.rs` app entry**
+- [x] **Step 6: Replace `crates/iota-cli/src/main.rs` app entry**
 
 Set `crates/iota-cli/src/main.rs` to:
 
@@ -294,7 +294,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-- [ ] **Step 7: Verify no source files remain in root `src`**
+- [x] **Step 7: Verify no source files remain in root `src`**
 
 Run:
 
@@ -304,7 +304,7 @@ find src -type f
 
 Expected: FAIL with `find: src: No such file or directory`, or no output if an empty `src` directory remains.
 
-- [ ] **Step 8: Commit source moves**
+- [x] **Step 8: Commit source moves**
 
 Run:
 
@@ -322,7 +322,7 @@ Expected: One commit primarily showing renames.
 - Modify: `crates/iota-cli/src/tui/*.rs`
 - Modify: `crates/iota-cli/src/tui/*_tests.rs`
 
-- [ ] **Step 1: List app files that still import core through `crate::`**
+- [x] **Step 1: List app files that still import core through `crate::`**
 
 Run:
 
@@ -332,7 +332,7 @@ rg -n "crate::(acp|config|context|daemon|engine|kanban|mcp|memory|runtime_event|
 
 Expected: Matches in CLI/TUI files before replacement.
 
-- [ ] **Step 2: Mechanically replace core import roots**
+- [x] **Step 2: Mechanically replace core import roots**
 
 Run:
 
@@ -342,7 +342,7 @@ perl -pi -e 's/crate::(acp|config|context|daemon|engine|kanban|mcp|memory|runtim
 
 Expected: App-local imports such as `crate::tui` and `super::...` remain unchanged.
 
-- [ ] **Step 3: Re-run the search**
+- [x] **Step 3: Re-run the search**
 
 Run:
 
@@ -352,7 +352,7 @@ rg -n "crate::(acp|config|context|daemon|engine|kanban|mcp|memory|runtime_event|
 
 Expected: No matches.
 
-- [ ] **Step 4: Run check and capture remaining compile errors**
+- [x] **Step 4: Run check and capture remaining compile errors**
 
 Run:
 
@@ -362,7 +362,7 @@ cargo check --workspace
 
 Expected: Initial run may fail. Remaining failures should be unresolved imports, private module visibility, or missing dependencies.
 
-- [ ] **Step 5: Fix public API visibility only where needed**
+- [x] **Step 5: Fix public API visibility only where needed**
 
 If `cargo check --workspace` reports private-module errors from `iota-cli`, expose the smallest required item from `iota-core`. For example, if `iota_core::store::observability` is private but used by `iota-cli`, update `crates/iota-core/src/store/mod.rs` with:
 
@@ -375,7 +375,7 @@ pub mod observability;
 
 Expected: Existing public modules remain public; do not expose unrelated internals unless a compile error proves the app uses them.
 
-- [ ] **Step 6: Add missing app dependencies only if compile errors require them**
+- [x] **Step 6: Add missing app dependencies only if compile errors require them**
 
 If `cargo check --workspace` reports an unresolved external crate in `iota-cli`, add that dependency to `crates/iota-cli/Cargo.toml` using workspace dependency syntax. Example:
 
@@ -385,7 +385,7 @@ serde = { workspace = true }
 
 Expected: Dependencies used only by core remain only in `iota-core`; dependencies used by CLI/TUI are listed in `iota-cli`.
 
-- [ ] **Step 7: Run check until it passes**
+- [x] **Step 7: Run check until it passes**
 
 Run:
 
@@ -395,7 +395,7 @@ cargo check --workspace
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit import and visibility fixes**
+- [x] **Step 8: Commit import and visibility fixes**
 
 Run:
 
@@ -418,7 +418,7 @@ Expected: One commit containing import rewrites and any minimal visibility/depen
 - Modify only if needed: `crates/iota-core/src/**/SKILL.md`
 - Modify only if needed: `crates/iota-cli/src/**/SKILL.md`
 
-- [ ] **Step 1: Search for old source path references**
+- [x] **Step 1: Search for old source path references**
 
 Run:
 
@@ -428,7 +428,7 @@ rg -n "src/(main|cli|tui|acp|config|context|daemon|engine|kanban|mcp|memory|runt
 
 Expected: Matches identify docs that mention old paths or root-package Cargo run commands.
 
-- [ ] **Step 2: Update source path examples**
+- [x] **Step 2: Update source path examples**
 
 For docs that list the old tree, rewrite path examples to the new workspace shape. Use this exact convention for path references:
 
@@ -442,7 +442,7 @@ crates/iota-core/src/acp/
 
 Expected: Docs no longer imply that app and core modules still live directly under root `src/`.
 
-- [ ] **Step 3: Update root Cargo run examples**
+- [x] **Step 3: Update root Cargo run examples**
 
 Replace root-package examples:
 
@@ -458,7 +458,7 @@ cargo run -p iota-cli -- check
 
 Expected: Installed binary examples such as `iota check` remain unchanged.
 
-- [ ] **Step 4: Preserve unrelated user changes**
+- [x] **Step 4: Preserve unrelated user changes**
 
 Run:
 
@@ -468,7 +468,7 @@ git diff -- README.md
 
 Expected: If `README.md` had pre-existing unrelated edits, keep them intact and only add path or command updates required by this split.
 
-- [ ] **Step 5: Stage only path-related documentation updates**
+- [x] **Step 5: Stage only path-related documentation updates**
 
 Run:
 
@@ -486,7 +486,7 @@ git add -p README.md README-zh.md docs crates
 
 Expected: Only hunks related to this workspace split are staged.
 
-- [ ] **Step 6: Commit documentation updates if any hunks were staged**
+- [x] **Step 6: Commit documentation updates if any hunks were staged**
 
 Run:
 
@@ -501,7 +501,7 @@ Expected: Commit is created only when documentation changes for this split were 
 **Files:**
 - Modify only if verification reveals required fixes.
 
-- [ ] **Step 1: Format all crates**
+- [x] **Step 1: Format all crates**
 
 Run:
 
@@ -511,7 +511,7 @@ cargo fmt --all --check
 
 Expected: PASS. If it fails, run `cargo fmt --all`, inspect the diff, and commit formatting with the relevant code changes.
 
-- [ ] **Step 2: Run workspace tests**
+- [x] **Step 2: Run workspace tests**
 
 Run:
 
@@ -521,7 +521,7 @@ cargo test --workspace
 
 Expected: PASS. If a test fails due to moved paths, fix the test or code path using `PathBuf` and workspace-relative assumptions only where the test owns those assumptions.
 
-- [ ] **Step 3: Run clippy**
+- [x] **Step 3: Run clippy**
 
 Run:
 
@@ -531,7 +531,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Expected: PASS.
 
-- [ ] **Step 4: Run CLI smoke test**
+- [x] **Step 4: Run CLI smoke test**
 
 Run:
 
@@ -541,7 +541,7 @@ cargo run -p iota-cli -- check
 
 Expected: Command runs through the `iota-cli` binary. It may report backend availability according to local machine setup, but it must not fail because Cargo cannot find the package or binary.
 
-- [ ] **Step 5: Inspect final status**
+- [x] **Step 5: Inspect final status**
 
 Run:
 
@@ -551,7 +551,7 @@ git status --short
 
 Expected: Only intentional changes remain. Pre-existing unrelated files, such as a user-modified `README.md`, must not be reverted.
 
-- [ ] **Step 6: Commit final verification fixes if any**
+- [x] **Step 6: Commit final verification fixes if any**
 
 Run:
 
