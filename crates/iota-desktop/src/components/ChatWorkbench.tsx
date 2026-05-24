@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import { Cpu, Send, CheckCircle2 } from "lucide-react";
-import { listenDaemonMessages, submitPrompt, getConfig } from "../api";
+import {
+  checkBackend,
+  currentWorkspace,
+  getConfig,
+  getObservabilitySummary,
+  listenDaemonMessages,
+  submitPrompt,
+} from "../api";
 import { initialTurnsState, turnsReducer } from "../turnReducer";
 import { RightInspector } from "./RightInspector";
 import { ConfigPanel } from "./ConfigPanel";
-import type { DesktopConfigSnapshot } from "../types";
+import type { BackendCheckResult, DesktopConfigSnapshot, ObservabilitySummary } from "../types";
 
 const BACKENDS = ["gemini", "claude", "hermes", "codex", "opencode"];
 
@@ -14,18 +21,51 @@ export function ChatWorkbench() {
   const [input, setInput] = useState("");
   const [view, setView] = useState<"chat" | "config">("chat");
   const [config, setConfig] = useState<DesktopConfigSnapshot | null>(null);
+  const [backendChecks, setBackendChecks] = useState<Record<string, BackendCheckResult>>({});
+  const [observability, setObservability] = useState<ObservabilitySummary | null>(null);
+  const [workspace, setWorkspace] = useState("");
+  const [daemonStatus, setDaemonStatus] = useState<"connecting" | "connected" | "error">("connecting");
 
   const activeTurn = state.activeTurnId ? state.turns[state.activeTurnId] : undefined;
 
   useEffect(() => {
     let disposed = false;
     
-    // Load config on mount
     getConfig()
       .then((cfg) => {
-        if (!disposed) setConfig(cfg);
+        if (!disposed) {
+          setConfig(cfg);
+          setDaemonStatus("connected");
+        }
       })
-      .catch((err) => console.error("Failed to load daemon config:", err));
+      .catch((err) => {
+        if (!disposed) setDaemonStatus("error");
+        console.error("Failed to load daemon config:", err);
+      });
+
+    currentWorkspace()
+      .then((cwd) => {
+        if (!disposed) setWorkspace(cwd);
+      })
+      .catch((err) => console.error("Failed to read workspace:", err));
+
+    getObservabilitySummary()
+      .then((summary) => {
+        if (!disposed) setObservability(summary);
+      })
+      .catch((err) => console.error("Failed to load observability summary:", err));
+
+    Promise.all(
+      BACKENDS.map(async (item) => {
+        try {
+          return [item, await checkBackend(item)] as const;
+        } catch (err) {
+          return [item, { backend: item, ok: false, details: String(err) }] as const;
+        }
+      }),
+    ).then((checks) => {
+      if (!disposed) setBackendChecks(Object.fromEntries(checks));
+    });
 
     // Listen for stream events
     listenDaemonMessages((message) => {
@@ -80,6 +120,14 @@ export function ChatWorkbench() {
   const activeBackendSnapshot = config?.backends[backend];
   const modelName = activeBackendSnapshot?.model?.name || "Loading model...";
   const isKeyConfigured = activeBackendSnapshot?.model?.api_key_configured;
+  const activeBackendCheck = backendChecks[backend];
+  const selectedBackendReady = activeBackendCheck?.ok !== false && isKeyConfigured !== false;
+  const daemonStatusText =
+    daemonStatus === "connected"
+      ? "Daemon Connected"
+      : daemonStatus === "connecting"
+        ? "Connecting"
+        : "Daemon Error";
 
   return (
     <div className="flex h-screen bg-[#0b0f19] text-gray-100 font-sans select-none">
@@ -95,11 +143,14 @@ export function ChatWorkbench() {
                 Iota Desktop
                 <span className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-medium">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  ● Daemon Connected
+                  ● {daemonStatusText}
                 </span>
               </h1>
               <p className="text-[11px] text-gray-500 font-mono truncate max-w-xs md:max-w-md">
                 Model: {modelName} {isKeyConfigured ? "· API key ✓" : "· API key ✗"}
+              </p>
+              <p className="text-[10px] text-gray-600 font-mono truncate max-w-xs md:max-w-md" title={workspace}>
+                {workspace || "Workspace unavailable"}
               </p>
             </div>
           </div>
@@ -131,7 +182,7 @@ export function ChatWorkbench() {
             >
               {BACKENDS.map((item) => (
                 <option key={item} value={item} className="bg-[#0b0f19]">
-                  {item.toUpperCase()}
+                  {item.toUpperCase()} {backendChecks[item]?.ok === false ? "⚠" : ""}
                 </option>
               ))}
             </select>
@@ -146,7 +197,11 @@ export function ChatWorkbench() {
               {transcript.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-sm text-gray-500 gap-2">
                   <CheckCircle2 className="h-8 w-8 text-gray-700" />
-                  <span>Send a prompt to begin coding with {backend.toUpperCase()}</span>
+                  <span>
+                    {selectedBackendReady
+                      ? `Send a prompt to begin coding with ${backend.toUpperCase()}`
+                      : `${backend.toUpperCase()} is not ready: ${activeBackendCheck?.details ?? "configuration incomplete"}`}
+                  </span>
                 </div>
               ) : null}
               {transcript.map((turn) => {
@@ -197,6 +252,8 @@ export function ChatWorkbench() {
                   placeholder={
                     activeTurnBusy
                       ? "Wait for the active turn to finish or interrupt it..."
+                      : !selectedBackendReady
+                        ? activeBackendCheck?.details ?? "Selected backend is not ready"
                       : `Ask ${backend.toUpperCase()} to write code, debug, or solve tasks...`
                   }
                   onKeyDown={(e) => {
@@ -208,7 +265,7 @@ export function ChatWorkbench() {
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim() || activeTurnBusy}
+                  disabled={!input.trim() || activeTurnBusy || !selectedBackendReady}
                   className="flex h-[60px] w-12 items-center justify-center rounded-md bg-primary hover:bg-primary/95 text-white disabled:opacity-50 transition-colors shadow shadow-primary/25 cursor-pointer"
                 >
                   <Send className="h-4.5 w-4.5" />
@@ -217,13 +274,14 @@ export function ChatWorkbench() {
             </form>
           </>
         ) : (
-          <ConfigPanel />
+          <ConfigPanel config={config} onConfigUpdate={setConfig} />
         )}
       </main>
 
       {/* Side Inspector Panel */}
       <RightInspector
         turn={activeTurn}
+        observability={observability}
         onApprovalDecision={(approvalId, approved) =>
           dispatch({ type: "approval_decision", approvalId, approved })
         }

@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { DaemonServerMessage, DesktopConfigSnapshot, DesktopModelConfig } from "./types";
+import type {
+  BackendCheckResult,
+  DaemonServerMessage,
+  DesktopConfigSnapshot,
+  DesktopModelConfig,
+  ObservabilitySummary,
+} from "./types";
 
 export function submitPrompt(prompt: string, backend: string, turnId: string): Promise<string> {
   return invoke<string>("submit_prompt", { prompt, backendStr: backend, turnId });
@@ -20,6 +26,22 @@ export function handleApproval(reqId: string, approved: boolean): Promise<void> 
 
 export function cancelTurn(turnId: string): Promise<void> {
   return invoke<void>("cancel_turn", { turnId });
+}
+
+export async function checkBackend(backend: string): Promise<BackendCheckResult> {
+  const message = await invoke<DaemonServerMessage>("check_backend", { backendStr: backend });
+  if (message.type !== "backend_check_result") {
+    throw new Error("daemon returned an unexpected backend check response");
+  }
+  return { backend: message.backend, ok: message.ok, details: message.details };
+}
+
+export function getObservabilitySummary(): Promise<ObservabilitySummary> {
+  return invoke<ObservabilitySummary>("get_observability_summary");
+}
+
+export function currentWorkspace(): Promise<string> {
+  return invoke<string>("current_workspace");
 }
 
 export function listenDaemonMessages(callback: (message: DaemonServerMessage) => void): Promise<() => void> {

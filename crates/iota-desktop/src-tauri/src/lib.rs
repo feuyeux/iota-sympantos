@@ -105,6 +105,49 @@ async fn cancel_turn(turn_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn check_backend(
+    backend_str: String,
+) -> Result<iota_core::daemon::DaemonServerMessage, String> {
+    daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CheckBackend {
+        backend: backend_str,
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .find(|message| {
+        matches!(
+            message,
+            iota_core::daemon::DaemonServerMessage::BackendCheckResult { .. }
+        )
+    })
+    .ok_or_else(|| "daemon did not return backend check result".to_string())
+}
+
+#[tauri::command]
+async fn get_observability_summary() -> Result<serde_json::Value, String> {
+    let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+    let cwd = std::env::current_dir().unwrap_or(home);
+    daemon_client::send_one(
+        iota_core::daemon::DaemonClientMessage::GetObservabilitySummary { cwd: Some(cwd) },
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .find_map(|message| match message {
+        iota_core::daemon::DaemonServerMessage::ObservabilitySummary { summary } => Some(summary),
+        _ => None,
+    })
+    .ok_or_else(|| "daemon did not return observability summary".to_string())
+}
+
+#[tauri::command]
+fn current_workspace() -> Result<String, String> {
+    std::env::current_dir()
+        .map(|cwd| cwd.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_boards(state: tauri::State<'_, AppState>) -> Result<Vec<Board>, String> {
     let store = state.kanban_store.lock().await;
     store.list_boards().map_err(|e| e.to_string())
@@ -244,6 +287,9 @@ pub fn run() {
             submit_prompt,
             handle_approval,
             cancel_turn,
+            check_backend,
+            get_observability_summary,
+            current_workspace,
             list_boards,
             list_tasks,
             create_task,

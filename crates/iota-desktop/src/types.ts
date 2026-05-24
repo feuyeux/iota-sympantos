@@ -68,3 +68,30 @@ export type DesktopConfigSnapshot = {
   config_path: string;
   backends: Record<string, DesktopBackendSnapshot>;
 };
+
+export type BackendCheckResult = {
+  backend: string;
+  ok: boolean;
+  details: string;
+};
+
+export type ObservabilitySummary = {
+  cwd?: string;
+  window_secs?: number;
+  token_summary?: Array<{
+    backend: string;
+    count: number;
+    normalized_total_mean?: number;
+    input_tokens_mean?: number;
+    output_tokens_mean?: number;
+  }>;
+  recent_token_executions?: Array<{
+    id: string;
+    ts: number;
+    execution_id?: string;
+    backend: string;
+    model?: string;
+    normalized_total_tokens?: number;
+  }>;
+  error?: string;
+};

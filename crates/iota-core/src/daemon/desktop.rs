@@ -8,7 +8,7 @@ use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::acp::{AcpBackend, permission::ApprovalRequest};
-use crate::config::{read_config, save_config};
+use crate::config::{BackendConfig, NimiaConfig, backend_config, read_config, save_config};
 use crate::daemon::pool::EnginePool;
 use crate::daemon::proto::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot,
@@ -239,9 +239,12 @@ async fn handle_message(
             .await?;
         }
         DaemonClientMessage::CheckBackend { backend } => {
-            let parsed = AcpBackend::parse(&backend);
-            let (ok, details) = match parsed {
-                Ok(_) => (true, "backend name is recognized".to_string()),
+            let (ok, details) = match AcpBackend::parse(&backend) {
+                Ok(backend) => {
+                    let config = read_config().context("Failed to read config")?;
+                    let result = backend_check_result(&config, backend);
+                    (result.ok, result.details)
+                }
                 Err(err) => (false, err.to_string()),
             };
             send_message(
@@ -399,6 +402,63 @@ async fn start_turn(
     turns.insert(turn_id, handle).await;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BackendCheck {
+    pub ok: bool,
+    pub details: String,
+}
+
+pub(crate) fn backend_check_result(config: &NimiaConfig, backend: AcpBackend) -> BackendCheck {
+    let Some(section) = backend_config(config, backend) else {
+        return BackendCheck {
+            ok: false,
+            details: "backend section is missing".to_string(),
+        };
+    };
+    if !section.enabled {
+        return BackendCheck {
+            ok: false,
+            details: "backend is disabled".to_string(),
+        };
+    }
+    let Some(acp) = section.acp.as_ref() else {
+        return BackendCheck {
+            ok: false,
+            details: "missing acp config".to_string(),
+        };
+    };
+    if acp.command.trim().is_empty() {
+        return BackendCheck {
+            ok: false,
+            details: "missing acp.command".to_string(),
+        };
+    }
+    if !api_key_configured(section) {
+        return BackendCheck {
+            ok: false,
+            details: "missing API key".to_string(),
+        };
+    }
+    BackendCheck {
+        ok: true,
+        details: "backend is configured".to_string(),
+    }
+}
+
+fn api_key_configured(section: &BackendConfig) -> bool {
+    section
+        .model
+        .as_ref()
+        .and_then(|model| model.api_key.as_deref())
+        .map(valid_api_key)
+        .unwrap_or(false)
+}
+
+fn valid_api_key(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && value != "<api-key>" && value != "YOUR_API_KEY"
 }
 
 async fn abort_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {

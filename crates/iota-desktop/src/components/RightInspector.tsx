@@ -1,14 +1,26 @@
-import { AlertCircle, CheckCircle2, Clock, Terminal, Zap, Ban, Coins, Activity, ShieldAlert, Cpu } from "lucide-react";
-import type { DesktopTurn } from "../types";
+import {
+  AlertCircle,
+  Clock,
+  Terminal,
+  Zap,
+  Ban,
+  Coins,
+  Activity,
+  ShieldAlert,
+  Cpu,
+  CheckCircle2,
+} from "lucide-react";
+import type { DesktopTurn, ObservabilitySummary } from "../types";
 import { handleApproval, cancelTurn } from "../api";
 import { useState } from "react";
 
 type Props = {
   turn?: DesktopTurn;
+  observability?: ObservabilitySummary | null;
   onApprovalDecision: (approvalId: string, approved: boolean) => void;
 };
 
-export function RightInspector({ turn, onApprovalDecision }: Props) {
+export function RightInspector({ turn, observability, onApprovalDecision }: Props) {
   const [cancelling, setCancelling] = useState(false);
 
   if (!turn) {
@@ -218,6 +230,34 @@ export function RightInspector({ turn, onApprovalDecision }: Props) {
           </div>
         ) : (
           <div className="text-xs text-gray-600 italic">No usage recorded yet</div>
+        )}
+      </section>
+
+      {/* Observability Summary */}
+      <section className="bg-white/[0.01] border border-white/5 rounded-md p-4">
+        <div className="flex items-center gap-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          <Activity className="h-4 w-4 text-primary" />
+          Recent Observability
+        </div>
+        {observability?.token_summary && observability.token_summary.length > 0 ? (
+          <div className="space-y-2 text-xs text-gray-300">
+            {observability.token_summary.slice(0, 5).map((summary) => (
+              <div key={summary.backend} className="rounded border border-white/5 bg-white/[0.02] p-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium uppercase">{summary.backend}</span>
+                  <span className="text-gray-500">{summary.count} turns</span>
+                </div>
+                <div className="mt-1 flex justify-between text-[11px] text-gray-500">
+                  <span>Avg total</span>
+                  <span>{formatNumber(Math.round(summary.normalized_total_mean ?? 0))}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-gray-600 italic">
+            {observability?.error ?? "No recent token usage summary"}
+          </div>
         )}
       </section>
 

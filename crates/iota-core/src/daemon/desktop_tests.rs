@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::{BackendConfig, CommandConfig, ModelConfig, NimiaConfig};
 use tokio::sync::oneshot;
 
 #[tokio::test]
@@ -55,4 +56,71 @@ async fn turn_registry_cancel_reports_whether_turn_existed() {
 
     assert!(registry.abort("turn-1").await);
     assert!(!registry.abort("turn-1").await);
+}
+
+#[test]
+fn backend_check_fails_for_disabled_backend() {
+    let config = NimiaConfig {
+        gemini: Some(gemini_config(false, "npx", "secret")),
+        ..Default::default()
+    };
+
+    let result = backend_check_result(&config, AcpBackend::Gemini);
+
+    assert!(!result.ok);
+    assert!(result.details.contains("disabled"));
+}
+
+#[test]
+fn backend_check_fails_for_missing_command() {
+    let config = NimiaConfig {
+        gemini: Some(gemini_config(true, " ", "secret")),
+        ..Default::default()
+    };
+
+    let result = backend_check_result(&config, AcpBackend::Gemini);
+
+    assert!(!result.ok);
+    assert!(result.details.contains("missing acp.command"));
+}
+
+#[test]
+fn backend_check_fails_for_missing_api_key() {
+    let config = NimiaConfig {
+        gemini: Some(gemini_config(true, "npx", "<api-key>")),
+        ..Default::default()
+    };
+
+    let result = backend_check_result(&config, AcpBackend::Gemini);
+
+    assert!(!result.ok);
+    assert!(result.details.contains("missing API key"));
+}
+
+#[test]
+fn backend_check_passes_for_configured_backend() {
+    let config = NimiaConfig {
+        gemini: Some(gemini_config(true, "npx", "secret")),
+        ..Default::default()
+    };
+
+    let result = backend_check_result(&config, AcpBackend::Gemini);
+
+    assert!(result.ok);
+    assert_eq!(result.details, "backend is configured");
+}
+
+fn gemini_config(enabled: bool, command: &str, api_key: &str) -> BackendConfig {
+    BackendConfig {
+        enabled,
+        acp: Some(CommandConfig {
+            command: command.to_string(),
+            args: vec![],
+        }),
+        model: Some(ModelConfig {
+            api_key: Some(api_key.to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
 }
