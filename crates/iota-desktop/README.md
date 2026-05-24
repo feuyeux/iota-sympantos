@@ -24,3 +24,5 @@ cargo test -p iota-core daemon
 cargo test -p iota-desktop
 cd crates/iota-desktop && npm test && npm run build
 ```
+
+Manual MVP acceptance is tracked in `../../docs/desktop-mvp-acceptance.md`.

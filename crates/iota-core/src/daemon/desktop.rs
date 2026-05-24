@@ -63,25 +63,39 @@ impl ApprovalRegistry {
 
 #[derive(Default, Clone)]
 pub(crate) struct TurnRegistry {
-    active: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
+    active: Arc<Mutex<BTreeMap<String, ActiveTurn>>>,
+}
+
+#[derive(Clone)]
+struct ActiveTurn {
+    handle: Arc<tokio::task::JoinHandle<()>>,
+    writer: Arc<Mutex<OwnedWriteHalf>>,
 }
 
 impl TurnRegistry {
-    pub async fn insert(&self, turn_id: String, handle: tokio::task::JoinHandle<()>) {
-        self.active.lock().await.insert(turn_id, handle);
+    pub async fn insert(
+        &self,
+        turn_id: String,
+        handle: tokio::task::JoinHandle<()>,
+        writer: Arc<Mutex<OwnedWriteHalf>>,
+    ) {
+        self.active.lock().await.insert(
+            turn_id,
+            ActiveTurn {
+                handle: Arc::new(handle),
+                writer,
+            },
+        );
     }
 
-    pub async fn remove(&self, turn_id: &str) -> Option<tokio::task::JoinHandle<()>> {
+    async fn remove(&self, turn_id: &str) -> Option<ActiveTurn> {
         self.active.lock().await.remove(turn_id)
     }
 
-    pub async fn abort(&self, turn_id: &str) -> bool {
-        if let Some(handle) = self.remove(turn_id).await {
-            handle.abort();
-            true
-        } else {
-            false
-        }
+    pub async fn abort(&self, turn_id: &str) -> Option<Arc<Mutex<OwnedWriteHalf>>> {
+        let turn = self.remove(turn_id).await?;
+        turn.handle.abort();
+        Some(turn.writer)
     }
 }
 
@@ -98,6 +112,26 @@ where
 {
     let writer = Arc::new(Mutex::new(write_half));
     let connection_turns = Arc::new(Mutex::new(Vec::<String>::new()));
+    let mut handshake_ok = false;
+    if !matches!(first_message, DaemonClientMessage::Hello { .. }) {
+        send_message(
+            &writer,
+            &DaemonServerMessage::ProtocolError {
+                message: "desktop daemon hello is required before other messages".to_string(),
+            },
+        )
+        .await?;
+        return Ok(());
+    }
+    if matches!(
+        first_message,
+        DaemonClientMessage::Hello {
+            protocol_version: DESKTOP_PROTOCOL_VERSION,
+            ..
+        }
+    ) {
+        handshake_ok = true;
+    }
     handle_message(
         first_message,
         Arc::clone(&writer),
@@ -107,6 +141,9 @@ where
         Arc::clone(&connection_turns),
     )
     .await?;
+    if !handshake_ok {
+        return Ok(());
+    }
 
     let mut reader = reader;
     let mut line = String::new();
@@ -114,6 +151,26 @@ where
     while reader.read_line(&mut line).await? > 0 {
         let message: DaemonClientMessage =
             serde_json::from_str(line.trim()).context("Failed to decode desktop daemon message")?;
+        if !handshake_ok {
+            send_message(
+                &writer,
+                &DaemonServerMessage::ProtocolError {
+                    message: "desktop daemon hello with matching protocol version is required"
+                        .to_string(),
+                },
+            )
+            .await?;
+            break;
+        }
+        if matches!(message, DaemonClientMessage::Hello { .. }) {
+            handshake_ok = matches!(
+                message,
+                DaemonClientMessage::Hello {
+                    protocol_version: DESKTOP_PROTOCOL_VERSION,
+                    ..
+                }
+            );
+        }
         handle_message(
             message,
             Arc::clone(&writer),
@@ -207,7 +264,7 @@ async fn handle_message(
             }
         }
         DaemonClientMessage::CancelTurn { turn_id } => {
-            let accepted = abort_turn(&turns, &approvals, &turn_id).await;
+            let accepted = cancel_turn(&turns, &approvals, &turn_id).await;
             send_message(
                 &writer,
                 &DaemonServerMessage::TurnCancelled { turn_id, accepted },
@@ -293,8 +350,10 @@ async fn start_turn(
 
     let engine = engine_pool.lock().await.engine_for(cwd.clone());
     let (stream_tx, mut stream_rx) = mpsc::channel::<String>(100);
+    let (event_tx, mut event_rx) = mpsc::channel(100);
+    let streamed_events = Arc::new(Mutex::new(Vec::<String>::new()));
     let (approval_tx, mut approval_rx) = mpsc::channel::<ApprovalRequest>(10);
-    crate::acp::permission::install_tui_approval_channel(approval_tx).await;
+    crate::acp::permission::install_scoped_approval_channel(turn_id.clone(), approval_tx).await;
 
     let stream_writer = Arc::clone(&writer);
     let stream_turn_id = turn_id.clone();
@@ -305,6 +364,25 @@ async fn start_turn(
                 &DaemonServerMessage::TextChunk {
                     turn_id: stream_turn_id.clone(),
                     chunk,
+                },
+            )
+            .await;
+        }
+    });
+
+    let event_writer = Arc::clone(&writer);
+    let event_turn_id = turn_id.clone();
+    let event_seen = Arc::clone(&streamed_events);
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            if let Ok(key) = serde_json::to_string(&event) {
+                event_seen.lock().await.push(key);
+            }
+            let _ = send_message(
+                &event_writer,
+                &DaemonServerMessage::TurnEvent {
+                    turn_id: event_turn_id.clone(),
+                    event: Box::new(event),
                 },
             )
             .await;
@@ -349,6 +427,7 @@ async fn start_turn(
     let task_writer = Arc::clone(&writer);
     let task_turn_id = turn_id.clone();
     let task_turns = turns.clone();
+    let task_streamed_events = Arc::clone(&streamed_events);
     let handle = tokio::spawn(async move {
         let result = {
             let mut engine = engine.lock().await;
@@ -356,16 +435,25 @@ async fn start_turn(
                 engine.set_acp_timeout_ms(timeout_ms);
             }
             engine.set_stream_output_sender(Some(stream_tx));
-            let result = engine.run_with_timing(backend, cwd, &prompt).await;
+            engine.set_stream_event_sender(Some(event_tx));
+            let result = engine.run(backend, cwd, &prompt, Some(&task_turn_id)).await;
             engine.set_stream_output_sender(None);
+            engine.set_stream_event_sender(None);
             result
         };
 
         task_turns.remove(&task_turn_id).await;
+        crate::acp::permission::remove_scoped_approval_channel(&task_turn_id).await;
 
         match result {
             Ok(output) => {
+                let mut seen = task_streamed_events.lock().await;
                 for event in output.events {
+                    let key = serde_json::to_string(&event).unwrap_or_default();
+                    if seen.iter().any(|sent| sent == &key) {
+                        continue;
+                    }
+                    seen.push(key);
                     let _ = send_message(
                         &task_writer,
                         &DaemonServerMessage::TurnEvent {
@@ -399,7 +487,7 @@ async fn start_turn(
     });
 
     connection_turns.lock().await.push(turn_id.clone());
-    turns.insert(turn_id, handle).await;
+    turns.insert(turn_id, handle, Arc::clone(&writer)).await;
 
     Ok(())
 }
@@ -462,11 +550,36 @@ fn valid_api_key(value: &str) -> bool {
 }
 
 async fn abort_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {
-    let accepted = turns.abort(turn_id).await;
-    if accepted {
-        approvals.deny_for_turn(turn_id).await;
-    }
-    accepted
+    let Some(writer) = turns.abort(turn_id).await else {
+        return false;
+    };
+    approvals.deny_for_turn(turn_id).await;
+    crate::acp::permission::remove_scoped_approval_channel(turn_id).await;
+    close_writer(&writer).await;
+    true
+}
+
+async fn cancel_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {
+    let Some(writer) = turns.abort(turn_id).await else {
+        return false;
+    };
+    approvals.deny_for_turn(turn_id).await;
+    crate::acp::permission::remove_scoped_approval_channel(turn_id).await;
+    let _ = send_message(
+        &writer,
+        &DaemonServerMessage::TurnCancelled {
+            turn_id: turn_id.to_string(),
+            accepted: true,
+        },
+    )
+    .await;
+    close_writer(&writer).await;
+    true
+}
+
+async fn close_writer(writer: &Arc<Mutex<OwnedWriteHalf>>) {
+    let mut writer = writer.lock().await;
+    let _ = writer.shutdown().await;
 }
 
 async fn cleanup_connection_turns(

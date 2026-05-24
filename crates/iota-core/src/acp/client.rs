@@ -13,6 +13,7 @@ use super::types::{AcpClientStartOptions, AcpSessionResolution};
 use super::util::{elapsed_ms, should_forward_backend_stderr};
 use super::wire::{format_acp_error, is_response_id, parse_message_line, read_next_line};
 use super::{AcpClient, AcpPromptOutput};
+use crate::runtime_event::RuntimeEvent;
 
 impl AcpClient {
     pub async fn start(options: AcpClientStartOptions) -> Result<Self> {
@@ -136,11 +137,16 @@ impl AcpClient {
             session_options,
             tool_whitelist,
             stream_tx: None,
+            event_tx: None,
         })
     }
 
     pub fn set_stream_sender(&mut self, tx: Option<tokio::sync::mpsc::Sender<String>>) {
         self.stream_tx = tx;
+    }
+
+    pub fn set_event_sender(&mut self, tx: Option<tokio::sync::mpsc::Sender<RuntimeEvent>>) {
+        self.event_tx = tx;
     }
 
     pub async fn execute(
@@ -167,6 +173,7 @@ impl AcpClient {
             )
             .await?;
             let stream_tx = self.stream_tx.clone();
+            let event_tx = self.event_tx.clone();
             let (text, events) = read_prompt_events_for_id(
                 &mut self.lines,
                 &mut self.stdin,
@@ -177,6 +184,7 @@ impl AcpClient {
                     timeout_ms: self.timeout_ms,
                     expected_prompt_id: &id,
                     stream_tx: stream_tx.as_ref(),
+                    event_tx: event_tx.as_ref(),
                     execution_id,
                 },
             )

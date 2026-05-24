@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   BackendCheckResult,
+  DaemonClientError,
   DaemonServerMessage,
   DesktopConfigSnapshot,
   DesktopModelConfig,
@@ -46,4 +47,8 @@ export function currentWorkspace(): Promise<string> {
 
 export function listenDaemonMessages(callback: (message: DaemonServerMessage) => void): Promise<() => void> {
   return listen<DaemonServerMessage>("daemon-message", (event) => callback(event.payload));
+}
+
+export function listenDaemonClientErrors(callback: (error: DaemonClientError) => void): Promise<() => void> {
+  return listen<DaemonClientError>("daemon-client-error", (event) => callback(event.payload));
 }

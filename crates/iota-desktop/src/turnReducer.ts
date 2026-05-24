@@ -1,4 +1,4 @@
-import type { DaemonServerMessage, DesktopTurn, RuntimeEventView, ToolCallView } from "./types";
+import type { DaemonClientError, DaemonServerMessage, DesktopTurn, RuntimeEventView, ToolCallView } from "./types";
 
 export type TurnsState = {
   activeTurnId?: string;
@@ -15,6 +15,7 @@ export const initialTurnsState: TurnsState = {
 export type TurnsAction =
   | { type: "turn_started"; turnId: string; backend: string; cwd: string; prompt: string }
   | { type: "daemon_message"; message: DaemonServerMessage }
+  | { type: "daemon_client_error"; error: DaemonClientError }
   | { type: "approval_decision"; approvalId: string; approved: boolean }
   | { type: "select_active_turn"; turnId: string };
 
@@ -55,6 +56,23 @@ export function turnsReducer(state: TurnsState, action: TurnsAction): TurnsState
           : approval,
       ),
     }));
+  }
+
+  if (action.type === "daemon_client_error") {
+    const { turn_id: turnId, message } = action.error;
+    if (!turnId) return { ...state, pendingError: message };
+    const turn = state.turns[turnId];
+    if (!turn) return { ...state, pendingError: message };
+    if (isTerminalStatus(turn.status)) return state;
+    return {
+      ...state,
+      activeTurnId: turnId,
+      pendingError: message,
+      turns: {
+        ...state.turns,
+        [turnId]: { ...turn, status: "failed", error: message },
+      },
+    };
   }
 
   const message = action.message;
@@ -148,6 +166,18 @@ function applyRuntimeEvent(turn: DesktopTurn, event: RuntimeEventView): DesktopT
       ),
     };
   }
+  if (event.kind === "ApprovalDecision" && isObject(event.data)) {
+    const requestId = String(event.data.request_id ?? "");
+    const approved = Boolean(event.data.approved);
+    return {
+      ...turn,
+      approvals: turn.approvals.map((approval) =>
+        approval.id === requestId
+          ? { ...approval, status: approved ? "approved" : "denied" }
+          : approval,
+      ),
+    };
+  }
   return turn;
 }
 
@@ -161,4 +191,8 @@ function mapTurns(state: TurnsState, f: (turn: DesktopTurn) => DesktopTurn): Tur
     turns[id] = f(state.turns[id]);
   }
   return { ...state, turns };
+}
+
+function isTerminalStatus(status: DesktopTurn["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }

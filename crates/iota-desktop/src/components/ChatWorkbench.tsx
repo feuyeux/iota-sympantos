@@ -5,6 +5,7 @@ import {
   currentWorkspace,
   getConfig,
   getObservabilitySummary,
+  listenDaemonClientErrors,
   listenDaemonMessages,
   submitPrompt,
 } from "../api";
@@ -52,6 +53,7 @@ export function ChatWorkbench() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    let unlistenErrors: (() => void) | undefined;
 
     getConfig()
       .then((cfg) => {
@@ -101,9 +103,24 @@ export function ChatWorkbench() {
       })
       .catch((err) => console.error("Failed to listen for daemon messages:", err));
 
+    listenDaemonClientErrors((error) => {
+      if (disposed) return;
+      dispatch({ type: "daemon_client_error", error });
+      setDaemonStatus("error");
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+        } else {
+          unlistenErrors = cleanup;
+        }
+      })
+      .catch((err) => console.error("Failed to listen for daemon client errors:", err));
+
     return () => {
       disposed = true;
       unlisten?.();
+      unlistenErrors?.();
     };
   }, [refreshBackendChecks, refreshObservability]);
 

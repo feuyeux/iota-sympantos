@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::OnceLock;
 use tokio::io::AsyncWriteExt;
@@ -27,14 +28,38 @@ pub struct ApprovalRequest {
 /// replaced when the TUI restarts within the same process, and reads never block
 /// the tokio worker thread.
 static TUI_APPROVAL_TX: OnceLock<RwLock<Option<mpsc::Sender<ApprovalRequest>>>> = OnceLock::new();
+static SCOPED_APPROVAL_TX: OnceLock<RwLock<BTreeMap<String, mpsc::Sender<ApprovalRequest>>>> =
+    OnceLock::new();
 
 fn approval_lock() -> &'static RwLock<Option<mpsc::Sender<ApprovalRequest>>> {
     TUI_APPROVAL_TX.get_or_init(|| RwLock::new(None))
 }
 
+fn scoped_approval_lock() -> &'static RwLock<BTreeMap<String, mpsc::Sender<ApprovalRequest>>> {
+    SCOPED_APPROVAL_TX.get_or_init(|| RwLock::new(BTreeMap::new()))
+}
+
 /// Install (or replace) the approval channel.  Call before starting the TUI event loop.
 pub async fn install_tui_approval_channel(tx: mpsc::Sender<ApprovalRequest>) {
     *approval_lock().write().await = Some(tx);
+}
+
+/// Install an approval channel scoped to a specific execution id.
+///
+/// Desktop turns use their `turn_id` as the execution id so concurrent turns cannot steal each
+/// other's approval requests. TUI keeps using the process-wide default channel above.
+pub async fn install_scoped_approval_channel(
+    execution_id: String,
+    tx: mpsc::Sender<ApprovalRequest>,
+) {
+    scoped_approval_lock()
+        .write()
+        .await
+        .insert(execution_id, tx);
+}
+
+pub async fn remove_scoped_approval_channel(execution_id: &str) {
+    scoped_approval_lock().write().await.remove(execution_id);
 }
 
 pub async fn answer_permission_request(
@@ -56,7 +81,20 @@ pub async fn answer_permission_request(
 
     // Read the channel once to avoid holding the lock across .await points and
     // to prevent double-locking (tokio::sync::RwLock is not reentrant).
-    let tui_tx: Option<mpsc::Sender<ApprovalRequest>> = approval_lock().read().await.clone();
+    let scoped_tx = if let Some(execution_id) = execution_id {
+        scoped_approval_lock()
+            .read()
+            .await
+            .get(execution_id)
+            .cloned()
+    } else {
+        None
+    };
+    let tui_tx: Option<mpsc::Sender<ApprovalRequest>> = if scoped_tx.is_some() {
+        scoped_tx.clone()
+    } else {
+        approval_lock().read().await.clone()
+    };
 
     // iota's own MCP tools are internal infrastructure — auto-approve without prompting.
     // Tool names may arrive as "iota_memory_write" or "mcp__iota-context__iota_memory_write".
@@ -274,6 +312,7 @@ async fn prompt_yes_no(message: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::mpsc;
 
     #[test]
     fn wildcard_star_matches_everything() {
@@ -390,5 +429,25 @@ mod tests {
         assert!(tool_is_whitelisted("iota_read", &rules));
         assert!(tool_is_whitelisted("safe_tool", &rules));
         assert!(!tool_is_whitelisted("dangerous", &rules));
+    }
+
+    #[tokio::test]
+    async fn scoped_approval_channel_is_registered_and_removed() {
+        let (tx, _rx) = mpsc::channel(1);
+        install_scoped_approval_channel("turn-test".to_string(), tx).await;
+        assert!(
+            scoped_approval_lock()
+                .read()
+                .await
+                .contains_key("turn-test")
+        );
+
+        remove_scoped_approval_channel("turn-test").await;
+        assert!(
+            !scoped_approval_lock()
+                .read()
+                .await
+                .contains_key("turn-test")
+        );
     }
 }

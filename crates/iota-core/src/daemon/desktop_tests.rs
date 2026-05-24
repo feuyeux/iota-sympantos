@@ -1,5 +1,7 @@
 use super::*;
 use crate::config::{BackendConfig, CommandConfig, ModelConfig, NimiaConfig};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 #[tokio::test]
@@ -52,10 +54,67 @@ async fn turn_registry_cancel_reports_whether_turn_existed() {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     });
 
-    registry.insert("turn-1".to_string(), handle).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accept = tokio::spawn(async move { listener.accept().await.unwrap().0.into_split().1 });
+    let _client = TcpStream::connect(addr).await.unwrap();
+    let write_half = accept.await.unwrap();
 
-    assert!(registry.abort("turn-1").await);
-    assert!(!registry.abort("turn-1").await);
+    registry
+        .insert(
+            "turn-1".to_string(),
+            handle,
+            Arc::new(Mutex::new(write_half)),
+        )
+        .await;
+
+    assert!(registry.abort("turn-1").await.is_some());
+    assert!(registry.abort("turn-1").await.is_none());
+}
+
+#[tokio::test]
+async fn desktop_connection_rejects_message_before_hello() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let stream = listener.accept().await.unwrap().0;
+        let pool = Arc::new(Mutex::new(EnginePool::new(
+            NimiaConfig::default(),
+            false,
+            1000,
+        )));
+        let (read_half, write_half) = stream.into_split();
+        let mut reader = BufReader::new(read_half);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let message: DaemonClientMessage = serde_json::from_str(line.trim()).unwrap();
+        handle_desktop_connection(
+            message,
+            reader,
+            write_half,
+            pool,
+            ApprovalRegistry::default(),
+            TurnRegistry::default(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let message = DaemonClientMessage::GetConfig;
+    let mut line = serde_json::to_vec(&message).unwrap();
+    line.push(b'\n');
+    client.write_all(&line).await.unwrap();
+    let mut reader = BufReader::new(client);
+    let mut response = String::new();
+    reader.read_line(&mut response).await.unwrap();
+    let response: DaemonServerMessage = serde_json::from_str(response.trim()).unwrap();
+
+    assert!(matches!(
+        response,
+        DaemonServerMessage::ProtocolError { .. }
+    ));
+    server.await.unwrap();
 }
 
 #[test]

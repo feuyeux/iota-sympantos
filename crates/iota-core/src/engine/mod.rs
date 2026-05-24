@@ -61,6 +61,10 @@ pub struct IotaEngine {
     last_used_backend: Option<AcpBackend>,
     /// In-memory cache for loaded skill manifests to avoid repeated filesystem scans.
     skill_registry_cache: SkillCache,
+    /// Optional live text stream sender used by TUI/desktop turns.
+    stream_output_sender: Option<tokio::sync::mpsc::Sender<String>>,
+    /// Optional live runtime event sender used by desktop inspectors.
+    stream_event_sender: Option<tokio::sync::mpsc::Sender<crate::runtime_event::RuntimeEvent>>,
 }
 
 impl IotaEngine {
@@ -115,6 +119,8 @@ impl IotaEngine {
             session_ledger_store,
             last_used_backend: None,
             skill_registry_cache: SkillCache::default(),
+            stream_output_sender: None,
+            stream_event_sender: None,
         }
     }
 
@@ -123,8 +129,20 @@ impl IotaEngine {
     /// The TUI installs a sender before a turn starts, receives incremental `session/update`
     /// text chunks through it, and clears the sender after the turn to stop forwarding output.
     pub fn set_stream_output_sender(&mut self, tx: Option<tokio::sync::mpsc::Sender<String>>) {
+        self.stream_output_sender = tx.clone();
         for client in self.acp_clients.values_mut() {
             client.set_stream_sender(tx.clone());
+        }
+    }
+
+    /// Attach or clear a live runtime event channel for all currently open and future ACP clients.
+    pub fn set_stream_event_sender(
+        &mut self,
+        tx: Option<tokio::sync::mpsc::Sender<crate::runtime_event::RuntimeEvent>>,
+    ) {
+        self.stream_event_sender = tx.clone();
+        for client in self.acp_clients.values_mut() {
+            client.set_event_sender(tx.clone());
         }
     }
 
@@ -259,7 +277,9 @@ impl IotaEngine {
         if self.acp_clients.contains_key(&key) {
             return Ok(false);
         }
-        let client = self.start_acp_client(backend, cwd.clone()).await?;
+        let mut client = self.start_acp_client(backend, cwd.clone()).await?;
+        client.set_stream_sender(self.stream_output_sender.clone());
+        client.set_event_sender(self.stream_event_sender.clone());
         match self.acp_clients.entry(key) {
             Entry::Vacant(entry) => {
                 entry.insert(client);

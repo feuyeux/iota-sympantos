@@ -2023,7 +2023,6 @@ name = "iota-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "dirs",
  "futures-util",
  "hex",
@@ -2043,7 +2042,6 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "urlencoding",
  "uuid",
 ]
 

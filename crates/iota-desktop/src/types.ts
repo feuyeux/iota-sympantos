@@ -50,6 +50,11 @@ export type DaemonServerMessage =
   | { type: "backend_check_result"; backend: string; ok: boolean; details: string }
   | { type: "observability_summary"; summary: any };
 
+export type DaemonClientError = {
+  turn_id?: string;
+  message: string;
+};
+
 export type DesktopModelConfig = {
   provider?: string;
   name?: string;

@@ -22,6 +22,7 @@ pub(super) struct PromptReadOptions<'a> {
     pub(super) timeout_ms: u64,
     pub(super) expected_prompt_id: &'a str,
     pub(super) stream_tx: Option<&'a mpsc::Sender<String>>,
+    pub(super) event_tx: Option<&'a mpsc::Sender<RuntimeEvent>>,
     pub(super) execution_id: Option<&'a str>,
 }
 
@@ -40,6 +41,7 @@ where
         timeout_ms,
         expected_prompt_id,
         stream_tx,
+        event_tx,
         execution_id,
     } = options;
     let mut output = String::new();
@@ -68,7 +70,7 @@ where
                 output.push_str(&text);
             }
             if let Some(usage) = runtime_event::token_usage_from_value(result) {
-                events.push(RuntimeEvent::TokenUsage(usage));
+                push_event(&mut events, event_tx, RuntimeEvent::TokenUsage(usage));
             }
             if is_terminal_result(result) {
                 break;
@@ -80,7 +82,7 @@ where
         };
 
         for event in runtime_event::map_acp_events(method, message.params.as_ref()) {
-            events.push(event);
+            push_event(&mut events, event_tx, event);
         }
 
         match method {
@@ -113,7 +115,11 @@ where
                     tool_whitelist,
                 )
                 .await?;
-                events.push(RuntimeEvent::ApprovalDecision(decision));
+                push_event(
+                    &mut events,
+                    event_tx,
+                    RuntimeEvent::ApprovalDecision(decision),
+                );
             }
             _ => {
                 if let (Some(id), Some(intercepted)) = (
@@ -130,11 +136,15 @@ where
                         arguments = %tool_arguments,
                         "ACP backend tool call intercepted"
                     );
-                    events.push(RuntimeEvent::ToolCall(ToolCallEvent {
-                        id: call_id.clone(),
-                        name: tool_name.clone(),
-                        arguments: tool_arguments.clone(),
-                    }));
+                    push_event(
+                        &mut events,
+                        event_tx,
+                        RuntimeEvent::ToolCall(ToolCallEvent {
+                            id: call_id.clone(),
+                            name: tool_name.clone(),
+                            arguments: tool_arguments.clone(),
+                        }),
+                    );
                     let result = intercepted.unwrap_or_else(|err| json!({"content":[{"type":"text","text":err.to_string()}],"isError":true}));
                     let ok = !result
                         .get("isError")
@@ -149,12 +159,16 @@ where
                         result = %result,
                         "ACP backend tool result returned"
                     );
-                    events.push(RuntimeEvent::ToolResult(ToolResultEvent {
-                        id: call_id,
-                        name: tool_name,
-                        ok,
-                        result: result.clone(),
-                    }));
+                    push_event(
+                        &mut events,
+                        event_tx,
+                        RuntimeEvent::ToolResult(ToolResultEvent {
+                            id: call_id,
+                            name: tool_name,
+                            ok,
+                            result: result.clone(),
+                        }),
+                    );
                     super::client::send_response(stdin, id, result).await?;
                     continue;
                 }
@@ -166,4 +180,15 @@ where
         }
     }
     Ok((output, events))
+}
+
+fn push_event(
+    events: &mut Vec<RuntimeEvent>,
+    event_tx: Option<&mpsc::Sender<RuntimeEvent>>,
+    event: RuntimeEvent,
+) {
+    if let Some(tx) = event_tx {
+        let _ = tx.try_send(event.clone());
+    }
+    events.push(event);
 }

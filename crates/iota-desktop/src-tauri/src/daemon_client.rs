@@ -23,10 +23,11 @@ pub async fn start_turn(
 ) -> Result<()> {
     let mut stream = connect_or_start().await?;
     write_message(&mut stream, &hello_message()).await?;
+    wait_for_hello(&mut stream).await?;
     write_message(
         &mut stream,
         &DaemonClientMessage::StartTurn {
-            turn_id,
+            turn_id: turn_id.clone(),
             cwd,
             backend,
             prompt,
@@ -38,25 +39,68 @@ pub async fn start_turn(
     tokio::spawn(async move {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+        let mut saw_terminal = false;
+        loop {
+            let bytes_read = match reader.read_line(&mut line).await {
+                Ok(bytes_read) => bytes_read,
+                Err(err) => {
+                    emit_client_error(&window, Some(&turn_id), err.to_string());
+                    return;
+                }
+            };
+            if bytes_read == 0 {
+                break;
+            }
             match serde_json::from_str::<DaemonServerMessage>(line.trim()) {
                 Ok(message) => {
+                    saw_terminal = is_terminal_turn_message(&message) || saw_terminal;
                     let _ = window.emit("daemon-message", message);
                 }
                 Err(err) => {
-                    let _ = window.emit("daemon-client-error", err.to_string());
+                    emit_client_error(&window, Some(&turn_id), err.to_string());
                 }
             }
             line.clear();
+        }
+        if !saw_terminal {
+            emit_client_error(
+                &window,
+                Some(&turn_id),
+                "daemon stream ended before the turn reached a terminal state".to_string(),
+            );
         }
     });
 
     Ok(())
 }
 
+#[derive(Clone, serde::Serialize)]
+struct DaemonClientErrorPayload<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turn_id: Option<&'a str>,
+    message: String,
+}
+
+fn emit_client_error(window: &tauri::Window, turn_id: Option<&str>, message: String) {
+    let _ = window.emit(
+        "daemon-client-error",
+        DaemonClientErrorPayload { turn_id, message },
+    );
+}
+
+fn is_terminal_turn_message(message: &DaemonServerMessage) -> bool {
+    matches!(
+        message,
+        DaemonServerMessage::TurnCompleted { .. }
+            | DaemonServerMessage::TurnFailed { .. }
+            | DaemonServerMessage::TurnCancelled { accepted: true, .. }
+    )
+}
+
 pub async fn send_one(message: DaemonClientMessage) -> Result<Vec<DaemonServerMessage>> {
     let mut stream = connect_or_start().await?;
     write_message(&mut stream, &hello_message()).await?;
+    wait_for_hello(&mut stream).await?;
     write_message(&mut stream, &message).await?;
 
     let mut reader = BufReader::new(stream);
@@ -141,4 +185,16 @@ async fn write_message(stream: &mut TcpStream, message: &DaemonClientMessage) ->
     stream.write_all(&line).await?;
     stream.flush().await?;
     Ok(())
+}
+
+async fn wait_for_hello(stream: &mut TcpStream) -> Result<()> {
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).await?;
+    let message: DaemonServerMessage = serde_json::from_str(line.trim())?;
+    match message {
+        DaemonServerMessage::HelloAccepted { .. } => Ok(()),
+        DaemonServerMessage::ProtocolError { message } => anyhow::bail!(message),
+        other => anyhow::bail!("daemon returned unexpected handshake message: {:?}", other),
+    }
 }

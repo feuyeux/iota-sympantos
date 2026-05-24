@@ -2,6 +2,7 @@ mod daemon_client;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::Emitter;
 use tokio::sync::Mutex;
 
 use iota_core::kanban::{KanbanStore, SqliteKanbanStore, types::*};
@@ -86,17 +87,23 @@ async fn handle_approval(req_id: String, approved: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn cancel_turn(turn_id: String) -> Result<(), String> {
+async fn cancel_turn(turn_id: String, window: tauri::Window) -> Result<(), String> {
     let messages = daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CancelTurn {
         turn_id: turn_id.clone(),
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    let accepted = messages.into_iter().find_map(|message| match message {
-        iota_core::daemon::DaemonServerMessage::TurnCancelled { accepted, .. } => Some(accepted),
-        _ => None,
-    });
+    let mut accepted = None;
+    for message in messages {
+        if let iota_core::daemon::DaemonServerMessage::TurnCancelled {
+            accepted: value, ..
+        } = &message
+        {
+            accepted = Some(*value);
+            let _ = window.emit("daemon-message", message);
+        }
+    }
     match accepted {
         Some(true) => Ok(()),
         Some(false) => Err(format!("turn {} is not active", turn_id)),

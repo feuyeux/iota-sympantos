@@ -93,6 +93,8 @@ pub struct AcpClient {
     pub(super) mcp_servers: Vec<AcpMcpServer>,
     pub(super) session_options: AcpSessionOptions,
     pub(super) tool_whitelist: Vec<String>,
-    /// When set, each streamed output chunk is forwarded to the TUI.
+    /// When set, each streamed output chunk is forwarded to the TUI/desktop UI.
     pub(super) stream_tx: Option<mpsc::Sender<String>>,
+    /// When set, runtime events are forwarded while the prompt is still running.
+    pub(super) event_tx: Option<mpsc::Sender<RuntimeEvent>>,
 }
