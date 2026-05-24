@@ -169,7 +169,7 @@ Record the date, OS, backend used, and result here when executing the runbook.
 
 | Date | OS | Backend | Result | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| pending | pending | pending | pending | Not yet manually executed |
+| 2026-05-24 | macOS | Gemini | partial pass | Launch and daemon connection verified. Existing old daemon on `127.0.0.1:47661` caused an EOF/daemon error; fixed by desktop fallback autostart on `127.0.0.1:47662` using the current workspace CLI. Full prompt, approval, cancellation, and config-save scenarios still need interactive execution. |
 
 ## Non-Blocking Follow-Ups
 
@@ -177,4 +177,4 @@ Use this section only for issues that do not invalidate the Chat-first daemon MV
 
 | Item | Scope | Owner |
 | :--- | :--- | :--- |
-| pending | pending | pending |
+| Full manual prompt/approval/cancellation walkthrough | Desktop MVP acceptance | Developer |

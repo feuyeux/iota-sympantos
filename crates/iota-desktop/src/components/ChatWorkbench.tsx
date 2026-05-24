@@ -133,7 +133,7 @@ export function ChatWorkbench() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const prompt = input.trim();
-    if (!prompt || activeTurnBusy || !selectedBackendReady) return;
+    if (!prompt || activeTurnBusy || !canSubmit) return;
     setInput("");
     const turnId = crypto.randomUUID();
     dispatch({
@@ -163,6 +163,8 @@ export function ChatWorkbench() {
   const isKeyConfigured = activeBackendSnapshot?.model?.api_key_configured;
   const activeBackendCheck = backendChecks[backend];
   const selectedBackendReady = activeBackendCheck?.ok === true;
+  const daemonError = state.pendingError;
+  const canSubmit = !daemonError && selectedBackendReady;
   const daemonStatusText =
     daemonStatus === "connected"
       ? "Daemon Connected"
@@ -244,9 +246,11 @@ export function ChatWorkbench() {
                 <div className="flex h-full flex-col items-center justify-center text-sm text-gray-500 gap-2">
                   <CheckCircle2 className="h-8 w-8 text-gray-700" />
                   <span>
-                    {selectedBackendReady
-                      ? `Send a prompt to begin coding with ${backend.toUpperCase()}`
-                      : `${backend.toUpperCase()} is not ready: ${activeBackendCheck?.details ?? "checking configuration"}`}
+                    {daemonError
+                      ? daemonError
+                      : selectedBackendReady
+                        ? `Send a prompt to begin coding with ${backend.toUpperCase()}`
+                        : `${backend.toUpperCase()} is not ready: ${activeBackendCheck?.details ?? "checking configuration"}`}
                   </span>
                 </div>
               ) : null}
@@ -298,6 +302,8 @@ export function ChatWorkbench() {
                   placeholder={
                     activeTurnBusy
                       ? "Wait for the active turn to finish or interrupt it..."
+                      : daemonError
+                        ? daemonError
                       : !selectedBackendReady
                         ? activeBackendCheck?.details ?? "Checking selected backend..."
                       : `Ask ${backend.toUpperCase()} to write code, debug, or solve tasks...`
@@ -311,7 +317,7 @@ export function ChatWorkbench() {
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim() || activeTurnBusy || !selectedBackendReady}
+                  disabled={!input.trim() || activeTurnBusy || !canSubmit}
                   className="flex h-[60px] w-12 items-center justify-center rounded-md bg-primary hover:bg-primary/95 text-white disabled:opacity-50 transition-colors shadow shadow-primary/25 cursor-pointer"
                 >
                   <Send className="h-4.5 w-4.5" />

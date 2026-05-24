@@ -21,7 +21,7 @@
 - Inspect: `crates/iota-desktop/src/components/RightInspector.tsx`
 - Inspect: `crates/iota-desktop/src/components/ConfigPanel.tsx`
 
-- [ ] **Step 1: Confirm daemon-first dependency boundary**
+- [x] **Step 1: Confirm daemon-first dependency boundary**
 
 Run:
 
@@ -31,7 +31,7 @@ rg -n "IotaEngine|create_session|run_with_timing|run\(" crates/iota-desktop/src-
 
 Expected: desktop Tauri code does not construct or call `IotaEngine` directly. Any hits should be imports from `iota_core::daemon` or unrelated test names.
 
-- [ ] **Step 2: Confirm daemon protocol coverage**
+- [x] **Step 2: Confirm daemon protocol coverage**
 
 Run:
 
@@ -41,7 +41,7 @@ cargo test -p iota-core daemon -- --nocapture
 
 Expected: desktop protocol serde, hello rejection, approval registry, backend checks, and legacy daemon tests pass.
 
-- [ ] **Step 3: Record remaining acceptance gaps**
+- [x] **Step 3: Record remaining acceptance gaps**
 
 Create or update a short checklist in `docs/desktop-mvp-acceptance.md` with the manual scenarios from Task 4 below. Do not include secrets or API keys.
 
@@ -57,7 +57,7 @@ Create or update a short checklist in `docs/desktop-mvp-acceptance.md` with the 
 - Modify: `crates/iota-desktop/src-tauri/src/lib.rs`
 - Modify: `crates/iota-desktop/src/components/ChatWorkbench.tsx`
 
-- [ ] **Step 1: Add explicit daemon client event type if needed**
+- [x] **Step 1: Add explicit daemon client event type if needed**
 
 Review how `daemon-client-error` is emitted today. If the UI only logs it, add a typed frontend event path that converts daemon client errors into either:
 
@@ -66,7 +66,7 @@ Review how `daemon-client-error` is emitted today. If the UI only logs it, add a
 
 Keep the reducer pure and avoid parsing rendered text.
 
-- [ ] **Step 2: Add reducer tests for disconnect/error**
+- [x] **Step 2: Add reducer tests for disconnect/error**
 
 Extend `turnReducer.test.ts` to cover:
 
@@ -80,7 +80,7 @@ Run:
 cd crates/iota-desktop && npm test
 ```
 
-- [ ] **Step 3: Ensure daemon client emits useful errors**
+- [x] **Step 3: Ensure daemon client emits useful errors**
 
 When the stream reader exits unexpectedly before a terminal turn message, emit an event that includes the `turn_id` supplied to `start_turn`.
 
@@ -101,7 +101,7 @@ cd crates/iota-desktop && npm test
 - Modify: `crates/iota-desktop/src/turnReducer.ts`
 - Modify: `crates/iota-desktop/src/turnReducer.test.ts`
 
-- [ ] **Step 1: Verify runtime event mapping**
+- [x] **Step 1: Verify runtime event mapping**
 
 Confirm reducer support for these event kinds:
 
@@ -111,11 +111,11 @@ Confirm reducer support for these event kinds:
 - `ApprovalRequest` / `ApprovalDecision` if surfaced through runtime events
 - generic events retained in `events`
 
-- [ ] **Step 2: Improve raw event display if needed**
+- [x] **Step 2: Improve raw event display if needed**
 
 Right inspector should show high-value summaries by default and keep raw JSON folded/scrollable. It should not let long raw payloads break layout.
 
-- [ ] **Step 3: Add focused reducer tests**
+- [x] **Step 3: Add focused reducer tests**
 
 Add tests proving `ToolCall`, `ToolResult`, and `TokenUsage` update inspector-friendly state.
 
@@ -133,7 +133,7 @@ cd crates/iota-desktop && npm test
 - Create: `docs/desktop-mvp-acceptance.md`
 - Modify if needed: `crates/iota-desktop/README.md`
 
-- [ ] **Step 1: Document prerequisites**
+- [x] **Step 1: Document prerequisites**
 
 Include:
 
@@ -142,7 +142,7 @@ Include:
 - `IOTA_CLI_PATH` or `iota` in PATH for daemon autostart
 - warning that secrets must not be pasted into logs
 
-- [ ] **Step 2: Document automated gates**
+- [x] **Step 2: Document automated gates**
 
 Include:
 
@@ -154,7 +154,7 @@ cargo run -p iota-cli -- check
 cd crates/iota-desktop && npm test && npm run build
 ```
 
-- [ ] **Step 3: Document manual desktop scenarios**
+- [x] **Step 3: Document manual desktop scenarios**
 
 Include expected behavior for:
 
@@ -169,7 +169,7 @@ Include expected behavior for:
 - stream interruption / daemon disconnect
 - CLI daemon compatibility after desktop use
 
-- [ ] **Step 4: Link runbook from README**
+- [x] **Step 4: Link runbook from README**
 
 Add a short README link so future workers know where manual acceptance lives.
 
@@ -180,31 +180,31 @@ Add a short README link so future workers know where manual acceptance lives.
 **Files:**
 - No code changes expected unless gates fail.
 
-- [ ] **Step 1: Rust format check**
+- [x] **Step 1: Rust format check**
 
 ```bash
 cargo fmt --all --check
 ```
 
-- [ ] **Step 2: Workspace tests**
+- [x] **Step 2: Workspace tests**
 
 ```bash
 cargo test --workspace
 ```
 
-- [ ] **Step 3: Clippy**
+- [x] **Step 3: Clippy**
 
 ```bash
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-- [ ] **Step 4: CLI check**
+- [x] **Step 4: CLI check**
 
 ```bash
 cargo run -p iota-cli -- check
 ```
 
-- [ ] **Step 5: Frontend tests and build**
+- [x] **Step 5: Frontend tests and build**
 
 ```bash
 cd crates/iota-desktop
@@ -240,11 +240,11 @@ Acceptance blockers must be fixed before marking this phase complete. Non-blocki
 
 ## Completion Checklist
 
-- [ ] Desktop still uses daemon path only.
-- [ ] Stream completion/failure/cancellation leaves UI in a terminal state.
+- [x] Desktop still uses daemon path only.
+- [x] Stream completion/failure/cancellation leaves UI in a terminal state.
 - [ ] Approval approve and deny are manually verified.
-- [ ] Config reads and saves through daemon APIs only.
-- [ ] Runtime events/timing/usage/tool calls render in the inspector when produced.
-- [ ] Automated gates pass.
+- [x] Config reads and saves through daemon APIs only.
+- [x] Runtime events/timing/usage/tool calls render in the inspector when produced.
+- [x] Automated gates pass.
 - [ ] Manual acceptance runbook exists and has been executed.
 - [ ] Remaining work is small enough to plan as product features rather than daemon-first architecture repair.

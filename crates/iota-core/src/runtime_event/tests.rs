@@ -1,9 +1,13 @@
 use super::*;
 use serde_json::json;
 
+fn first_acp_event(method: &str, params: Option<&serde_json::Value>) -> Option<RuntimeEvent> {
+    map_acp_events(method, params).into_iter().next()
+}
+
 #[test]
 fn maps_agent_message_to_output() {
-    let event = map_acp_event(
+    let event = first_acp_event(
         "session/update",
         Some(&json!({"update":{"sessionUpdate":"agent_message_chunk","content":[{"text":"hi"}]}})),
     )
@@ -66,7 +70,7 @@ fn uncached_prompt_tokens_take_precedence_for_input_tokens() {
 
 #[test]
 fn maps_session_complete_to_state() {
-    let event = map_acp_event(
+    let event = first_acp_event(
         "session/complete",
         Some(&json!({
             "model": "test-model",
@@ -301,7 +305,7 @@ fn normalizes_codex_usage_update_used_as_adapter_total_only() {
 
 #[test]
 fn tool_call_event_is_mapped() {
-    let event = map_acp_event(
+    let event = first_acp_event(
         "session/update",
         Some(&json!({"update":{"sessionUpdate":"tool_call","id":"t1","name":"iota_memory_search","arguments":{"query":"rust"}}})),
     )
@@ -405,7 +409,7 @@ fn claude_failed_tool_call_update_emits_failed_tool_result() {
 
 #[test]
 fn unknown_session_update_maps_to_state() {
-    let event = map_acp_event(
+    let event = first_acp_event(
         "session/update",
         Some(&json!({"update":{"sessionUpdate":"thinking"}})),
     )
@@ -415,7 +419,7 @@ fn unknown_session_update_maps_to_state() {
 
 #[test]
 fn error_update_maps_to_error_event() {
-    let event = map_acp_event(
+    let event = first_acp_event(
         "session/update",
         Some(&json!({"update":{"sessionUpdate":"error","message":"timeout","code":504}})),
     )
@@ -442,7 +446,7 @@ fn session_complete_emits_token_usage_too() {
 
 #[test]
 fn request_permission_maps_to_approval_request() {
-    let event = map_acp_event(
+    let event = first_acp_event(
         "session/request_permission",
         Some(&json!({"requestId":"req-1","toolName":"shell","command":"rm -rf /tmp/x"})),
     )

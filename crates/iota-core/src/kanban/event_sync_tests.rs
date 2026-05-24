@@ -1,13 +1,13 @@
-use anyhow::Context;
 use crate::kanban::event_sync::{
-    default_pull_source, export_event_bundle, handle_event_sync_stream,
+    KanbanEventBundle, default_pull_source, export_event_bundle, handle_event_sync_stream,
     import_event_bundle, pull_event_bundle, push_event_bundle, read_event_bundle,
-    write_event_bundle, KanbanEventBundle,
+    write_event_bundle,
 };
-use crate::kanban::{CreateTaskRequest, SqliteKanbanStore, KanbanStore, Status};
+use crate::kanban::{CreateTaskRequest, KanbanStore, SqliteKanbanStore, Status};
+use anyhow::Context;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 fn serve_event_sync_until_shutdown(

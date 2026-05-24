@@ -1,8 +1,8 @@
+use crate::kanban::shadow::{SHADOW_SCHEMA, ShadowEvent, ShadowMaterializer, ShadowWatcher};
 use crate::kanban::sqlite_store::SqliteKanbanStore;
-use crate::kanban::shadow::{ShadowEvent, ShadowMaterializer, ShadowWatcher, SHADOW_SCHEMA};
 use crate::kanban::store::KanbanStore;
 use crate::kanban::{BoardId, CreateTaskRequest, LinkKind, TaskId};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
 
 fn test_tmp_dir() -> std::path::PathBuf {
@@ -197,9 +197,15 @@ fn sync_events_applies_to_store() {
 
     let board_id = make_board(&store);
     let task_id = make_task(&store, board_id);
-    store.transition(task_id, crate::kanban::Status::Todo).unwrap();
-    store.transition(task_id, crate::kanban::Status::Ready).unwrap();
-    store.transition(task_id, crate::kanban::Status::Running).unwrap();
+    store
+        .transition(task_id, crate::kanban::Status::Todo)
+        .unwrap();
+    store
+        .transition(task_id, crate::kanban::Status::Ready)
+        .unwrap();
+    store
+        .transition(task_id, crate::kanban::Status::Running)
+        .unwrap();
     let run_id = store.create_run(task_id, "test-profile").unwrap();
 
     let watcher = ShadowWatcher::new(tmp.join("unused.db"), task_id);
@@ -296,9 +302,15 @@ fn sync_events_defers_main_task_status_until_worker_exit() {
     let store = open_store(&tmp.join("store.db"));
     let board_id = make_board(&store);
     let task_id = make_task(&store, board_id);
-    store.transition(task_id, crate::kanban::Status::Todo).unwrap();
-    store.transition(task_id, crate::kanban::Status::Ready).unwrap();
-    store.transition(task_id, crate::kanban::Status::Running).unwrap();
+    store
+        .transition(task_id, crate::kanban::Status::Todo)
+        .unwrap();
+    store
+        .transition(task_id, crate::kanban::Status::Ready)
+        .unwrap();
+    store
+        .transition(task_id, crate::kanban::Status::Running)
+        .unwrap();
     let run_id = store.create_run(task_id, "test-profile").unwrap();
     let watcher = ShadowWatcher::new(tmp.join("unused.db"), task_id);
 
@@ -311,5 +323,8 @@ fn sync_events_defers_main_task_status_until_worker_exit() {
 
     watcher.sync_events(&events, &store, &run_id).unwrap();
 
-    assert_eq!(store.get_task(task_id).unwrap().status, crate::kanban::Status::Running);
+    assert_eq!(
+        store.get_task(task_id).unwrap().status,
+        crate::kanban::Status::Running
+    );
 }
