@@ -1,8 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
-#[cfg(test)]
-use std::process::Stdio;
 use std::time::Duration;
 
 use super::shadow::{ShadowMaterializer, ShadowWatcher};
