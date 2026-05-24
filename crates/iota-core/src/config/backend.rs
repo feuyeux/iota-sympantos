@@ -39,6 +39,10 @@ pub struct BackendConfig {
     pub tool_whitelist: Vec<String>,
 }
 
+#[cfg(test)]
+#[path = "backend_tests.rs"]
+mod tests;
+
 fn default_enabled() -> bool {
     true
 }
@@ -61,6 +65,41 @@ pub fn command_label(command: &CommandConfig) -> String {
     parts.push(command.command.clone());
     parts.extend(command.args.iter().cloned());
     parts.join(" ")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendReadiness {
+    pub ok: bool,
+    pub details: String,
+}
+
+pub fn backend_readiness(config: &NimiaConfig, backend: AcpBackend) -> BackendReadiness {
+    let Some(section) = backend_config(config, backend) else {
+        return BackendReadiness {
+            ok: false,
+            details: "missing section".to_string(),
+        };
+    };
+    if !section.enabled {
+        return BackendReadiness {
+            ok: false,
+            details: "disabled".to_string(),
+        };
+    }
+    if section
+        .acp
+        .as_ref()
+        .is_some_and(|acp| !acp.command.trim().is_empty())
+    {
+        return BackendReadiness {
+            ok: true,
+            details: "configured".to_string(),
+        };
+    }
+    BackendReadiness {
+        ok: false,
+        details: "missing acp.command".to_string(),
+    }
 }
 
 pub fn configured_model(section: &BackendConfig) -> Option<String> {

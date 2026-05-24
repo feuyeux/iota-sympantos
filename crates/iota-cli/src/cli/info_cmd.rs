@@ -44,19 +44,7 @@ pub(super) fn print_combined_info(config: &NimiaConfig) -> Result<()> {
 
 fn backend_info(config: &NimiaConfig, backend: acp::AcpBackend) -> BackendInfo {
     let section = config::backend_config(config, backend);
-    let check_status = match section {
-        Some(section) if !section.enabled => "disabled",
-        Some(section)
-            if section
-                .acp
-                .as_ref()
-                .is_some_and(|acp| !acp.command.trim().is_empty()) =>
-        {
-            "configured"
-        }
-        Some(_) => "missing acp.command",
-        None => "missing section",
-    };
+    let check_status = config::backend_readiness(config, backend).details;
     let enabled = section.is_some_and(|section| section.enabled);
     let acp_command = section
         .and_then(|section| section.acp.as_ref())
@@ -71,7 +59,7 @@ fn backend_info(config: &NimiaConfig, backend: acp::AcpBackend) -> BackendInfo {
     BackendInfo {
         backend: backend.to_string(),
         enabled,
-        check_status: check_status.to_string(),
+        check_status,
         acp_command,
         version_mapping,
         model,

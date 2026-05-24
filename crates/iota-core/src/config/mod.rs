@@ -10,8 +10,9 @@ pub mod schema;
 #[allow(unused_imports)]
 pub use backend::BackendVersionMapping;
 pub use backend::{
-    BackendConfig, CommandConfig, backend_config, backend_process_env_with_context, command_label,
-    configured_model, normalized_acp_command,
+    BackendConfig, BackendReadiness, CommandConfig, backend_config,
+    backend_process_env_with_context, backend_readiness, command_label, configured_model,
+    normalized_acp_command,
 };
 #[allow(unused_imports)]
 pub use context::context_mcp_session_enabled;

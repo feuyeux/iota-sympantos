@@ -8,7 +8,7 @@ use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::acp::{AcpBackend, permission::ApprovalRequest};
-use crate::config::{BackendConfig, NimiaConfig, backend_config, read_config, save_config};
+use crate::config::{backend_readiness, read_config, save_config};
 use crate::daemon::pool::EnginePool;
 use crate::daemon::proto::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot,
@@ -299,7 +299,7 @@ async fn handle_message(
             let (ok, details) = match AcpBackend::parse(&backend) {
                 Ok(backend) => {
                     let config = read_config().context("Failed to read config")?;
-                    let result = backend_check_result(&config, backend);
+                    let result = backend_readiness(&config, backend);
                     (result.ok, result.details)
                 }
                 Err(err) => (false, err.to_string()),
@@ -490,94 +490,6 @@ async fn start_turn(
     turns.insert(turn_id, handle, Arc::clone(&writer)).await;
 
     Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BackendCheck {
-    pub ok: bool,
-    pub details: String,
-}
-
-pub(crate) fn backend_check_result(config: &NimiaConfig, backend: AcpBackend) -> BackendCheck {
-    let Some(section) = backend_config(config, backend) else {
-        return BackendCheck {
-            ok: false,
-            details: "backend section is missing".to_string(),
-        };
-    };
-    if !section.enabled {
-        return BackendCheck {
-            ok: false,
-            details: "backend is disabled".to_string(),
-        };
-    }
-    let Some(acp) = section.acp.as_ref() else {
-        return BackendCheck {
-            ok: false,
-            details: "missing acp config".to_string(),
-        };
-    };
-    if acp.command.trim().is_empty() {
-        return BackendCheck {
-            ok: false,
-            details: "missing acp.command".to_string(),
-        };
-    }
-    if let Some(details) = missing_backend_secret_detail(backend, section) {
-        return BackendCheck { ok: false, details };
-    }
-    BackendCheck {
-        ok: true,
-        details: "backend is configured".to_string(),
-    }
-}
-
-fn missing_backend_secret_detail(backend: AcpBackend, section: &BackendConfig) -> Option<String> {
-    match backend {
-        AcpBackend::OpenCode => None,
-        AcpBackend::Hermes => {
-            if model_api_key_configured(section) {
-                None
-            } else {
-                Some("missing model.api_key for Hermes provider".to_string())
-            }
-        }
-        AcpBackend::ClaudeCode => {
-            if model_api_key_configured(section) {
-                None
-            } else {
-                Some("missing model.api_key for ANTHROPIC_API_KEY".to_string())
-            }
-        }
-        AcpBackend::Codex => {
-            if model_api_key_configured(section) {
-                None
-            } else {
-                Some("missing model.api_key for OPENAI_API_KEY/ROUTER_API_KEY".to_string())
-            }
-        }
-        AcpBackend::Gemini => {
-            if model_api_key_configured(section) {
-                None
-            } else {
-                Some("missing model.api_key for GEMINI_API_KEY".to_string())
-            }
-        }
-    }
-}
-
-fn model_api_key_configured(section: &BackendConfig) -> bool {
-    section
-        .model
-        .as_ref()
-        .and_then(|model| model.api_key.as_deref())
-        .map(valid_api_key)
-        .unwrap_or(false)
-}
-
-fn valid_api_key(value: &str) -> bool {
-    let value = value.trim();
-    !value.is_empty() && value != "<api-key>" && value != "YOUR_API_KEY"
 }
 
 async fn abort_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {

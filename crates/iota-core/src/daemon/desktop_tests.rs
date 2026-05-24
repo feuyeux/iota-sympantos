@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{BackendConfig, CommandConfig, ModelConfig, NimiaConfig};
+use crate::config::NimiaConfig;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -115,94 +115,4 @@ async fn desktop_connection_rejects_message_before_hello() {
         DaemonServerMessage::ProtocolError { .. }
     ));
     server.await.unwrap();
-}
-
-#[test]
-fn backend_check_fails_for_disabled_backend() {
-    let config = NimiaConfig {
-        gemini: Some(gemini_config(false, "npx", "secret")),
-        ..Default::default()
-    };
-
-    let result = backend_check_result(&config, AcpBackend::Gemini);
-
-    assert!(!result.ok);
-    assert!(result.details.contains("disabled"));
-}
-
-#[test]
-fn backend_check_fails_for_missing_command() {
-    let config = NimiaConfig {
-        gemini: Some(gemini_config(true, " ", "secret")),
-        ..Default::default()
-    };
-
-    let result = backend_check_result(&config, AcpBackend::Gemini);
-
-    assert!(!result.ok);
-    assert!(result.details.contains("missing acp.command"));
-}
-
-#[test]
-fn backend_check_fails_for_missing_api_key() {
-    let config = NimiaConfig {
-        gemini: Some(gemini_config(true, "npx", "<api-key>")),
-        ..Default::default()
-    };
-
-    let result = backend_check_result(&config, AcpBackend::Gemini);
-
-    assert!(!result.ok);
-    assert!(result.details.contains("GEMINI_API_KEY"));
-}
-
-#[test]
-fn backend_check_allows_opencode_without_api_key() {
-    let config = NimiaConfig {
-        opencode: Some(BackendConfig {
-            enabled: true,
-            acp: Some(CommandConfig {
-                command: "npx".to_string(),
-                args: vec![],
-            }),
-            model: Some(ModelConfig {
-                api_key: None,
-                ..Default::default()
-            }),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    let result = backend_check_result(&config, AcpBackend::OpenCode);
-
-    assert!(result.ok);
-}
-
-#[test]
-fn backend_check_passes_for_configured_backend() {
-    let config = NimiaConfig {
-        gemini: Some(gemini_config(true, "npx", "secret")),
-        ..Default::default()
-    };
-
-    let result = backend_check_result(&config, AcpBackend::Gemini);
-
-    assert!(result.ok);
-    assert_eq!(result.details, "backend is configured");
-}
-
-fn gemini_config(enabled: bool, command: &str, api_key: &str) -> BackendConfig {
-    BackendConfig {
-        enabled,
-        acp: Some(CommandConfig {
-            command: command.to_string(),
-            args: vec![],
-        }),
-        model: Some(ModelConfig {
-            api_key: Some(api_key.to_string()),
-            ..Default::default()
-        }),
-        ..Default::default()
-    }
 }
