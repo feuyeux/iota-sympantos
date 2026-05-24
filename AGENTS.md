@@ -252,6 +252,8 @@ iota __daemon           # 内部 daemon 入口
 
 ## 单元测试规范
 
+**强制规则：UT 必须写入独立 `*_tests.rs` 文件，禁止内联在源文件中。**
+
 所有 `#[cfg(test)] mod tests {}` 内联测试块必须提取为独立文件，使用 `#[path]` 属性引用：
 
 ```rust
@@ -263,7 +265,7 @@ mod tests;
 
 ```rust
 // 独立测试文件 (module_tests.rs)
-use super::*;
+use crate::xxx;  // 使用绝对路径导入父模块
 
 #[test]
 fn my_test() { ... }
@@ -273,7 +275,7 @@ fn my_test() { ... }
 
 - 测试文件命名：`<module_name>_tests.rs`
 - 测试文件放在同目录下
-- 使用 `use super::*` 导入父模块内容
+- 导入使用 `use crate::<module>::...` 绝对路径，禁止 `use super::*`
 - 测试函数直接放在文件顶层，不嵌套 `mod inner {}`
 - `async fn` 测试使用 `#[tokio::test]` 宏，无需额外配置（自动继承 crate 的 edition）
 - 辅助函数（如 `process_exists`）直接放在文件内
@@ -288,6 +290,12 @@ fn my_test() { ... }
 - `utils/tests.rs`
 - `runtime_event/tests.rs`
 - `kanban/worker_tests.rs` — 4 个测试
+- `kanban/sqlite_store_tests.rs` — 8 个测试
+- `kanban/dispatcher_tests.rs` — 5 个测试
+- `kanban/shadow_tests.rs` — 4 个测试
+- `kanban/bridge_tests.rs` — 3 个测试
+- `kanban/state_machine_tests.rs` — 3 个测试
+- `kanban/event_sync_tests.rs` — 6 个测试
 
 ---
 

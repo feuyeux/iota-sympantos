@@ -126,11 +126,13 @@ CLI / TUI
 ## 开发
 
 ```bash
-cargo test               # 367 tests
+cargo test               # 运行全部测试
 cargo check --offline
 RUST_LOG=debug cargo run -p iota-cli --quiet
 cargo run -p iota-cli --quiet -- run codex "ping" --timing
 ```
+
+**UT 规范：** 所有测试必须写入独立 `*_tests.rs` 文件，禁止内联在源文件中。详见 [`AGENTS.md`](AGENTS.md#单元测试规范)。
 
 **Rust 1.95+，依赖：** tokio · ratatui · rusqlite · reqwest · axum · tracing · opentelemetry · serde
 
