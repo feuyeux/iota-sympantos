@@ -28,7 +28,7 @@ pub use context::{
 };
 pub use effective::EffectiveConfig;
 pub use helpers::{expand_home_path, normalize_command};
-pub use loader::{config_path, read_config};
+pub use loader::{config_path, read_config, save_config};
 #[allow(unused_imports)]
 pub use model::ModelConfig;
 pub use schema::{NimiaConfig, StoreConfig};

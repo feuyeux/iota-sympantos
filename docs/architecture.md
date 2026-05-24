@@ -122,9 +122,9 @@ Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngi
 | 模块 | 职责 | 主要下游 |
 | :---| :---| :---|
 | `crates/iota-core/src/engine/` | 核心编排门面。按 `(backend, cwd)` 维护 ACP client pool；处理 session ledger、handoff、memory recall/write、skill 短路、context capsule、ACP 调用和事件落库 | `acp`, `config`, `context`, `skill`, `store`, `runtime_event` |
-| `crates/iota-core/src/daemon/mod.rs` | `127.0.0.1:47661` 默认 TCP daemon；支持 `IOTA_DAEMON_ADDR`；每连接一条 JSON request/response；8 并发限流；10 MiB 请求上限；Ctrl+C 优雅关闭 | `engine`, `daemon::pool`, `daemon::proto` |
-| `crates/iota-core/src/daemon/pool.rs` | `EnginePool` 按 cwd 复用 `IotaEngine`，从而复用 ACP 子进程和 session/handoff 状态 | `engine`, `config` |
-| `crates/iota-core/src/daemon/proto.rs` | `DaemonPromptRequest`、`DaemonPromptResponse`、`DaemonWarmRequest` | `runtime_event`, `acp::AcpPromptTiming` |
+| `crates/iota-core/src/daemon/mod.rs` | `127.0.0.1:47661` 默认 TCP daemon；支持 `IOTA_DAEMON_ADDR`；提供 legacy CLI request/response 与 desktop 细粒度 streaming turns 双协议通道；8 并发限流；10 MiB 请求上限；Ctrl+C 优雅关闭 | `engine`, `daemon::pool`, `daemon::proto`, `daemon::desktop` |
+| `crates/iota-core/src/daemon/pool.rs` | `EnginePool` 按 cwd 复用 `IotaEngine`，从而复用 ACP 子进程和 session/handoff 状态，支持 config 热替换/重置引擎 | `engine`, `config` |
+| `crates/iota-core/src/daemon/proto.rs` | 协议定义。保留 legacy 消息，新增 `DaemonClientMessage`/`DaemonServerMessage` Tagged Enum 用以描述 desktop 的 start/cancel/respond_approval 以及 chunks/events/approvals 流式消息，并定义 `DesktopConfigSnapshot` 用以无密展示配置 | `runtime_event`, `acp::AcpPromptTiming` |
 
 `crates/iota-core/src/engine/` 是行为决策边界；SQL、ACP wire、MCP JSON-RPC 和 TUI 渲染仍保留在各自模块。
 
@@ -208,6 +208,22 @@ iota run --daemon ...
   -> daemon EnginePool::engine_for(cwd)
   -> same IotaEngine prompt path
   -> JSON-line DaemonPromptResponse
+```
+
+### Desktop (Tauri + React) 经 daemon 运行
+
+```text
+iota-desktop (Tauri App)
+  -> React UI: click "Send" / submitPrompt(prompt, backend)
+  -> Tauri Command: submit_prompt
+  -> daemon_client: start_turn(window, turn_id, cwd, backend, prompt)
+  -> connect_or_start(): connect to daemon at 127.0.0.1:47661 (or autostart __daemon)
+  -> send Hello + StartTurn
+  -> daemon: handle_desktop_connection
+  -> spawn tokio task to run IotaEngine run_with_timing()
+  -> streams TextChunk over TCP stream -> daemon_client emits "daemon-message" window event
+  -> streams TurnEvent and ApprovalRequested (routes approvals through ApprovalRegistry)
+  -> React turnsReducer processes messages, updates chat history, and shows details in Right Inspector
 ```
 
 ### TUI 执行

@@ -20,16 +20,20 @@ TCP server on `127.0.0.1:47661` that keeps `IotaEngine` instances alive across C
 - Maintain an `EnginePool` keyed by working directory
 - Reuse warm ACP backend connections
 - Auto-start on first `--daemon` CLI call
+- Provide two local JSON-line APIs: legacy CLI request/response and desktop streaming turns
 
 ## Sub-modules
 
 | Module | Purpose |
 | :--------| :---------|
 | `pool` | `EnginePool` — per-cwd engine instance management |
-| `proto` | `DaemonPromptRequest` / `DaemonPromptResponse` wire types |
+| `proto` | `DaemonPromptRequest` / `DaemonPromptResponse` and desktop wire types |
+| `desktop` | `handle_desktop_connection` — streams text chunks, events, and routes approvals |
 
 ## Key Types
 
 - `EnginePool` — maps cwd → `IotaEngine` with warm ACP clients
 - `DaemonPromptRequest` — inbound prompt (backend, cwd, prompt, timeout)
 - `DaemonPromptResponse` — result (ok, output, error, timing)
+- `DaemonClientMessage` — desktop client command (start turn, cancel turn, getConfig, saveBackendModel, respondApproval)
+- `DaemonServerMessage` — desktop streaming server event (helloAccepted, textChunk, turnEvent, approvalRequested)

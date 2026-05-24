@@ -2051,6 +2051,7 @@ dependencies = [
 name = "iota-desktop"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dirs",
  "iota-core",
  "serde",

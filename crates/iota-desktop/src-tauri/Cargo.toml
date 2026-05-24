@@ -21,6 +21,7 @@ serde_yaml.workspace = true
 tokio.workspace = true
 dirs.workspace = true
 uuid.workspace = true
+anyhow.workspace = true
 iota-core = { path = "../../iota-core" }
 
 

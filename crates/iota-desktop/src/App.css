@@ -9,5 +9,11 @@ body {
   background-color: #0b0f19;
   color: #f3f4f6;
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  overflow-x: hidden;
+  overflow: hidden;
+}
+
+button,
+select,
+textarea {
+  font: inherit;
 }

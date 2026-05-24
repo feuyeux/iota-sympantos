@@ -11,10 +11,15 @@
 //! - [`proto`] — wire types: [`DaemonPromptRequest`], [`DaemonPromptResponse`],
 //!   [`DaemonWarmRequest`]
 
+mod desktop;
 mod pool;
 mod proto;
 
-pub use proto::{DaemonPromptRequest, DaemonPromptResponse, DaemonWarmRequest};
+pub use proto::{
+    DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonPromptRequest, DaemonPromptResponse,
+    DaemonServerMessage, DaemonWarmRequest, DesktopBackendSnapshot, DesktopConfigSnapshot,
+    DesktopModelConfig, apply_desktop_model_update,
+};
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -77,6 +82,8 @@ pub async fn run_daemon(
         }
     });
 
+    let desktop_approvals = desktop::ApprovalRegistry::default();
+
     loop {
         tokio::select! {
             _ = shutdown_token.cancelled() => {
@@ -96,9 +103,10 @@ pub async fn run_daemon(
                 let (stream, _) = accept_result?;
                 let engine_pool = Arc::clone(&engine_pool);
                 let permit = Arc::clone(&concurrency);
+                let desktop_approvals = desktop_approvals.clone();
                 tokio::spawn(async move {
                     let _permit = permit.acquire_owned().await;
-                    if let Err(err) = handle_connection(stream, engine_pool).await {
+                    if let Err(err) = handle_connection(stream, engine_pool, desktop_approvals).await {
                         eprintln!("daemon request failed: {}", err);
                     }
                 });
@@ -162,7 +170,11 @@ async fn send_request<T: Serialize + ?Sized>(
     serde_json::from_str(response.trim()).context("Failed to decode daemon response")
 }
 
-async fn handle_connection(stream: TcpStream, engine_pool: Arc<Mutex<EnginePool>>) -> Result<()> {
+async fn handle_connection(
+    stream: TcpStream,
+    engine_pool: Arc<Mutex<EnginePool>>,
+    desktop_approvals: desktop::ApprovalRegistry,
+) -> Result<()> {
     // Limit inbound request size to 10 MiB to prevent memory exhaustion from
     // a malicious or misbehaving client sending an unbounded line.
     const MAX_REQUEST_BYTES: u64 = 10 * 1024 * 1024;
@@ -176,6 +188,33 @@ async fn handle_connection(stream: TcpStream, engine_pool: Arc<Mutex<EnginePool>
     }
     let request: serde_json::Value =
         serde_json::from_str(request_line.trim()).context("Failed to decode daemon request")?;
+
+    if matches!(
+        request.get("type").and_then(serde_json::Value::as_str),
+        Some(
+            "hello"
+                | "start_turn"
+                | "respond_approval"
+                | "cancel_turn"
+                | "get_config"
+                | "save_backend_model"
+                | "check_backend"
+                | "get_observability_summary"
+        )
+    ) {
+        let first_message: DaemonClientMessage =
+            serde_json::from_value(request).context("Failed to decode desktop daemon message")?;
+        desktop::handle_desktop_connection(
+            first_message,
+            reader,
+            write_half,
+            engine_pool,
+            desktop_approvals,
+        )
+        .await?;
+        return Ok(());
+    }
+
     let response = if request.get("type").and_then(serde_json::Value::as_str) == Some("warm") {
         let request: DaemonWarmRequest =
             serde_json::from_value(request).context("Failed to decode daemon warm request")?;
@@ -334,14 +373,5 @@ fn record_warm_result(warmed: &mut usize, started: bool) {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn warm_count_only_increments_for_newly_started_backend() {
-        let mut warmed = 0;
-
-        super::record_warm_result(&mut warmed, false);
-        super::record_warm_result(&mut warmed, true);
-
-        assert_eq!(warmed, 1);
-    }
-}
+#[path = "daemon_tests.rs"]
+mod tests;
