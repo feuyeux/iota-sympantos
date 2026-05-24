@@ -44,13 +44,17 @@ export function ChatWorkbench() {
   }, []);
 
   const transcript = useMemo(() => state.order.map((id) => state.turns[id]), [state.order, state.turns]);
+  const activeTurnBusy =
+    activeTurn?.status === "queued" ||
+    activeTurn?.status === "running" ||
+    activeTurn?.status === "waiting_approval";
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const prompt = input.trim();
-    if (!prompt) return;
+    if (!prompt || activeTurnBusy) return;
     setInput("");
-    const turnId = await submitPrompt(prompt, backend);
+    const turnId = crypto.randomUUID();
     dispatch({
       type: "turn_started",
       turnId,
@@ -58,6 +62,18 @@ export function ChatWorkbench() {
       cwd: "",
       prompt,
     });
+    try {
+      await submitPrompt(prompt, backend, turnId);
+    } catch (err) {
+      dispatch({
+        type: "daemon_message",
+        message: {
+          type: "turn_failed",
+          turn_id: turnId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
   }
 
   // Extract model details
@@ -178,7 +194,11 @@ export function ChatWorkbench() {
                   onChange={(event) => setInput(event.target.value)}
                   rows={2}
                   className="min-h-[60px] flex-1 resize-none rounded-md border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-gray-100 outline-none focus:border-primary transition-all font-sans"
-                  placeholder={`Ask ${backend.toUpperCase()} to write code, debug, or solve tasks...`}
+                  placeholder={
+                    activeTurnBusy
+                      ? "Wait for the active turn to finish or interrupt it..."
+                      : `Ask ${backend.toUpperCase()} to write code, debug, or solve tasks...`
+                  }
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
@@ -188,7 +208,7 @@ export function ChatWorkbench() {
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim()}
+                  disabled={!input.trim() || activeTurnBusy}
                   className="flex h-[60px] w-12 items-center justify-center rounded-md bg-primary hover:bg-primary/95 text-white disabled:opacity-50 transition-colors shadow shadow-primary/25 cursor-pointer"
                 >
                   <Send className="h-4.5 w-4.5" />

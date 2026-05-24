@@ -14,25 +14,50 @@ use crate::daemon::proto::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot,
     apply_desktop_model_update,
 };
+use crate::store::observability::ObservabilityStore;
 
 #[derive(Default, Clone)]
 pub(crate) struct ApprovalRegistry {
-    pending: Arc<Mutex<BTreeMap<String, oneshot::Sender<bool>>>>,
+    pending: Arc<Mutex<BTreeMap<String, PendingApproval>>>,
+}
+
+struct PendingApproval {
+    turn_id: String,
+    tx: oneshot::Sender<bool>,
 }
 
 impl ApprovalRegistry {
-    pub async fn insert(&self, approval_id: String, tx: oneshot::Sender<bool>) {
-        self.pending.lock().await.insert(approval_id, tx);
+    pub async fn insert(&self, turn_id: String, approval_id: String, tx: oneshot::Sender<bool>) {
+        self.pending
+            .lock()
+            .await
+            .insert(approval_id, PendingApproval { turn_id, tx });
     }
 
     pub async fn respond(&self, approval_id: &str, approved: bool) -> bool {
-        let tx = self.pending.lock().await.remove(approval_id);
-        if let Some(tx) = tx {
-            let _ = tx.send(approved);
+        let pending = self.pending.lock().await.remove(approval_id);
+        if let Some(pending) = pending {
+            let _ = pending.tx.send(approved);
             true
         } else {
             false
         }
+    }
+
+    pub async fn deny_for_turn(&self, turn_id: &str) -> usize {
+        let mut pending = self.pending.lock().await;
+        let approval_ids = pending
+            .iter()
+            .filter(|(_, approval)| approval.turn_id == turn_id)
+            .map(|(approval_id, _)| approval_id.clone())
+            .collect::<Vec<_>>();
+        let denied_count = approval_ids.len();
+        for approval_id in approval_ids {
+            if let Some(approval) = pending.remove(&approval_id) {
+                let _ = approval.tx.send(false);
+            }
+        }
+        denied_count
     }
 }
 
@@ -49,6 +74,15 @@ impl TurnRegistry {
     pub async fn remove(&self, turn_id: &str) -> Option<tokio::task::JoinHandle<()>> {
         self.active.lock().await.remove(turn_id)
     }
+
+    pub async fn abort(&self, turn_id: &str) -> bool {
+        if let Some(handle) = self.remove(turn_id).await {
+            handle.abort();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub(crate) async fn handle_desktop_connection<R>(
@@ -57,18 +91,20 @@ pub(crate) async fn handle_desktop_connection<R>(
     write_half: OwnedWriteHalf,
     engine_pool: Arc<Mutex<EnginePool>>,
     approvals: ApprovalRegistry,
+    turns: TurnRegistry,
 ) -> Result<()>
 where
     R: AsyncRead + Unpin,
 {
     let writer = Arc::new(Mutex::new(write_half));
-    let turns = TurnRegistry::default();
+    let connection_turns = Arc::new(Mutex::new(Vec::<String>::new()));
     handle_message(
         first_message,
         Arc::clone(&writer),
         Arc::clone(&engine_pool),
         approvals.clone(),
         turns.clone(),
+        Arc::clone(&connection_turns),
     )
     .await?;
 
@@ -84,10 +120,12 @@ where
             Arc::clone(&engine_pool),
             approvals.clone(),
             turns.clone(),
+            Arc::clone(&connection_turns),
         )
         .await?;
         line.clear();
     }
+    cleanup_connection_turns(connection_turns, turns, approvals).await;
     Ok(())
 }
 
@@ -97,6 +135,7 @@ async fn handle_message(
     engine_pool: Arc<Mutex<EnginePool>>,
     approvals: ApprovalRegistry,
     turns: TurnRegistry,
+    connection_turns: Arc<Mutex<Vec<String>>>,
 ) -> Result<()> {
     match message {
         DaemonClientMessage::Hello {
@@ -140,6 +179,7 @@ async fn handle_message(
                 engine_pool,
                 approvals,
                 turns,
+                connection_turns,
             )
             .await?;
         }
@@ -167,10 +207,12 @@ async fn handle_message(
             }
         }
         DaemonClientMessage::CancelTurn { turn_id } => {
-            if let Some(handle) = turns.remove(&turn_id).await {
-                handle.abort();
-            }
-            send_message(&writer, &DaemonServerMessage::TurnCancelled { turn_id }).await?;
+            let accepted = abort_turn(&turns, &approvals, &turn_id).await;
+            send_message(
+                &writer,
+                &DaemonServerMessage::TurnCancelled { turn_id, accepted },
+            )
+            .await?;
         }
         DaemonClientMessage::GetConfig => {
             let config = read_config().context("Failed to read config")?;
@@ -213,11 +255,10 @@ async fn handle_message(
             .await?;
         }
         DaemonClientMessage::GetObservabilitySummary { cwd } => {
+            let summary = observability_summary(cwd)?;
             send_message(
                 &writer,
-                &DaemonServerMessage::ObservabilitySummary {
-                    summary: serde_json::json!({ "cwd": cwd }),
-                },
+                &DaemonServerMessage::ObservabilitySummary { summary },
             )
             .await?;
         }
@@ -236,6 +277,7 @@ async fn start_turn(
     engine_pool: Arc<Mutex<EnginePool>>,
     approvals: ApprovalRegistry,
     turns: TurnRegistry,
+    connection_turns: Arc<Mutex<Vec<String>>>,
 ) -> Result<()> {
     let backend = AcpBackend::parse(&backend)?;
     send_message(
@@ -272,18 +314,31 @@ async fn start_turn(
         while let Some(req) = approval_rx.recv().await {
             let approval_id = uuid::Uuid::new_v4().to_string();
             let (reply_tx, reply_rx) = oneshot::channel();
-            approvals.insert(approval_id.clone(), reply_tx).await;
-            let _ = send_message(
+            approvals
+                .insert(approval_turn_id.clone(), approval_id.clone(), reply_tx)
+                .await;
+            let sent = send_message(
                 &approval_writer,
                 &DaemonServerMessage::ApprovalRequested {
                     turn_id: approval_turn_id.clone(),
-                    approval_id,
+                    approval_id: approval_id.clone(),
                     tool_name: req.tool_name,
                     params: req.params,
                 },
             )
             .await;
-            let decision = reply_rx.await.unwrap_or(false);
+            if sent.is_err() {
+                approvals.respond(&approval_id, false).await;
+                let _ = req.reply.send(false);
+                continue;
+            }
+            let decision = tokio::select! {
+                decision = reply_rx => decision.unwrap_or(false),
+                _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => {
+                    approvals.respond(&approval_id, false).await;
+                    false
+                }
+            };
             let _ = req.reply.send(decision);
         }
     });
@@ -340,9 +395,29 @@ async fn start_turn(
         }
     });
 
+    connection_turns.lock().await.push(turn_id.clone());
     turns.insert(turn_id, handle).await;
 
     Ok(())
+}
+
+async fn abort_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {
+    let accepted = turns.abort(turn_id).await;
+    if accepted {
+        approvals.deny_for_turn(turn_id).await;
+    }
+    accepted
+}
+
+async fn cleanup_connection_turns(
+    connection_turns: Arc<Mutex<Vec<String>>>,
+    turns: TurnRegistry,
+    approvals: ApprovalRegistry,
+) {
+    let turn_ids = std::mem::take(&mut *connection_turns.lock().await);
+    for turn_id in turn_ids {
+        abort_turn(&turns, &approvals, &turn_id).await;
+    }
 }
 
 async fn send_message(
@@ -356,6 +431,30 @@ async fn send_message(
     writer.write_all(&line).await?;
     writer.flush().await?;
     Ok(())
+}
+
+fn observability_summary(cwd: Option<PathBuf>) -> Result<serde_json::Value> {
+    let store = ObservabilityStore::default_path().and_then(|path| ObservabilityStore::open(&path));
+    match store {
+        Ok(store) => {
+            let since_ts = crate::utils::now_ts() - 7 * 24 * 60 * 60;
+            let token_summary = store.token_summary_since(since_ts)?;
+            let recent_token_executions = store.recent_token_executions(10)?;
+            Ok(serde_json::json!({
+                "cwd": cwd,
+                "window_secs": 7 * 24 * 60 * 60,
+                "token_summary": token_summary,
+                "recent_token_executions": recent_token_executions,
+            }))
+        }
+        Err(err) => Ok(serde_json::json!({
+            "cwd": cwd,
+            "window_secs": 7 * 24 * 60 * 60,
+            "token_summary": [],
+            "recent_token_executions": [],
+            "error": err.to_string(),
+        })),
+    }
 }
 
 #[cfg(test)]

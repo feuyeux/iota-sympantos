@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { DaemonServerMessage, DesktopConfigSnapshot, DesktopModelConfig } from "./types";
 
-export function submitPrompt(prompt: string, backend: string): Promise<string> {
-  return invoke<string>("submit_prompt", { prompt, backendStr: backend });
+export function submitPrompt(prompt: string, backend: string, turnId: string): Promise<string> {
+  return invoke<string>("submit_prompt", { prompt, backendStr: backend, turnId });
 }
 
 export function getConfig(): Promise<DesktopConfigSnapshot> {

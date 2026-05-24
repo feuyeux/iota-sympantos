@@ -135,6 +135,7 @@ pub enum DaemonServerMessage {
     },
     TurnCancelled {
         turn_id: String,
+        accepted: bool,
     },
     ConfigSnapshot {
         config: DesktopConfigSnapshot,

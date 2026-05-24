@@ -61,6 +61,25 @@ export function turnsReducer(state: TurnsState, action: TurnsAction): TurnsState
   if (message.type === "protocol_error") {
     return { ...state, pendingError: message.message };
   }
+  if (message.type === "turn_started" && !state.turns[message.turn_id]) {
+    const turn: DesktopTurn = {
+      id: message.turn_id,
+      backend: "unknown",
+      cwd: "",
+      status: "running",
+      userPrompt: "",
+      assistantText: "",
+      events: [],
+      toolCalls: [],
+      approvals: [],
+    };
+    return {
+      ...state,
+      activeTurnId: message.turn_id,
+      order: [...state.order, message.turn_id],
+      turns: { ...state.turns, [message.turn_id]: turn },
+    };
+  }
   if (!("turn_id" in message)) {
     return state;
   }
@@ -69,9 +88,14 @@ export function turnsReducer(state: TurnsState, action: TurnsAction): TurnsState
   if (!existing) return state;
 
   const updated = reduceTurn(existing, message);
+  const pendingError =
+    message.type === "turn_cancelled" && !message.accepted
+      ? `turn ${message.turn_id} is not active`
+      : state.pendingError;
   return {
     ...state,
     activeTurnId: message.turn_id,
+    pendingError,
     turns: { ...state.turns, [message.turn_id]: updated },
   };
 }
@@ -98,7 +122,7 @@ function reduceTurn(turn: DesktopTurn, message: Extract<DaemonServerMessage, { t
     case "turn_failed":
       return { ...turn, status: "failed", error: message.error };
     case "turn_cancelled":
-      return { ...turn, status: "cancelled" };
+      return message.accepted ? { ...turn, status: "cancelled" } : turn;
   }
 }
 

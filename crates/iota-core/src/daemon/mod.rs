@@ -83,6 +83,7 @@ pub async fn run_daemon(
     });
 
     let desktop_approvals = desktop::ApprovalRegistry::default();
+    let desktop_turns = desktop::TurnRegistry::default();
 
     loop {
         tokio::select! {
@@ -104,9 +105,13 @@ pub async fn run_daemon(
                 let engine_pool = Arc::clone(&engine_pool);
                 let permit = Arc::clone(&concurrency);
                 let desktop_approvals = desktop_approvals.clone();
+                let desktop_turns = desktop_turns.clone();
                 tokio::spawn(async move {
                     let _permit = permit.acquire_owned().await;
-                    if let Err(err) = handle_connection(stream, engine_pool, desktop_approvals).await {
+                    if let Err(err) =
+                        handle_connection(stream, engine_pool, desktop_approvals, desktop_turns)
+                            .await
+                    {
                         eprintln!("daemon request failed: {}", err);
                     }
                 });
@@ -174,6 +179,7 @@ async fn handle_connection(
     stream: TcpStream,
     engine_pool: Arc<Mutex<EnginePool>>,
     desktop_approvals: desktop::ApprovalRegistry,
+    desktop_turns: desktop::TurnRegistry,
 ) -> Result<()> {
     // Limit inbound request size to 10 MiB to prevent memory exhaustion from
     // a malicious or misbehaving client sending an unbounded line.
@@ -210,6 +216,7 @@ async fn handle_connection(
             write_half,
             engine_pool,
             desktop_approvals,
+            desktop_turns,
         )
         .await?;
         return Ok(());

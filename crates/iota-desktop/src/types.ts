@@ -45,7 +45,7 @@ export type DaemonServerMessage =
   | { type: "approval_responded"; approval_id: string; accepted: boolean }
   | { type: "turn_completed"; turn_id: string; text: string; timing: any }
   | { type: "turn_failed"; turn_id: string; error: string }
-  | { type: "turn_cancelled"; turn_id: string }
+  | { type: "turn_cancelled"; turn_id: string; accepted: boolean }
   | { type: "config_snapshot"; config: DesktopConfigSnapshot }
   | { type: "backend_check_result"; backend: string; ok: boolean; details: string }
   | { type: "observability_summary"; summary: any };

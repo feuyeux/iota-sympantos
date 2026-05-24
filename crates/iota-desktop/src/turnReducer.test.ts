@@ -106,3 +106,31 @@ test("select_active_turn updates activeTurnId", () => {
 
   assert.equal(selected.activeTurnId, "turn-1");
 });
+
+test("turn_started daemon message creates a placeholder when local turn is not registered yet", () => {
+  const updated = turnsReducer(initialTurnsState, {
+    type: "daemon_message",
+    message: { type: "turn_started", turn_id: "turn-1" },
+  });
+
+  assert.equal(updated.turns["turn-1"].status, "running");
+  assert.equal(updated.activeTurnId, "turn-1");
+});
+
+test("turn_cancelled with accepted false keeps running status and records protocol error", () => {
+  const started = turnsReducer(initialTurnsState, {
+    type: "turn_started",
+    turnId: "turn-1",
+    backend: "gemini",
+    cwd: "/tmp/project",
+    prompt: "hello",
+  });
+
+  const updated = turnsReducer(started, {
+    type: "daemon_message",
+    message: { type: "turn_cancelled", turn_id: "turn-1", accepted: false },
+  });
+
+  assert.equal(updated.turns["turn-1"].status, "queued");
+  assert.match(updated.pendingError ?? "", /not active/);
+});

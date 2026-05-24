@@ -50,11 +50,12 @@ async fn save_backend_model(
 async fn submit_prompt(
     prompt: String,
     backend_str: String,
+    turn_id: Option<String>,
     window: tauri::Window,
 ) -> Result<String, String> {
     let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
     let cwd = std::env::current_dir().unwrap_or(home);
-    let turn_id = uuid::Uuid::new_v4().to_string();
+    let turn_id = turn_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     daemon_client::start_turn(window, turn_id.clone(), cwd, backend_str, prompt)
         .await
         .map_err(|e| e.to_string())?;
@@ -63,21 +64,44 @@ async fn submit_prompt(
 
 #[tauri::command]
 async fn handle_approval(req_id: String, approved: bool) -> Result<(), String> {
-    daemon_client::send_one(iota_core::daemon::DaemonClientMessage::RespondApproval {
-        approval_id: req_id,
-        approved,
-    })
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    let messages =
+        daemon_client::send_one(iota_core::daemon::DaemonClientMessage::RespondApproval {
+            approval_id: req_id,
+            approved,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let accepted = messages.into_iter().find_map(|message| match message {
+        iota_core::daemon::DaemonServerMessage::ApprovalResponded { accepted, .. } => {
+            Some(accepted)
+        }
+        _ => None,
+    });
+    match accepted {
+        Some(true) => Ok(()),
+        Some(false) => Err("approval request was not pending".to_string()),
+        None => Err("daemon did not acknowledge approval response".to_string()),
+    }
 }
 
 #[tauri::command]
 async fn cancel_turn(turn_id: String) -> Result<(), String> {
-    daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CancelTurn { turn_id })
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let messages = daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CancelTurn {
+        turn_id: turn_id.clone(),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let accepted = messages.into_iter().find_map(|message| match message {
+        iota_core::daemon::DaemonServerMessage::TurnCancelled { accepted, .. } => Some(accepted),
+        _ => None,
+    });
+    match accepted {
+        Some(true) => Ok(()),
+        Some(false) => Err(format!("turn {} is not active", turn_id)),
+        None => Err("daemon did not acknowledge turn cancellation".to_string()),
+    }
 }
 
 #[tauri::command]
