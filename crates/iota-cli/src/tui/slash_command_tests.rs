@@ -261,3 +261,33 @@ fn compress_alias_is_normalised_to_compact_before_forwarding() {
         );
     }
 }
+
+#[test]
+fn memory_command_parses_properly() {
+    let parsed = parse_slash_command("/memory", AcpBackend::Gemini).unwrap();
+    assert_eq!(parsed.action, SlashAction::Memory);
+    assert_eq!(parsed.name, "memory");
+
+    let parsed_alias = parse_slash_command("/mem", AcpBackend::Gemini).unwrap();
+    assert_eq!(parsed_alias.action, SlashAction::Memory);
+    assert_eq!(parsed_alias.name, "memory");
+}
+
+#[test]
+fn memory_command_execution_records_system_notice() {
+    let mut app = TuiApp::new(config_with_all_backends_enabled()).unwrap();
+    app.composer.text = "/memory".to_string();
+    app.composer.cursor = "/memory".len();
+
+    app.submit();
+
+    assert!(!app.running_turn);
+    let notice = latest_notice(&app).expect("Notice should be recorded");
+    assert!(
+        notice.contains("No recalled memories found")
+            || notice.contains("Recalled memories")
+            || notice.contains("Memory store is not initialized"),
+        "notice should contain memory-related info: {}",
+        notice
+    );
+}

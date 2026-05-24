@@ -145,3 +145,59 @@ fn config_with_gemini_model() -> crate::config::NimiaConfig {
         ..Default::default()
     }
 }
+
+#[test]
+fn memory_context_snapshot_request_roundtrips() {
+    let message = DaemonClientMessage::GetMemoryContextSnapshot {
+        cwd: PathBuf::from("/tmp/iota-workspace"),
+        scope_mode: DesktopMemoryScopeMode::Workspace,
+    };
+
+    let json = serde_json::to_string(&message).unwrap();
+    assert!(json.contains("\"type\":\"get_memory_context_snapshot\""));
+    assert!(json.contains("\"scope_mode\":\"workspace\""));
+
+    let decoded: DaemonClientMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, message);
+}
+
+#[test]
+fn memory_context_snapshot_response_roundtrips() {
+    let snapshot = DesktopMemoryContextSnapshot {
+        cwd: PathBuf::from("/tmp/iota-workspace"),
+        scope_mode: DesktopMemoryScopeMode::All,
+        memory: DesktopMemoryBuckets::default(),
+        memory_summary: DesktopMemorySummary::default(),
+        runtime_context: Some(DesktopRuntimeContextSnapshot {
+            turn_id: "turn-1".to_string(),
+            backend: "codex".to_string(),
+            cwd: PathBuf::from("/tmp/iota-workspace"),
+            session_id: "session-1".to_string(),
+            model: Some("model-a".to_string()),
+            created_at: 123,
+            capsule_text: "<iota-context>\n</iota-context>\n\nUser request:\nhello".to_string(),
+            sections: vec![DesktopContextSection {
+                name: "session".to_string(),
+                chars: 24,
+                preview: "iota_session_id: session-1".to_string(),
+            }],
+            budgets: DesktopContextBudgetsSnapshot::default(),
+        }),
+        context_engine: DesktopContextEngineSnapshot {
+            enabled: true,
+            memory_db: Some(PathBuf::from("/Users/example/.i6/context/memory.sqlite")),
+            budgets: DesktopContextBudgetsSnapshot::default(),
+        },
+        errors: vec![],
+    };
+
+    let message = DaemonServerMessage::MemoryContextSnapshot { snapshot };
+    let json = serde_json::to_string(&message).unwrap();
+    assert!(json.contains("\"type\":\"memory_context_snapshot\""));
+
+    let decoded: DaemonServerMessage = serde_json::from_str(&json).unwrap();
+    assert!(matches!(
+        decoded,
+        DaemonServerMessage::MemoryContextSnapshot { .. }
+    ));
+}

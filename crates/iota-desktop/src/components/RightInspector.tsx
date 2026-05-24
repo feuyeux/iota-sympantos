@@ -18,9 +18,10 @@ type Props = {
   turn?: DesktopTurn;
   observability?: ObservabilitySummary | null;
   onApprovalDecision: (approvalId: string, approved: boolean) => void;
+  onOpenMemoryViewer?: () => void;
 };
 
-export function RightInspector({ turn, observability, onApprovalDecision }: Props) {
+export function RightInspector({ turn, observability, onApprovalDecision, onOpenMemoryViewer }: Props) {
   const [cancelling, setCancelling] = useState(false);
 
   const formatMs = (ms?: number) => {
@@ -174,6 +175,15 @@ export function RightInspector({ turn, observability, onApprovalDecision }: Prop
               </button>
             </div>
           )}
+        </div>
+        <div className="mt-3">
+          <button
+            onClick={onOpenMemoryViewer}
+            className="w-full flex items-center justify-center gap-1.5 rounded border border-white/10 bg-white/[0.02] hover:bg-white/[0.06] text-gray-300 py-1.5 text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <Cpu className="h-3.5 w-3.5 text-primary" />
+            Open in Memory / Context
+          </button>
         </div>
       </section>
 

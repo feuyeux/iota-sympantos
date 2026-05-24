@@ -12,6 +12,7 @@ import {
 import { initialTurnsState, turnsReducer } from "../turnReducer";
 import { RightInspector } from "./RightInspector";
 import { ConfigPanel } from "./ConfigPanel";
+import { MemoryContextWorkspace } from "./MemoryContextWorkspace";
 import type { BackendCheckResult, DesktopConfigSnapshot, ObservabilitySummary } from "../types";
 
 const BACKENDS = ["gemini", "claude", "hermes", "codex", "opencode"];
@@ -20,7 +21,7 @@ export function ChatWorkbench() {
   const [state, dispatch] = useReducer(turnsReducer, initialTurnsState);
   const [backend, setBackend] = useState("gemini");
   const [input, setInput] = useState("");
-  const [view, setView] = useState<"chat" | "config">("chat");
+  const [view, setView] = useState<"chat" | "config" | "memory">("chat");
   const [config, setConfig] = useState<DesktopConfigSnapshot | null>(null);
   const [backendChecks, setBackendChecks] = useState<Record<string, BackendCheckResult>>({});
   const [observability, setObservability] = useState<ObservabilitySummary | null>(null);
@@ -215,6 +216,14 @@ export function ChatWorkbench() {
               </button>
               <button
                 className={`rounded px-3 py-1 text-xs font-semibold transition-all ${
+                  view === "memory" ? "bg-primary text-white shadow" : "text-gray-400 hover:text-white"
+                }`}
+                onClick={() => setView("memory")}
+              >
+                Memory &amp; Context
+              </button>
+              <button
+                className={`rounded px-3 py-1 text-xs font-semibold transition-all ${
                   view === "config" ? "bg-primary text-white shadow" : "text-gray-400 hover:text-white"
                 }`}
                 onClick={() => setView("config")}
@@ -326,8 +335,10 @@ export function ChatWorkbench() {
               </div>
             </form>
           </>
-        ) : (
+        ) : view === "config" ? (
           <ConfigPanel config={config} backendChecks={backendChecks} onConfigUpdate={handleConfigUpdate} />
+        ) : (
+          <MemoryContextWorkspace />
         )}
       </main>
 
@@ -338,6 +349,7 @@ export function ChatWorkbench() {
         onApprovalDecision={(approvalId, approved) =>
           dispatch({ type: "approval_decision", approvalId, approved })
         }
+        onOpenMemoryViewer={() => setView("memory")}
       />
     </div>
   );

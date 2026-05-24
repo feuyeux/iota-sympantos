@@ -114,6 +114,7 @@ pub async fn send_one(message: DaemonClientMessage) -> Result<Vec<DaemonServerMe
                 | Some(DaemonServerMessage::ApprovalResponded { .. })
                 | Some(DaemonServerMessage::TurnCancelled { .. })
                 | Some(DaemonServerMessage::ProtocolError { .. })
+                | Some(DaemonServerMessage::MemoryContextSnapshot { .. })
         ) {
             break;
         }

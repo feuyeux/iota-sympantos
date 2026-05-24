@@ -8,6 +8,9 @@ use crate::config::{
     normalized_acp_command,
 };
 use crate::context::{ContextEngine, WorkingMemoryBuffer};
+use crate::daemon::{
+    DesktopContextBudgetsSnapshot, DesktopContextSection, DesktopRuntimeContextSnapshot,
+};
 use crate::memory::MemoryStore;
 use crate::skill::SkillCache;
 use crate::store::cache::CacheStore;
@@ -65,6 +68,8 @@ pub struct IotaEngine {
     stream_output_sender: Option<tokio::sync::mpsc::Sender<String>>,
     /// Optional live runtime event sender used by desktop inspectors.
     stream_event_sender: Option<tokio::sync::mpsc::Sender<crate::runtime_event::RuntimeEvent>>,
+    /// Last actual context capsule sent to a backend in this process. Not persisted.
+    pub recent_runtime_context: Option<DesktopRuntimeContextSnapshot>,
 }
 
 impl IotaEngine {
@@ -114,6 +119,7 @@ impl IotaEngine {
             skill_registry_cache: SkillCache::default(),
             stream_output_sender: None,
             stream_event_sender: None,
+            recent_runtime_context: None,
         };
         engine.resume_session_state(session_cwd);
         engine
@@ -417,6 +423,82 @@ impl IotaEngine {
     fn record_active_sessions(&self) {
         // Keep this as a single hook for future OTel UpDownCounter session tracking.
     }
+
+    pub fn recent_runtime_context_snapshot(&self) -> Option<DesktopRuntimeContextSnapshot> {
+        self.recent_runtime_context.clone()
+    }
+
+    pub fn context_engine_budgets(&self) -> crate::context::ContextBudgets {
+        self.context_engine.budgets()
+    }
+
+    pub fn capture_runtime_context_snapshot(
+        &mut self,
+        turn_id: String,
+        backend: AcpBackend,
+        cwd: PathBuf,
+        model: Option<String>,
+        capsule_text: String,
+    ) {
+        self.recent_runtime_context = Some(DesktopRuntimeContextSnapshot {
+            turn_id,
+            backend: backend.to_string(),
+            cwd,
+            session_id: self.engine_session_id.clone(),
+            model,
+            created_at: crate::utils::now_ts(),
+            sections: parse_context_sections(&capsule_text),
+            capsule_text,
+            budgets: DesktopContextBudgetsSnapshot::from(self.context_engine.budgets()),
+        });
+    }
+}
+
+impl From<crate::context::ContextBudgets> for DesktopContextBudgetsSnapshot {
+    fn from(value: crate::context::ContextBudgets) -> Self {
+        Self {
+            memory_chars: value.memory_chars,
+            skills_chars: value.skills_chars,
+            working_memory_chars: value.working_memory_chars,
+            workspace_chars: value.workspace_chars,
+            handoff_chars: value.handoff_chars,
+        }
+    }
+}
+
+fn parse_context_sections(capsule: &str) -> Vec<DesktopContextSection> {
+    let Some(start) = capsule.find("<iota-context>") else {
+        return Vec::new();
+    };
+    let Some(end) = capsule.find("</iota-context>") else {
+        return Vec::new();
+    };
+    let body = &capsule[start..end + "</iota-context>".len()];
+    let names = [
+        "memory-tools",
+        "model",
+        "skills",
+        "memory",
+        "session",
+        "handoff",
+        "working-memory",
+        "workspace",
+    ];
+    names
+        .iter()
+        .filter_map(|name| {
+            let open = format!("<{}>", name);
+            let close = format!("</{}>", name);
+            let section_start = body.find(&open)? + open.len();
+            let section_end = body[section_start..].find(&close)? + section_start;
+            let text = body[section_start..section_end].trim();
+            Some(DesktopContextSection {
+                name: (*name).to_string(),
+                chars: text.len(),
+                preview: crate::utils::summarize(text, 180),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

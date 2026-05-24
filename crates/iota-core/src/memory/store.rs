@@ -465,6 +465,57 @@ impl MemoryStore {
         }
     }
 
+    pub fn all_scope_buckets(&self, limit_per_bucket: usize) -> Result<RecallBuckets> {
+        Ok(RecallBuckets {
+            identity: self.query_all(
+                Some(&MemoryFacet::Identity),
+                Some(&MemoryType::Semantic),
+                limit_per_bucket,
+            )?,
+            preference: self.query_all(
+                Some(&MemoryFacet::Preference),
+                Some(&MemoryType::Semantic),
+                limit_per_bucket,
+            )?,
+            strategic: self.query_all(
+                Some(&MemoryFacet::Strategic),
+                Some(&MemoryType::Semantic),
+                limit_per_bucket,
+            )?,
+            domain: self.query_all(
+                Some(&MemoryFacet::Domain),
+                Some(&MemoryType::Semantic),
+                limit_per_bucket,
+            )?,
+            procedural: self.query_all(None, Some(&MemoryType::Procedural), limit_per_bucket)?,
+            episodic: self.query_all(None, Some(&MemoryType::Episodic), limit_per_bucket)?,
+        })
+    }
+
+    fn query_all(
+        &self,
+        facet: Option<&MemoryFacet>,
+        memory_type: Option<&MemoryType>,
+        limit: usize,
+    ) -> Result<Vec<MemoryRecord>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let facet_value = facet.map(MemoryFacet::as_str);
+        let type_value = memory_type.map(MemoryType::as_str);
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT id, type, facet, scope, scope_id, content, confidence, created_at, updated_at, expires_at FROM memory
+             WHERE (?1 IS NULL OR facet = ?1) AND (?2 IS NULL OR type = ?2) AND expires_at > ?3
+             ORDER BY confidence DESC, updated_at DESC, created_at DESC
+             LIMIT ?4",
+        )?;
+        rows_to_records(stmt.query_map(
+            params![facet_value, type_value, now_ts(), limit as i64],
+            row_to_memory_record,
+        )?)
+    }
+
     fn search_keyword(&self, trimmed: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
         if self.fts_available && !trimmed.is_empty() {
             match self.search_fts(trimmed, limit) {

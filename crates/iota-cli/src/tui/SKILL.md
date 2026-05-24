@@ -39,11 +39,14 @@ ratatui-based interactive chat interface with markdown rendering, multi-line com
 - Ctrl+T full-screen pager, ? help overlay
 - Tab queue (buffer input while backend is running)
 - ~120 FPS frame limiter, mouse capture
+- Local slash commands including `/memory` (alias `/mem`) for memory recall and hybrid search.
 
 ## Sub-modules
 
 | Module | Purpose |
 | :--------| :---------|
+| `autocomplete` | Slash command autocompletions, completion hints, and ghost text |
+| `exporter` | Formatting and exporting TUI chat transcript text files |
 | `input` | Multi-line input with kill-buffer, word motion, history search |
 | `events` | Keyboard/mouse event handling and dispatch |
 | `loop` | Main event loop, async engine turn, frame timing |
@@ -53,3 +56,4 @@ ratatui-based interactive chat interface with markdown rendering, multi-line com
 | `status_bar` | Bottom status bar (backend·model, key hints) |
 | `terminal_lifecycle` | Terminal setup/restore RAII guard |
 | `theme` | ratatui color theme (magenta accent) |
+

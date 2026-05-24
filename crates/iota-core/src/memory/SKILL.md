@@ -22,6 +22,7 @@ Persistent memory store with SQLite FTS5 full-text search and TF-IDF embedding-b
 - Full-text search via SQLite FTS5
 - Semantic similarity search via TF-IDF embeddings
 - Merge modes: Auto, Add, Update, None
+- Optimized concurrency: pre-calculates embeddings before locking the database connection mutex to avoid blocking during external/HTTP embedding API calls
 
 ## Sub-modules
 

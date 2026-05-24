@@ -1,5 +1,6 @@
 use super::*;
-use crate::config::NimiaConfig;
+use crate::config::{ContextEngineConfig, ContextInjection, NimiaConfig, RecallThresholdsConfig};
+use crate::memory::{MemoryFacet, MemoryInsert, MemoryMergeMode, MemoryScope, MemoryStore, MemoryType};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -115,4 +116,104 @@ async fn desktop_connection_rejects_message_before_hello() {
         DaemonServerMessage::ProtocolError { .. }
     ));
     server.await.unwrap();
+}
+
+#[test]
+fn memory_summary_counts_bucket_lengths() {
+    let mut buckets = DesktopMemoryBuckets::default();
+    buckets
+        .identity
+        .push(desktop_record("id-1", "semantic", Some("identity")));
+    buckets
+        .episodic
+        .push(desktop_record("id-2", "episodic", None));
+
+    let summary = memory_summary(&buckets);
+    assert_eq!(summary.identity, 1);
+    assert_eq!(summary.episodic, 1);
+    assert_eq!(summary.preference, 0);
+}
+
+#[tokio::test]
+async fn memory_context_snapshot_workspace_uses_configured_recall_thresholds() {
+    let memory_path = std::env::temp_dir().join(format!(
+        "iota-desktop-memory-thresholds-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let cwd = std::env::current_dir().unwrap();
+    let store = MemoryStore::open(&memory_path).unwrap();
+    store
+        .insert_with_merge(
+            MemoryInsert {
+                memory_type: MemoryType::Semantic,
+                facet: Some(MemoryFacet::Identity),
+                scope: MemoryScope::User,
+                scope_id: "local-user".to_string(),
+                content: "Low confidence identity should stay hidden".to_string(),
+                confidence: 0.4,
+                source_backend: None,
+                source_session_id: None,
+                source_execution_id: None,
+                metadata_json: None,
+                ttl_days: 30,
+                supersedes: None,
+            },
+            MemoryMergeMode::Add,
+        )
+        .unwrap();
+
+    let pool = Arc::new(Mutex::new(EnginePool::new(
+        NimiaConfig {
+            context_engine: Some(ContextEngineConfig {
+                memory_db: Some(memory_path.display().to_string()),
+                recall_thresholds: Some(RecallThresholdsConfig {
+                    identity: 0.9,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        false,
+        1000,
+    )));
+
+    let snapshot =
+        memory_context_snapshot(cwd, DesktopMemoryScopeMode::Workspace, pool).await;
+    assert!(snapshot.memory.identity.is_empty());
+}
+
+#[tokio::test]
+async fn memory_context_snapshot_reports_injection_off_as_disabled() {
+    let cwd = std::env::current_dir().unwrap();
+    let pool = Arc::new(Mutex::new(EnginePool::new(
+        NimiaConfig {
+            context_engine: Some(ContextEngineConfig {
+                injection: ContextInjection::Off,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        false,
+        1000,
+    )));
+
+    let snapshot =
+        memory_context_snapshot(cwd, DesktopMemoryScopeMode::Workspace, pool).await;
+    assert!(!snapshot.context_engine.enabled);
+}
+
+fn desktop_record(id: &str, memory_type: &str, facet: Option<&str>) -> DesktopMemoryRecord {
+    DesktopMemoryRecord {
+        id: id.to_string(),
+        memory_type: memory_type.to_string(),
+        facet: facet.map(str::to_string),
+        scope: "user".to_string(),
+        scope_id: "local-user".to_string(),
+        content: "content".to_string(),
+        confidence: 1.0,
+        created_at: 1,
+        updated_at: 2,
+        expires_at: 3,
+    }
 }

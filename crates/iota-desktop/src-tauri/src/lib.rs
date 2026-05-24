@@ -148,6 +148,34 @@ async fn get_observability_summary() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn get_memory_context_snapshot(
+    scope_mode: String,
+) -> Result<iota_core::daemon::DesktopMemoryContextSnapshot, String> {
+    let scope_mode = match scope_mode.as_str() {
+        "all" => iota_core::daemon::DesktopMemoryScopeMode::All,
+        _ => iota_core::daemon::DesktopMemoryScopeMode::Workspace,
+    };
+    let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
+    let cwd = std::env::current_dir().unwrap_or(home);
+
+    let messages = daemon_client::send_one(
+        iota_core::daemon::DaemonClientMessage::GetMemoryContextSnapshot { cwd, scope_mode },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    messages
+        .into_iter()
+        .find_map(|message| match message {
+            iota_core::daemon::DaemonServerMessage::MemoryContextSnapshot { snapshot } => {
+                Some(snapshot)
+            }
+            _ => None,
+        })
+        .ok_or_else(|| "daemon did not return memory context snapshot".to_string())
+}
+
+#[tauri::command]
 fn current_workspace() -> Result<String, String> {
     std::env::current_dir()
         .map(|cwd| cwd.display().to_string())
@@ -296,6 +324,7 @@ pub fn run() {
             cancel_turn,
             check_backend,
             get_observability_summary,
+            get_memory_context_snapshot,
             current_workspace,
             list_boards,
             list_tasks,

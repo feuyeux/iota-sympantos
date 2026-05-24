@@ -7,6 +7,7 @@ import type {
   DesktopConfigSnapshot,
   DesktopModelConfig,
   ObservabilitySummary,
+  DesktopMemoryContextSnapshot,
 } from "./types";
 
 export function submitPrompt(prompt: string, backend: string, turnId: string): Promise<string> {
@@ -51,4 +52,8 @@ export function listenDaemonMessages(callback: (message: DaemonServerMessage) =>
 
 export function listenDaemonClientErrors(callback: (error: DaemonClientError) => void): Promise<() => void> {
   return listen<DaemonClientError>("daemon-client-error", (event) => callback(event.payload));
+}
+
+export function getMemoryContextSnapshot(scopeMode: "workspace" | "all"): Promise<DesktopMemoryContextSnapshot> {
+  return invoke<DesktopMemoryContextSnapshot>("get_memory_context_snapshot", { scopeMode });
 }

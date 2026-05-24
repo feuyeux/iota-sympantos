@@ -181,3 +181,59 @@ fn test_resume_session_restores_backend_and_working_memory() {
         wm_summary.contains("[claude-code] user: write a rust script; assistant: fn main() {}")
     );
 }
+
+fn test_engine() -> IotaEngine {
+    IotaEngine::create_session(NimiaConfig::default(), false, 30_000, None)
+}
+
+#[test]
+fn recent_context_snapshot_starts_empty() {
+    let engine = test_engine();
+    assert!(engine.recent_runtime_context_snapshot().is_none());
+}
+
+#[test]
+fn recent_context_snapshot_is_in_memory_only() {
+    let mut engine = test_engine();
+    let cwd = std::env::current_dir().unwrap();
+    engine.capture_runtime_context_snapshot(
+        "turn-1".to_string(),
+        AcpBackend::Codex,
+        cwd.clone(),
+        Some("model-a".to_string()),
+        "<iota-context>\n<session>\nbackend: codex\n</session>\n</iota-context>\n\nUser request:\nhello".to_string(),
+    );
+
+    let snapshot = engine.recent_runtime_context_snapshot().unwrap();
+    assert_eq!(snapshot.turn_id, "turn-1");
+    assert_eq!(snapshot.backend, "codex");
+    assert_eq!(snapshot.cwd, cwd);
+    assert!(snapshot.capsule_text.contains("<iota-context>"));
+    assert!(
+        snapshot
+            .sections
+            .iter()
+            .any(|section| section.name == "session")
+    );
+}
+
+#[test]
+fn recent_context_snapshot_parses_memory_sections_with_attributes() {
+    let mut engine = test_engine();
+    let cwd = std::env::current_dir().unwrap();
+    engine.capture_runtime_context_snapshot(
+        "turn-memory".to_string(),
+        AcpBackend::Codex,
+        cwd,
+        None,
+        "<iota-context>\n<memory type=\"identity\">\n- User is Han\n</memory>\n</iota-context>\n\nUser request:\nhello".to_string(),
+    );
+
+    let snapshot = engine.recent_runtime_context_snapshot().unwrap();
+    assert!(
+        snapshot
+            .sections
+            .iter()
+            .any(|section| section.name == "memory" && section.preview.contains("User is Han"))
+    );
+}

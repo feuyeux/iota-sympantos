@@ -27,6 +27,7 @@ Parses `~/.i6/nimia.yaml` and provides typed configuration for all modules.
 
 | Module | Purpose |
 | :--------| :---------|
+| `adapters` | `BackendAdapter` strategy registry for mapping environments/commands |
 | `backend` | `BackendConfig`, env variable mapping, command resolution |
 | `helpers` | `expand_home_path()`, `normalize_command()` |
 | `context` | `ContextEngineConfig`, `RecallThresholdsConfig`, `ContextBudgetsConfig`, `EmbeddingConfig` |
@@ -42,3 +43,5 @@ Parses `~/.i6/nimia.yaml` and provides typed configuration for all modules.
 - `EffectiveConfig` — config with all defaults resolved
 - `BackendConfig` — per-backend enabled/command/model settings
 - `RecallThresholdsConfig` — per-bucket recall confidence thresholds
+- `BackendAdapter` — strategy trait for mapping backend configurations
+

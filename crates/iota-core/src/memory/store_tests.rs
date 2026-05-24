@@ -308,3 +308,124 @@ fn recall_buckets_respects_confidence_threshold() {
         .unwrap();
     assert!(!buckets_low.identity.is_empty());
 }
+
+fn insert_memory(
+    store: &MemoryStore,
+    memory_type: MemoryType,
+    facet: Option<MemoryFacet>,
+    scope: MemoryScope,
+    scope_id: &str,
+    content: &str,
+    confidence: f64,
+    ttl_days: i64,
+) -> String {
+    let mut insert = test_memory_insert(memory_type, facet, scope, scope_id, content);
+    insert.confidence = confidence;
+    insert.ttl_days = ttl_days;
+    store
+        .insert_with_merge(insert, MemoryMergeMode::Add)
+        .unwrap()
+        .unwrap()
+}
+
+#[test]
+fn all_scope_buckets_group_unexpired_records() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+    let now = crate::utils::now_ts();
+
+    insert_memory(
+        &store,
+        MemoryType::Semantic,
+        Some(MemoryFacet::Identity),
+        MemoryScope::User,
+        "local-user",
+        "User is Han",
+        0.9,
+        30,
+    );
+    insert_memory(
+        &store,
+        MemoryType::Semantic,
+        Some(MemoryFacet::Preference),
+        MemoryScope::User,
+        "local-user",
+        "Prefers concise answers",
+        0.8,
+        30,
+    );
+    insert_memory(
+        &store,
+        MemoryType::Semantic,
+        Some(MemoryFacet::Strategic),
+        MemoryScope::Project,
+        "/tmp/project",
+        "Ship desktop viewer",
+        0.7,
+        30,
+    );
+    insert_memory(
+        &store,
+        MemoryType::Semantic,
+        Some(MemoryFacet::Domain),
+        MemoryScope::Project,
+        "/tmp/project",
+        "Uses daemon-first Tauri",
+        0.7,
+        30,
+    );
+    insert_memory(
+        &store,
+        MemoryType::Procedural,
+        None,
+        MemoryScope::Project,
+        "/tmp/project",
+        "Run npm test before build",
+        0.6,
+        30,
+    );
+    insert_memory(
+        &store,
+        MemoryType::Episodic,
+        None,
+        MemoryScope::Session,
+        "session-1",
+        "Prompt: hi\nOutput: hello",
+        0.6,
+        30,
+    );
+
+    let buckets = store.all_scope_buckets(50).unwrap();
+    assert_eq!(buckets.identity.len(), 1);
+    assert_eq!(buckets.preference.len(), 1);
+    assert_eq!(buckets.strategic.len(), 1);
+    assert_eq!(buckets.domain.len(), 1);
+    assert_eq!(buckets.procedural.len(), 1);
+    assert_eq!(buckets.episodic.len(), 1);
+    assert!(buckets.identity[0].expires_at > now);
+}
+
+#[test]
+fn all_scope_buckets_exclude_expired_records() {
+    let store = MemoryStore::open(Path::new(":memory:")).unwrap();
+    let id = insert_memory(
+        &store,
+        MemoryType::Semantic,
+        Some(MemoryFacet::Identity),
+        MemoryScope::User,
+        "local-user",
+        "Expired identity",
+        0.9,
+        1,
+    );
+    {
+        let conn = crate::utils::lock_or_recover(&store.conn);
+        conn.execute(
+            "UPDATE memory SET expires_at = ?2 WHERE id = ?1",
+            rusqlite::params![id, crate::utils::now_ts() - 1],
+        )
+        .unwrap();
+    }
+
+    let buckets = store.all_scope_buckets(50).unwrap();
+    assert!(buckets.identity.is_empty());
+}

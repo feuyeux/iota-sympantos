@@ -8,6 +8,7 @@
 
 mod autocomplete;
 mod events;
+mod exporter;
 mod input;
 mod kanban_command;
 mod kanban_view;
@@ -42,11 +43,12 @@ use iota_core::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use iota_core::acp::{ALL_BACKENDS, AcpBackend};
 use iota_core::config::{NimiaConfig, backend_config, configured_model};
 use iota_core::engine::IotaEngine;
+use iota_core::memory::{MemoryRecord, MemorySearchMode};
 use iota_core::telemetry::metrics;
 use iota_kanban::{AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
 use kanban_view::KanbanViewState;
 use render::observability_line;
-use slash_command::{SlashAction, parse_slash_command, slash_completions};
+use slash_command::{SlashAction, parse_slash_command};
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 use terminal_lifecycle::{TerminalGuard, install_terminal_panic_hook};
 
@@ -354,12 +356,144 @@ impl TuiApp {
                     self.record_entry(ConversationEntry::SystemNotice { text: line });
                 }
             }
+            SlashAction::Memory => {
+                self.handle_memory_slash(command.args);
+            }
             SlashAction::Quit => {
                 self.quit_confirm_tick = Some(self.tick_count);
                 self.overlay = Overlay::QuitConfirm;
             }
         }
         true
+    }
+
+    fn handle_memory_slash(&mut self, args: &str) {
+        let (store, session_id, thresholds) = {
+            let engine = self.engine.blocking_lock();
+            let store = engine.memory_store().cloned();
+            let session_id = engine.engine_session_id().to_string();
+            let thresholds = *engine.effective_config().recall_thresholds();
+            (store, session_id, thresholds)
+        };
+
+        let Some(store) = store else {
+            self.record_entry(ConversationEntry::SystemNotice {
+                text: "Memory store is not initialized or configured.".into(),
+            });
+            return;
+        };
+
+        let trimmed = args.trim();
+        if trimmed.is_empty() || trimmed == "show" {
+            let user_id = "local-user";
+            let project_id = self.cwd.display().to_string();
+
+            match store.recall_buckets_with_thresholds(
+                user_id,
+                &project_id,
+                &session_id,
+                thresholds,
+            ) {
+                Ok(buckets) => {
+                    let has_memories = !buckets.identity.is_empty()
+                        || !buckets.preference.is_empty()
+                        || !buckets.strategic.is_empty()
+                        || !buckets.domain.is_empty()
+                        || !buckets.procedural.is_empty()
+                        || !buckets.episodic.is_empty();
+
+                    if !has_memories {
+                        self.record_entry(ConversationEntry::SystemNotice {
+                            text: "No recalled memories found for the current context.".into(),
+                        });
+                        return;
+                    }
+
+                    let mut output = String::new();
+                    output.push_str("Recalled memories for the current context:\n");
+
+                    let mut print_bucket = |name: &str, records: &[MemoryRecord]| {
+                        if !records.is_empty() {
+                            output.push_str(&format!("--- {} ---\n", name));
+                            for r in records {
+                                let facet_str = r
+                                    .facet
+                                    .as_ref()
+                                    .map(|f| format!("facet: {} | ", f.as_str()))
+                                    .unwrap_or_default();
+                                output.push_str(&format!(
+                                    " • [{}type: {} | scope: {}] {} (conf: {:.2})\n",
+                                    facet_str,
+                                    r.memory_type.as_str(),
+                                    r.scope.as_str(),
+                                    r.content.trim(),
+                                    r.confidence
+                                ));
+                            }
+                        }
+                    };
+
+                    print_bucket("Identity", &buckets.identity);
+                    print_bucket("Preference", &buckets.preference);
+                    print_bucket("Strategic", &buckets.strategic);
+                    print_bucket("Domain", &buckets.domain);
+                    print_bucket("Procedural", &buckets.procedural);
+                    print_bucket("Episodic", &buckets.episodic);
+
+                    self.record_entry(ConversationEntry::SystemNotice {
+                        text: output.trim_end().to_string(),
+                    });
+                }
+                Err(err) => {
+                    self.record_entry(ConversationEntry::SystemNotice {
+                        text: format!("Failed to recall memories: {}", err),
+                    });
+                }
+            }
+        } else {
+            let query = trimmed.strip_prefix("search ").unwrap_or(trimmed).trim();
+            if query.is_empty() {
+                self.record_entry(ConversationEntry::SystemNotice {
+                    text: "Please provide a query: /memory search <query>".into(),
+                });
+                return;
+            }
+
+            match store.search_with_mode(query, 10, MemorySearchMode::Hybrid) {
+                Ok(records) => {
+                    if records.is_empty() {
+                        self.record_entry(ConversationEntry::SystemNotice {
+                            text: format!("No memories found matching '{}'.", query),
+                        });
+                    } else {
+                        let mut output = format!("Memory search results for '{}':\n", query);
+                        for r in records {
+                            let facet_str = r
+                                .facet
+                                .as_ref()
+                                .map(|f| format!("facet: {} | ", f.as_str()))
+                                .unwrap_or_default();
+                            output.push_str(&format!(
+                                " • [{}type: {} | scope: {}] {} (conf: {:.2})\n",
+                                facet_str,
+                                r.memory_type.as_str(),
+                                r.scope.as_str(),
+                                r.content.trim(),
+                                r.confidence
+                            ));
+                        }
+                        self.record_entry(ConversationEntry::SystemNotice {
+                            text: output.trim_end().to_string(),
+                        });
+                    }
+                }
+                Err(err) => {
+                    self.record_entry(ConversationEntry::SystemNotice {
+                        text: format!("Memory search failed: {}", err),
+                    });
+                }
+            }
+        }
     }
 
     fn handle_kanban_view_slash(&mut self, args: &str) -> bool {
@@ -452,61 +586,12 @@ impl TuiApp {
     // ── export ───────────────────────────────────────────────────────────────
 
     fn export_history(&mut self) -> Result<PathBuf> {
-        use std::fs;
-
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("iota_transcript_{}.txt", timestamp);
-        let path = self.cwd.join(&filename);
-
-        let mut content = String::new();
-        content.push_str("iota TUI Transcript\n");
-        content.push_str(&format!(
-            "Exported: {}\n",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
-        ));
-        content.push_str(&format!("Backend: {}\n", self.active_backend));
-        if let Some(model) = &self.active_model {
-            content.push_str(&format!("Model: {}\n", model));
-        }
-        content.push_str(&format!("Working Directory: {}\n", self.cwd.display()));
-        content.push('\n');
-        content.push_str(&"=".repeat(80));
-        content.push_str("\n\n");
-
-        for entry in &self.history.entries {
-            match entry {
-                ConversationEntry::UserMessage { text, .. } => {
-                    content.push_str("YOU:\n");
-                    content.push_str(text);
-                    content.push_str("\n\n");
-                }
-                ConversationEntry::AssistantMessage {
-                    backend,
-                    text,
-                    observability,
-                } => {
-                    content.push_str(&format!("{}:\n", backend.to_string().to_uppercase()));
-                    content.push_str(text);
-                    content.push('\n');
-                    if let Some(meta) = observability
-                        && let Some(line) = observability_line(meta, None)
-                    {
-                        content.push_str(&format!("[{}]\n", line));
-                    }
-                    content.push('\n');
-                }
-                ConversationEntry::SystemNotice { text } => {
-                    content.push_str(&format!("── {} ──\n\n", text));
-                }
-                ConversationEntry::ToolResult { name, ok, text } => {
-                    let icon = if *ok { "✓" } else { "✗" };
-                    content.push_str(&format!("{} {} → {}\n\n", icon, name, text));
-                }
-            }
-        }
-
-        fs::write(&path, content)?;
-        Ok(path)
+        exporter::export_history(
+            &self.cwd,
+            self.active_backend,
+            self.active_model.as_deref(),
+            &self.history,
+        )
     }
 
     // ── submit ───────────────────────────────────────────────────────────────

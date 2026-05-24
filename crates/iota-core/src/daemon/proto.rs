@@ -92,6 +92,106 @@ pub enum DaemonClientMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<PathBuf>,
     },
+    GetMemoryContextSnapshot {
+        cwd: PathBuf,
+        scope_mode: DesktopMemoryScopeMode,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopMemoryScopeMode {
+    Workspace,
+    All,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DesktopMemoryBuckets {
+    pub identity: Vec<DesktopMemoryRecord>,
+    pub preference: Vec<DesktopMemoryRecord>,
+    pub strategic: Vec<DesktopMemoryRecord>,
+    pub domain: Vec<DesktopMemoryRecord>,
+    pub procedural: Vec<DesktopMemoryRecord>,
+    pub episodic: Vec<DesktopMemoryRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesktopMemoryRecord {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub memory_type: String,
+    pub facet: Option<String>,
+    pub scope: String,
+    pub scope_id: String,
+    pub content: String,
+    pub confidence: f64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DesktopMemorySummary {
+    pub identity: usize,
+    pub preference: usize,
+    pub strategic: usize,
+    pub domain: usize,
+    pub procedural: usize,
+    pub episodic: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DesktopContextBudgetsSnapshot {
+    pub memory_chars: usize,
+    pub skills_chars: usize,
+    pub working_memory_chars: usize,
+    pub workspace_chars: usize,
+    pub handoff_chars: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesktopContextSection {
+    pub name: String,
+    pub chars: usize,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesktopRuntimeContextSnapshot {
+    pub turn_id: String,
+    pub backend: String,
+    pub cwd: PathBuf,
+    pub session_id: String,
+    pub model: Option<String>,
+    pub created_at: i64,
+    pub capsule_text: String,
+    pub sections: Vec<DesktopContextSection>,
+    pub budgets: DesktopContextBudgetsSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesktopContextEngineSnapshot {
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_db: Option<PathBuf>,
+    pub budgets: DesktopContextBudgetsSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesktopSnapshotError {
+    pub area: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DesktopMemoryContextSnapshot {
+    pub cwd: PathBuf,
+    pub scope_mode: DesktopMemoryScopeMode,
+    pub memory: DesktopMemoryBuckets,
+    pub memory_summary: DesktopMemorySummary,
+    pub runtime_context: Option<DesktopRuntimeContextSnapshot>,
+    pub context_engine: DesktopContextEngineSnapshot,
+    pub errors: Vec<DesktopSnapshotError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +247,9 @@ pub enum DaemonServerMessage {
     },
     ObservabilitySummary {
         summary: serde_json::Value,
+    },
+    MemoryContextSnapshot {
+        snapshot: DesktopMemoryContextSnapshot,
     },
 }
 

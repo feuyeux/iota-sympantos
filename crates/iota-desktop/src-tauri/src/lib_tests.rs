@@ -12,3 +12,25 @@ fn desktop_hello_uses_current_protocol_version() {
         }
     ));
 }
+
+#[test]
+fn test_get_memory_context_snapshot_message_building() {
+    let cwd = PathBuf::from("/tmp/workspace");
+    let message = DaemonClientMessage::GetMemoryContextSnapshot {
+        cwd: cwd.clone(),
+        scope_mode: iota_core::daemon::DesktopMemoryScopeMode::Workspace,
+    };
+    if let DaemonClientMessage::GetMemoryContextSnapshot {
+        cwd: path,
+        scope_mode,
+    } = message
+    {
+        assert_eq!(path, cwd);
+        assert_eq!(
+            scope_mode,
+            iota_core::daemon::DesktopMemoryScopeMode::Workspace
+        );
+    } else {
+        panic!("expected GetMemoryContextSnapshot message");
+    }
+}

@@ -315,6 +315,16 @@ impl IotaEngine {
             workspace: Some(&workspace_str),
         });
 
+        self.capture_runtime_context_snapshot(
+            execution_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            backend,
+            cwd.clone(),
+            model.clone(),
+            effective_prompt.clone(),
+        );
+
         let client_started = self.ensure_acp_client(backend, cwd.clone()).await?;
         let key = super::AcpClientKey {
             backend,

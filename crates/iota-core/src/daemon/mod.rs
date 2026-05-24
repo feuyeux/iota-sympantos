@@ -18,7 +18,10 @@ mod proto;
 pub use proto::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonPromptRequest, DaemonPromptResponse,
     DaemonServerMessage, DaemonWarmRequest, DesktopBackendSnapshot, DesktopConfigSnapshot,
-    DesktopModelConfig, apply_desktop_model_update,
+    DesktopContextBudgetsSnapshot, DesktopContextEngineSnapshot, DesktopContextSection,
+    DesktopMemoryBuckets, DesktopMemoryContextSnapshot, DesktopMemoryRecord,
+    DesktopMemoryScopeMode, DesktopMemorySummary, DesktopModelConfig,
+    DesktopRuntimeContextSnapshot, DesktopSnapshotError, apply_desktop_model_update,
 };
 
 use anyhow::{Context, Result};
@@ -206,6 +209,7 @@ async fn handle_connection(
                 | "save_backend_model"
                 | "check_backend"
                 | "get_observability_summary"
+                | "get_memory_context_snapshot"
         )
     ) {
         let first_message: DaemonClientMessage =

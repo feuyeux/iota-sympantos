@@ -12,9 +12,13 @@ use crate::config::{backend_readiness, read_config, save_config};
 use crate::daemon::pool::EnginePool;
 use crate::daemon::proto::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot,
+    DesktopContextEngineSnapshot, DesktopMemoryBuckets, DesktopMemoryContextSnapshot,
+    DesktopMemoryRecord, DesktopMemoryScopeMode, DesktopMemorySummary, DesktopSnapshotError,
     apply_desktop_model_update,
 };
+use crate::memory::{MemoryRecord, MemoryStore, RecallBuckets};
 use crate::store::observability::ObservabilityStore;
+use std::path::Path;
 
 #[derive(Default, Clone)]
 pub(crate) struct ApprovalRegistry {
@@ -326,6 +330,14 @@ async fn handle_message(
             )
             .await?;
         }
+        DaemonClientMessage::GetMemoryContextSnapshot { cwd, scope_mode } => {
+            let snapshot = memory_context_snapshot(cwd, scope_mode, engine_pool).await;
+            send_message(
+                &writer,
+                &DaemonServerMessage::MemoryContextSnapshot { snapshot },
+            )
+            .await?;
+        }
     }
     Ok(())
 }
@@ -574,6 +586,138 @@ fn observability_summary(cwd: Option<PathBuf>) -> Result<serde_json::Value> {
             "recent_token_executions": [],
             "error": err.to_string(),
         })),
+    }
+}
+
+async fn memory_context_snapshot(
+    cwd: PathBuf,
+    scope_mode: DesktopMemoryScopeMode,
+    engine_pool: Arc<Mutex<EnginePool>>,
+) -> DesktopMemoryContextSnapshot {
+    let mut errors = Vec::new();
+    let engine = engine_pool.lock().await.engine_for(cwd.clone());
+    let engine = engine.lock().await;
+
+    let memory = match engine.memory_store() {
+        Some(store) => {
+            match memory_buckets_for_scope(store, &scope_mode, &cwd, engine.engine_session_id()) {
+                Ok(buckets) => buckets,
+                Err(err) => {
+                    errors.push(DesktopSnapshotError {
+                        area: "memory".to_string(),
+                        message: err.to_string(),
+                    });
+                    DesktopMemoryBuckets::default()
+                }
+            }
+        }
+        None => {
+            errors.push(DesktopSnapshotError {
+                area: "memory".to_string(),
+                message: "memory store is unavailable".to_string(),
+            });
+            DesktopMemoryBuckets::default()
+        }
+    };
+
+    let context_engine = DesktopContextEngineSnapshot {
+        enabled: engine.effective_config().context_engine().enabled,
+        memory_db: engine
+            .effective_config()
+            .memory_db_path()
+            .map(PathBuf::from),
+        budgets: engine.context_engine_budgets().into(),
+    };
+
+    let memory_summary = memory_summary(&memory);
+    DesktopMemoryContextSnapshot {
+        cwd,
+        scope_mode,
+        memory,
+        memory_summary,
+        runtime_context: engine.recent_runtime_context_snapshot(),
+        context_engine,
+        errors,
+    }
+}
+
+fn memory_buckets_for_scope(
+    store: &MemoryStore,
+    scope_mode: &DesktopMemoryScopeMode,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<DesktopMemoryBuckets> {
+    let buckets = match scope_mode {
+        DesktopMemoryScopeMode::Workspace => {
+            store.recall_buckets("local-user", &cwd.display().to_string(), session_id)?
+        }
+        DesktopMemoryScopeMode::All => store.all_scope_buckets(100)?,
+    };
+    Ok(DesktopMemoryBuckets::from(buckets))
+}
+
+fn memory_summary(memory: &DesktopMemoryBuckets) -> DesktopMemorySummary {
+    DesktopMemorySummary {
+        identity: memory.identity.len(),
+        preference: memory.preference.len(),
+        strategic: memory.strategic.len(),
+        domain: memory.domain.len(),
+        procedural: memory.procedural.len(),
+        episodic: memory.episodic.len(),
+    }
+}
+
+impl From<RecallBuckets> for DesktopMemoryBuckets {
+    fn from(value: RecallBuckets) -> Self {
+        Self {
+            identity: value
+                .identity
+                .into_iter()
+                .map(DesktopMemoryRecord::from)
+                .collect(),
+            preference: value
+                .preference
+                .into_iter()
+                .map(DesktopMemoryRecord::from)
+                .collect(),
+            strategic: value
+                .strategic
+                .into_iter()
+                .map(DesktopMemoryRecord::from)
+                .collect(),
+            domain: value
+                .domain
+                .into_iter()
+                .map(DesktopMemoryRecord::from)
+                .collect(),
+            procedural: value
+                .procedural
+                .into_iter()
+                .map(DesktopMemoryRecord::from)
+                .collect(),
+            episodic: value
+                .episodic
+                .into_iter()
+                .map(DesktopMemoryRecord::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<MemoryRecord> for DesktopMemoryRecord {
+    fn from(value: MemoryRecord) -> Self {
+        Self {
+            id: value.id,
+            memory_type: value.memory_type.as_str().to_string(),
+            facet: value.facet.map(|facet| facet.as_str().to_string()),
+            scope: value.scope.as_str().to_string(),
+            scope_id: value.scope_id,
+            content: value.content,
+            confidence: value.confidence,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            expires_at: value.expires_at,
+        }
     }
 }
 
