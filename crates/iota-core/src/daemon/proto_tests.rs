@@ -85,3 +85,63 @@ fn desktop_config_snapshot_masks_api_keys() {
     assert!(!json.contains("secret-value"));
     assert!(json.contains("\"api_key_configured\":true"));
 }
+
+#[test]
+fn desktop_model_update_preserves_untouched_fields() {
+    let mut config = config_with_gemini_model();
+
+    apply_desktop_model_update(
+        &mut config,
+        AcpBackend::Gemini,
+        DesktopModelConfig {
+            name: Some("gemini-2.5-flash".to_string()),
+            ..Default::default()
+        },
+    );
+
+    let model = config.gemini.unwrap().model.unwrap();
+    assert_eq!(model.provider.as_deref(), Some("google"));
+    assert_eq!(model.name.as_deref(), Some("gemini-2.5-flash"));
+    assert_eq!(model.base_url.as_deref(), Some("https://example.test"));
+    assert_eq!(model.api_key.as_deref(), Some("secret-value"));
+}
+
+#[test]
+fn desktop_model_update_clears_blank_text_fields() {
+    let mut config = config_with_gemini_model();
+
+    apply_desktop_model_update(
+        &mut config,
+        AcpBackend::Gemini,
+        DesktopModelConfig {
+            provider: Some(" ".to_string()),
+            base_url: Some(String::new()),
+            ..Default::default()
+        },
+    );
+
+    let model = config.gemini.unwrap().model.unwrap();
+    assert_eq!(model.provider, None);
+    assert_eq!(model.name.as_deref(), Some("gemini-1.5-pro"));
+    assert_eq!(model.base_url, None);
+    assert_eq!(model.api_key.as_deref(), Some("secret-value"));
+}
+
+fn config_with_gemini_model() -> crate::config::NimiaConfig {
+    let model = crate::config::ModelConfig {
+        provider: Some("google".to_string()),
+        name: Some("gemini-1.5-pro".to_string()),
+        base_url: Some("https://example.test".to_string()),
+        api_key: Some("secret-value".to_string()),
+    };
+    let backend = crate::config::BackendConfig {
+        enabled: true,
+        model: Some(model),
+        ..Default::default()
+    };
+
+    crate::config::NimiaConfig {
+        gemini: Some(backend),
+        ..Default::default()
+    }
+}

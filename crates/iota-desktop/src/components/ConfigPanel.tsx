@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { getConfig, saveBackendModel } from "../api";
-import type { DesktopConfigSnapshot, DesktopModelConfig } from "../types";
+import type { BackendCheckResult, DesktopConfigSnapshot, DesktopModelConfig } from "../types";
 
 type Props = {
   config?: DesktopConfigSnapshot | null;
+  backendChecks?: Record<string, BackendCheckResult>;
   onConfigUpdate?: (config: DesktopConfigSnapshot) => void;
 };
 
-export function ConfigPanel({ config: externalConfig, onConfigUpdate }: Props) {
+export function ConfigPanel({ config: externalConfig, backendChecks = {}, onConfigUpdate }: Props) {
   const [config, setConfig] = useState<DesktopConfigSnapshot | null>(null);
   const [edits, setEdits] = useState<Record<string, Partial<DesktopModelConfig>>>({});
 
@@ -36,6 +37,7 @@ export function ConfigPanel({ config: externalConfig, onConfigUpdate }: Props) {
         {Object.values(config.backends).map((backend) => {
           const draft = edits[backend.backend] ?? {};
           const model = backend.model;
+          const check = backendChecks[backend.backend];
           const updateDraft = (patch: Partial<DesktopModelConfig>) =>
             setEdits({ ...edits, [backend.backend]: { ...draft, ...patch } });
 
@@ -52,6 +54,17 @@ export function ConfigPanel({ config: externalConfig, onConfigUpdate }: Props) {
                 <span className={backend.enabled ? "text-xs text-emerald-400" : "text-xs text-gray-500"}>
                   {backend.enabled ? "Enabled" : "Disabled"}
                 </span>
+              </div>
+              <div
+                className={`mt-3 rounded border px-3 py-2 text-xs ${
+                  check?.ok
+                    ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-300"
+                    : check
+                      ? "border-amber-500/20 bg-amber-500/5 text-amber-300"
+                      : "border-white/5 bg-white/[0.02] text-gray-500"
+                }`}
+              >
+                {check ? check.details : "Checking backend readiness..."}
               </div>
               <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
                 <input

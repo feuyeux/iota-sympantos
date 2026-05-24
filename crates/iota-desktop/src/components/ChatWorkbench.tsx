@@ -145,7 +145,7 @@ export function ChatWorkbench() {
   const modelName = activeBackendSnapshot?.model?.name || "Loading model...";
   const isKeyConfigured = activeBackendSnapshot?.model?.api_key_configured;
   const activeBackendCheck = backendChecks[backend];
-  const selectedBackendReady = activeBackendCheck?.ok !== false && isKeyConfigured !== false;
+  const selectedBackendReady = activeBackendCheck?.ok === true;
   const daemonStatusText =
     daemonStatus === "connected"
       ? "Daemon Connected"
@@ -229,7 +229,7 @@ export function ChatWorkbench() {
                   <span>
                     {selectedBackendReady
                       ? `Send a prompt to begin coding with ${backend.toUpperCase()}`
-                      : `${backend.toUpperCase()} is not ready: ${activeBackendCheck?.details ?? "configuration incomplete"}`}
+                      : `${backend.toUpperCase()} is not ready: ${activeBackendCheck?.details ?? "checking configuration"}`}
                   </span>
                 </div>
               ) : null}
@@ -282,7 +282,7 @@ export function ChatWorkbench() {
                     activeTurnBusy
                       ? "Wait for the active turn to finish or interrupt it..."
                       : !selectedBackendReady
-                        ? activeBackendCheck?.details ?? "Selected backend is not ready"
+                        ? activeBackendCheck?.details ?? "Checking selected backend..."
                       : `Ask ${backend.toUpperCase()} to write code, debug, or solve tasks...`
                   }
                   onKeyDown={(e) => {
@@ -303,7 +303,7 @@ export function ChatWorkbench() {
             </form>
           </>
         ) : (
-          <ConfigPanel config={config} onConfigUpdate={handleConfigUpdate} />
+          <ConfigPanel config={config} backendChecks={backendChecks} onConfigUpdate={handleConfigUpdate} />
         )}
       </main>
 

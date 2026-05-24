@@ -244,19 +244,25 @@ pub fn apply_desktop_model_update(
     let mut backend_config = section.clone().unwrap_or_default();
     let mut model = backend_config.model.clone().unwrap_or_default();
     if update.provider.is_some() {
-        model.provider = update.provider;
+        model.provider = normalize_optional_text(update.provider);
     }
     if update.name.is_some() {
-        model.name = update.name;
+        model.name = normalize_optional_text(update.name);
     }
     if update.base_url.is_some() {
-        model.base_url = update.base_url;
+        model.base_url = normalize_optional_text(update.base_url);
     }
     if update.api_key_update.is_some() {
-        model.api_key = update.api_key_update;
+        model.api_key = normalize_optional_text(update.api_key_update);
     }
     backend_config.model = Some(model);
     *section = Some(backend_config);
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]
