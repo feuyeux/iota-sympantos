@@ -14,8 +14,13 @@ The desktop app is daemon-first:
 ```bash
 cd crates/iota-desktop
 npm install
-npm run tauri dev
+npm run dev:clean
 ```
+
+`dev:clean` stops existing `iota __daemon` processes before launching Tauri dev.
+It also builds the current workspace `iota` CLI and exports `IOTA_CLI_PATH`, so
+the Tauri daemon client autostarts the matching daemon instead of a stale binary
+from `PATH`.
 
 ## Verification
 

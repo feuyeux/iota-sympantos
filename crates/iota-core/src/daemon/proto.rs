@@ -56,7 +56,7 @@ use std::path::PathBuf;
 use crate::acp::AcpBackend;
 use crate::config::{BackendConfig, ModelConfig, NimiaConfig};
 
-pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
+pub const DESKTOP_PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]

@@ -16,7 +16,13 @@ import {
   Sliders
 } from "lucide-react";
 
-export function MemoryContextWorkspace() {
+export type MemoryContextMode = "memory" | "context";
+
+type MemoryContextWorkspaceProps = {
+  mode?: MemoryContextMode;
+};
+
+export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspaceProps) {
   const [scopeMode, setScopeMode] = useState<"workspace" | "all">("workspace");
   const [snapshot, setSnapshot] = useState<DesktopMemoryContextSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,8 +48,8 @@ export function MemoryContextWorkspace() {
       } else {
         setSelectedRecord(null);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to load snapshot");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -99,22 +105,28 @@ export function MemoryContextWorkspace() {
     r.content.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const isMemoryMode = mode === "memory";
+
   return (
     <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden font-sans">
       {/* Top Header */}
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 bg-zinc-900/60 px-6 py-4 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-primary/10 p-2 text-primary border border-primary/20 animate-pulse">
-            <Database className="h-5 w-5" />
+          <div className="rounded-lg bg-primary/10 p-2 text-primary border border-primary/20">
+            {isMemoryMode ? <Database className="h-5 w-5" /> : <Cpu className="h-5 w-5" />}
           </div>
           <div>
             <h1 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
-              Memory &amp; Context Viewer
+              {isMemoryMode ? "Persistent Memory" : "Runtime Context"}
               <span className="text-[10px] uppercase font-semibold tracking-wider bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded border border-zinc-700">
                 Read-Only
               </span>
             </h1>
-            <p className="text-xs text-zinc-400">Inspect persistent episodic/semantic memories and runtime context capsules.</p>
+            <p className="text-xs text-zinc-400">
+              {isMemoryMode
+                ? "Inspect persistent identity, preference, strategic, domain, procedural, and episodic memories."
+                : "Inspect the captured runtime context capsule and Context Fabric configuration."}
+            </p>
           </div>
         </div>
 
@@ -179,10 +191,9 @@ export function MemoryContextWorkspace() {
         </div>
       )}
 
-      {/* Workspace Grid */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800 overflow-hidden">
+      <div className="flex-1 overflow-hidden">
         
-        {/* LEFT PANEL: Persistent Memory */}
+        {isMemoryMode && (
         <section className="flex flex-col h-full overflow-hidden bg-zinc-950">
           <div className="flex items-center justify-between border-b border-zinc-900 bg-zinc-900/10 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
@@ -342,8 +353,9 @@ export function MemoryContextWorkspace() {
             </div>
           </div>
         </section>
+        )}
 
-        {/* RIGHT PANEL: Runtime Context */}
+        {!isMemoryMode && (
         <section className="flex flex-col h-full overflow-hidden bg-zinc-950">
           <div className="flex items-center justify-between border-b border-zinc-900 bg-zinc-900/10 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
@@ -526,6 +538,7 @@ export function MemoryContextWorkspace() {
             )}
           </div>
         </section>
+        )}
 
       </div>
     </div>

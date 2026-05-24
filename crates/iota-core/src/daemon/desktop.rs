@@ -8,7 +8,7 @@ use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::acp::{AcpBackend, permission::ApprovalRequest};
-use crate::config::{backend_readiness, read_config, save_config};
+use crate::config::{RecallThresholdsConfig, backend_readiness, read_config, save_config};
 use crate::daemon::pool::EnginePool;
 use crate::daemon::proto::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot,
@@ -600,7 +600,13 @@ async fn memory_context_snapshot(
 
     let memory = match engine.memory_store() {
         Some(store) => {
-            match memory_buckets_for_scope(store, &scope_mode, &cwd, engine.engine_session_id()) {
+            match memory_buckets_for_scope(
+                store,
+                &scope_mode,
+                &cwd,
+                engine.engine_session_id(),
+                *engine.effective_config().recall_thresholds(),
+            ) {
                 Ok(buckets) => buckets,
                 Err(err) => {
                     errors.push(DesktopSnapshotError {
@@ -621,7 +627,7 @@ async fn memory_context_snapshot(
     };
 
     let context_engine = DesktopContextEngineSnapshot {
-        enabled: engine.effective_config().context_engine().enabled,
+        enabled: engine.context_engine_enabled(),
         memory_db: engine
             .effective_config()
             .memory_db_path()
@@ -646,10 +652,16 @@ fn memory_buckets_for_scope(
     scope_mode: &DesktopMemoryScopeMode,
     cwd: &Path,
     session_id: &str,
+    thresholds: RecallThresholdsConfig,
 ) -> Result<DesktopMemoryBuckets> {
     let buckets = match scope_mode {
         DesktopMemoryScopeMode::Workspace => {
-            store.recall_buckets("local-user", &cwd.display().to_string(), session_id)?
+            store.recall_buckets_with_thresholds(
+                "local-user",
+                &cwd.display().to_string(),
+                session_id,
+                thresholds,
+            )?
         }
         DesktopMemoryScopeMode::All => store.all_scope_buckets(100)?,
     };

@@ -47,7 +47,6 @@ use iota_core::memory::{MemoryRecord, MemorySearchMode};
 use iota_core::telemetry::metrics;
 use iota_kanban::{AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
 use kanban_view::KanbanViewState;
-use render::observability_line;
 use slash_command::{SlashAction, parse_slash_command};
 use state::{ConversationEntry, HistoryState, ObservabilityMeta};
 use terminal_lifecycle::{TerminalGuard, install_terminal_panic_hook};

@@ -10,5 +10,9 @@ test("MemoryContextWorkspace is hosted by the right inspector, not the central w
   assert.equal(workbench.includes('view === "memory"'), false);
   assert.equal(inspector.includes("MemoryContextWorkspace"), true);
   assert.equal(inspector.includes("Observability"), true);
-  assert.equal(inspector.includes("Memory / Context"), true);
+  assert.equal(inspector.includes("Memory / Context"), false);
+  assert.match(inspector, />\s*Memory\s*</);
+  assert.match(inspector, />\s*Context\s*</);
+  assert.equal(inspector.includes('mode="memory"'), true);
+  assert.equal(inspector.includes('mode="context"'), true);
 });

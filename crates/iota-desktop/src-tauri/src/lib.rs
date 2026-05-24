@@ -164,15 +164,18 @@ async fn get_memory_context_snapshot(
     .await
     .map_err(|e| e.to_string())?;
 
-    messages
-        .into_iter()
-        .find_map(|message| match message {
+    for message in messages {
+        match message {
             iota_core::daemon::DaemonServerMessage::MemoryContextSnapshot { snapshot } => {
-                Some(snapshot)
+                return Ok(snapshot);
             }
-            _ => None,
-        })
-        .ok_or_else(|| "daemon did not return memory context snapshot".to_string())
+            iota_core::daemon::DaemonServerMessage::ProtocolError { message } => {
+                return Err(message);
+            }
+            _ => {}
+        }
+    }
+    Err("daemon did not return memory context snapshot".to_string())
 }
 
 #[tauri::command]

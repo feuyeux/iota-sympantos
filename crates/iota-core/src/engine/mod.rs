@@ -432,6 +432,10 @@ impl IotaEngine {
         self.context_engine.budgets()
     }
 
+    pub fn context_engine_enabled(&self) -> bool {
+        self.context_engine.enabled
+    }
+
     pub fn capture_runtime_context_snapshot(
         &mut self,
         turn_id: String,
@@ -478,13 +482,12 @@ fn parse_context_sections(capsule: &str) -> Vec<DesktopContextSection> {
         "memory-tools",
         "model",
         "skills",
-        "memory",
         "session",
         "handoff",
         "working-memory",
         "workspace",
     ];
-    names
+    let mut sections = names
         .iter()
         .filter_map(|name| {
             let open = format!("<{}>", name);
@@ -498,7 +501,42 @@ fn parse_context_sections(capsule: &str) -> Vec<DesktopContextSection> {
                 preview: crate::utils::summarize(text, 180),
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if let Some(memory_section) = parse_memory_context_section(body) {
+        sections.push(memory_section);
+    }
+    sections
+}
+
+fn parse_memory_context_section(body: &str) -> Option<DesktopContextSection> {
+    let mut rest = body;
+    let mut content = Vec::new();
+    while let Some(open_start) = rest.find("<memory") {
+        let after_open_start = &rest[open_start..];
+        let Some(open_end) = after_open_start.find('>') else {
+            break;
+        };
+        let content_start = open_start + open_end + 1;
+        let Some(close_start_relative) = rest[content_start..].find("</memory>") else {
+            break;
+        };
+        let close_start = content_start + close_start_relative;
+        let text = rest[content_start..close_start].trim();
+        if !text.is_empty() {
+            content.push(text.to_string());
+        }
+        let after_close = close_start + "</memory>".len();
+        rest = &rest[after_close..];
+    }
+    if content.is_empty() {
+        return None;
+    }
+    let joined = content.join("\n\n");
+    Some(DesktopContextSection {
+        name: "memory".to_string(),
+        chars: joined.len(),
+        preview: crate::utils::summarize(&joined, 180),
+    })
 }
 
 #[cfg(test)]
