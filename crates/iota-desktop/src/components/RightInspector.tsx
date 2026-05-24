@@ -23,11 +23,78 @@ type Props = {
 export function RightInspector({ turn, observability, onApprovalDecision }: Props) {
   const [cancelling, setCancelling] = useState(false);
 
+  const formatMs = (ms?: number) => {
+    if (ms === undefined) return "N/A";
+    return `${(ms / 1000).toFixed(2)}s`;
+  };
+
+  const formatNumber = (num?: number) => {
+    if (num === undefined) return "0";
+    return new Intl.NumberFormat().format(num);
+  };
+
+  const renderObservabilitySection = () => (
+    <section className="bg-white/[0.01] border border-white/5 rounded-md p-4">
+      <div className="flex items-center gap-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        <Activity className="h-4 w-4 text-primary" />
+        Recent Observability
+      </div>
+      {observability?.token_summary && observability.token_summary.length > 0 ? (
+        <div className="space-y-2 text-xs text-gray-300">
+          {observability.token_summary.slice(0, 5).map((summary) => (
+            <div key={summary.backend} className="rounded border border-white/5 bg-white/[0.02] p-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium uppercase">{summary.backend}</span>
+                <span className="text-gray-500">{summary.count} turns</span>
+              </div>
+              <div className="mt-1 grid grid-cols-3 gap-2 text-[11px] text-gray-500">
+                <div>
+                  <span>Input</span>
+                  <div className="text-gray-300">{formatNumber(Math.round(summary.input_tokens_mean ?? 0))}</div>
+                </div>
+                <div>
+                  <span>Output</span>
+                  <div className="text-gray-300">{formatNumber(Math.round(summary.output_tokens_mean ?? 0))}</div>
+                </div>
+                <div>
+                  <span>Total</span>
+                  <div className="text-gray-300">{formatNumber(Math.round(summary.normalized_total_mean ?? 0))}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {observability.recent_token_executions && observability.recent_token_executions.length > 0 ? (
+            <div className="border-t border-white/5 pt-2">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Recent Runs</div>
+              <div className="space-y-1.5">
+                {observability.recent_token_executions.slice(0, 3).map((execution) => (
+                  <div key={execution.id} className="flex items-center justify-between text-[11px] text-gray-500">
+                    <span className="truncate uppercase">{execution.backend}</span>
+                    <span className="font-mono text-gray-400">
+                      {formatNumber(execution.normalized_total_tokens)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="text-xs text-gray-600 italic">
+          {observability?.error ?? "No recent token usage summary"}
+        </div>
+      )}
+    </section>
+  );
+
   if (!turn) {
     return (
-      <aside className="w-[380px] border-l border-white/10 bg-[#070a13] p-5 text-sm text-gray-500 flex flex-col justify-center items-center gap-2">
-        <Activity className="h-8 w-8 text-gray-700 animate-pulse" />
-        <span>Select or start a turn to inspect</span>
+      <aside className="w-[380px] border-l border-white/10 bg-[#070a13] p-5 text-sm text-gray-500 overflow-y-auto flex flex-col gap-6">
+        <section className="flex flex-col items-center justify-center gap-2 py-10">
+          <Activity className="h-8 w-8 text-gray-700 animate-pulse" />
+          <span>Select or start a turn to inspect</span>
+        </section>
+        {renderObservabilitySection()}
       </aside>
     );
   }
@@ -73,17 +140,6 @@ export function RightInspector({ turn, observability, onApprovalDecision }: Prop
     } finally {
       setCancelling(false);
     }
-  };
-
-  // Safe formatting helpers
-  const formatMs = (ms?: number) => {
-    if (ms === undefined) return "N/A";
-    return `${(ms / 1000).toFixed(2)}s`;
-  };
-
-  const formatNumber = (num?: number) => {
-    if (num === undefined) return "0";
-    return new Intl.NumberFormat().format(num);
   };
 
   return (
@@ -233,33 +289,7 @@ export function RightInspector({ turn, observability, onApprovalDecision }: Prop
         )}
       </section>
 
-      {/* Observability Summary */}
-      <section className="bg-white/[0.01] border border-white/5 rounded-md p-4">
-        <div className="flex items-center gap-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          <Activity className="h-4 w-4 text-primary" />
-          Recent Observability
-        </div>
-        {observability?.token_summary && observability.token_summary.length > 0 ? (
-          <div className="space-y-2 text-xs text-gray-300">
-            {observability.token_summary.slice(0, 5).map((summary) => (
-              <div key={summary.backend} className="rounded border border-white/5 bg-white/[0.02] p-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium uppercase">{summary.backend}</span>
-                  <span className="text-gray-500">{summary.count} turns</span>
-                </div>
-                <div className="mt-1 flex justify-between text-[11px] text-gray-500">
-                  <span>Avg total</span>
-                  <span>{formatNumber(Math.round(summary.normalized_total_mean ?? 0))}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-gray-600 italic">
-            {observability?.error ?? "No recent token usage summary"}
-          </div>
-        )}
-      </section>
+      {renderObservabilitySection()}
 
       {/* Tool Calls Accordion */}
       <section className="flex flex-col gap-2">

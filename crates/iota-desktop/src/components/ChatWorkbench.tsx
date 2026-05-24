@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { Cpu, Send, CheckCircle2 } from "lucide-react";
 import {
   checkBackend,
@@ -28,9 +28,31 @@ export function ChatWorkbench() {
 
   const activeTurn = state.activeTurnId ? state.turns[state.activeTurnId] : undefined;
 
+  const refreshBackendChecks = useCallback(async () => {
+    const checks = await Promise.all(
+      BACKENDS.map(async (item) => {
+        try {
+          return [item, await checkBackend(item)] as const;
+        } catch (err) {
+          return [item, { backend: item, ok: false, details: String(err) }] as const;
+        }
+      }),
+    );
+    setBackendChecks(Object.fromEntries(checks));
+  }, []);
+
+  const refreshObservability = useCallback(async () => {
+    try {
+      setObservability(await getObservabilitySummary());
+    } catch (err) {
+      console.error("Failed to load observability summary:", err);
+    }
+  }, []);
+
   useEffect(() => {
     let disposed = false;
-    
+    let unlisten: (() => void) | undefined;
+
     getConfig()
       .then((cfg) => {
         if (!disposed) {
@@ -49,39 +71,41 @@ export function ChatWorkbench() {
       })
       .catch((err) => console.error("Failed to read workspace:", err));
 
-    getObservabilitySummary()
-      .then((summary) => {
-        if (!disposed) setObservability(summary);
-      })
-      .catch((err) => console.error("Failed to load observability summary:", err));
-
-    Promise.all(
-      BACKENDS.map(async (item) => {
-        try {
-          return [item, await checkBackend(item)] as const;
-        } catch (err) {
-          return [item, { backend: item, ok: false, details: String(err) }] as const;
-        }
-      }),
-    ).then((checks) => {
-      if (!disposed) setBackendChecks(Object.fromEntries(checks));
-    });
+    refreshObservability();
+    refreshBackendChecks();
 
     // Listen for stream events
     listenDaemonMessages((message) => {
       if (disposed) return;
       dispatch({ type: "daemon_message", message });
-      
+
       // If the message contains a config update, refresh local state
       if (message.type === "config_snapshot") {
         setConfig(message.config);
+        refreshBackendChecks();
       }
-    });
+      if (
+        message.type === "turn_completed" ||
+        message.type === "turn_failed" ||
+        message.type === "turn_cancelled"
+      ) {
+        refreshObservability();
+      }
+    })
+      .then((cleanup) => {
+        if (disposed) {
+          cleanup();
+        } else {
+          unlisten = cleanup;
+        }
+      })
+      .catch((err) => console.error("Failed to listen for daemon messages:", err));
 
     return () => {
       disposed = true;
+      unlisten?.();
     };
-  }, []);
+  }, [refreshBackendChecks, refreshObservability]);
 
   const transcript = useMemo(() => state.order.map((id) => state.turns[id]), [state.order, state.turns]);
   const activeTurnBusy =
@@ -92,14 +116,14 @@ export function ChatWorkbench() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const prompt = input.trim();
-    if (!prompt || activeTurnBusy) return;
+    if (!prompt || activeTurnBusy || !selectedBackendReady) return;
     setInput("");
     const turnId = crypto.randomUUID();
     dispatch({
       type: "turn_started",
       turnId,
       backend,
-      cwd: "",
+      cwd: workspace,
       prompt,
     });
     try {
@@ -128,6 +152,11 @@ export function ChatWorkbench() {
       : daemonStatus === "connecting"
         ? "Connecting"
         : "Daemon Error";
+
+  const handleConfigUpdate = (updated: DesktopConfigSnapshot) => {
+    setConfig(updated);
+    refreshBackendChecks();
+  };
 
   return (
     <div className="flex h-screen bg-[#0b0f19] text-gray-100 font-sans select-none">
@@ -274,7 +303,7 @@ export function ChatWorkbench() {
             </form>
           </>
         ) : (
-          <ConfigPanel config={config} onConfigUpdate={setConfig} />
+          <ConfigPanel config={config} onConfigUpdate={handleConfigUpdate} />
         )}
       </main>
 
