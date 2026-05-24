@@ -89,3 +89,20 @@ test("turn_failed preserves partial text and stores error", () => {
   assert.equal(failed.turns["turn-1"].assistantText, "partial");
   assert.equal(failed.turns["turn-1"].error, "boom");
 });
+
+test("select_active_turn updates activeTurnId", () => {
+  const started = turnsReducer(initialTurnsState, {
+    type: "turn_started",
+    turnId: "turn-1",
+    backend: "gemini",
+    cwd: "/tmp/project",
+    prompt: "hello",
+  });
+
+  const selected = turnsReducer(started, {
+    type: "select_active_turn",
+    turnId: "turn-1",
+  });
+
+  assert.equal(selected.activeTurnId, "turn-1");
+});

@@ -18,6 +18,10 @@ export function handleApproval(reqId: string, approved: boolean): Promise<void> 
   return invoke<void>("handle_approval", { reqId, approved });
 }
 
+export function cancelTurn(turnId: string): Promise<void> {
+  return invoke<void>("cancel_turn", { turnId });
+}
+
 export function listenDaemonMessages(callback: (message: DaemonServerMessage) => void): Promise<() => void> {
   return listen<DaemonServerMessage>("daemon-message", (event) => callback(event.payload));
 }

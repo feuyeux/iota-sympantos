@@ -73,6 +73,14 @@ async fn handle_approval(req_id: String, approved: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn cancel_turn(turn_id: String) -> Result<(), String> {
+    daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CancelTurn { turn_id })
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_boards(state: tauri::State<'_, AppState>) -> Result<Vec<Board>, String> {
     let store = state.kanban_store.lock().await;
     store.list_boards().map_err(|e| e.to_string())
@@ -211,6 +219,7 @@ pub fn run() {
             save_backend_model,
             submit_prompt,
             handle_approval,
+            cancel_turn,
             list_boards,
             list_tasks,
             create_task,

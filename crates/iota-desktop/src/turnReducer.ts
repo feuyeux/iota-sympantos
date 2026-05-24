@@ -15,9 +15,17 @@ export const initialTurnsState: TurnsState = {
 export type TurnsAction =
   | { type: "turn_started"; turnId: string; backend: string; cwd: string; prompt: string }
   | { type: "daemon_message"; message: DaemonServerMessage }
-  | { type: "approval_decision"; approvalId: string; approved: boolean };
+  | { type: "approval_decision"; approvalId: string; approved: boolean }
+  | { type: "select_active_turn"; turnId: string };
 
 export function turnsReducer(state: TurnsState, action: TurnsAction): TurnsState {
+  if (action.type === "select_active_turn") {
+    return {
+      ...state,
+      activeTurnId: action.turnId,
+    };
+  }
+
   if (action.type === "turn_started") {
     const turn: DesktopTurn = {
       id: action.turnId,

@@ -36,6 +36,21 @@ impl ApprovalRegistry {
     }
 }
 
+#[derive(Default, Clone)]
+pub(crate) struct TurnRegistry {
+    active: Arc<Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>>,
+}
+
+impl TurnRegistry {
+    pub async fn insert(&self, turn_id: String, handle: tokio::task::JoinHandle<()>) {
+        self.active.lock().await.insert(turn_id, handle);
+    }
+
+    pub async fn remove(&self, turn_id: &str) -> Option<tokio::task::JoinHandle<()>> {
+        self.active.lock().await.remove(turn_id)
+    }
+}
+
 pub(crate) async fn handle_desktop_connection<R>(
     first_message: DaemonClientMessage,
     reader: BufReader<R>,
@@ -47,11 +62,13 @@ where
     R: AsyncRead + Unpin,
 {
     let writer = Arc::new(Mutex::new(write_half));
+    let turns = TurnRegistry::default();
     handle_message(
         first_message,
         Arc::clone(&writer),
         Arc::clone(&engine_pool),
         approvals.clone(),
+        turns.clone(),
     )
     .await?;
 
@@ -66,6 +83,7 @@ where
             Arc::clone(&writer),
             Arc::clone(&engine_pool),
             approvals.clone(),
+            turns.clone(),
         )
         .await?;
         line.clear();
@@ -78,6 +96,7 @@ async fn handle_message(
     writer: Arc<Mutex<OwnedWriteHalf>>,
     engine_pool: Arc<Mutex<EnginePool>>,
     approvals: ApprovalRegistry,
+    turns: TurnRegistry,
 ) -> Result<()> {
     match message {
         DaemonClientMessage::Hello {
@@ -120,6 +139,7 @@ async fn handle_message(
                 writer,
                 engine_pool,
                 approvals,
+                turns,
             )
             .await?;
         }
@@ -147,6 +167,9 @@ async fn handle_message(
             }
         }
         DaemonClientMessage::CancelTurn { turn_id } => {
+            if let Some(handle) = turns.remove(&turn_id).await {
+                handle.abort();
+            }
             send_message(&writer, &DaemonServerMessage::TurnCancelled { turn_id }).await?;
         }
         DaemonClientMessage::GetConfig => {
@@ -212,6 +235,7 @@ async fn start_turn(
     writer: Arc<Mutex<OwnedWriteHalf>>,
     engine_pool: Arc<Mutex<EnginePool>>,
     approvals: ApprovalRegistry,
+    turns: TurnRegistry,
 ) -> Result<()> {
     let backend = AcpBackend::parse(&backend)?;
     send_message(
@@ -264,7 +288,10 @@ async fn start_turn(
         }
     });
 
-    tokio::spawn(async move {
+    let task_writer = Arc::clone(&writer);
+    let task_turn_id = turn_id.clone();
+    let task_turns = turns.clone();
+    let handle = tokio::spawn(async move {
         let result = {
             let mut engine = engine.lock().await;
             if let Some(timeout_ms) = timeout_ms {
@@ -276,22 +303,24 @@ async fn start_turn(
             result
         };
 
+        task_turns.remove(&task_turn_id).await;
+
         match result {
             Ok(output) => {
                 for event in output.events {
                     let _ = send_message(
-                        &writer,
+                        &task_writer,
                         &DaemonServerMessage::TurnEvent {
-                            turn_id: turn_id.clone(),
+                            turn_id: task_turn_id.clone(),
                             event: Box::new(event),
                         },
                     )
                     .await;
                 }
                 let _ = send_message(
-                    &writer,
+                    &task_writer,
                     &DaemonServerMessage::TurnCompleted {
-                        turn_id,
+                        turn_id: task_turn_id,
                         text: output.text,
                         timing: output.timing,
                     },
@@ -300,9 +329,9 @@ async fn start_turn(
             }
             Err(err) => {
                 let _ = send_message(
-                    &writer,
+                    &task_writer,
                     &DaemonServerMessage::TurnFailed {
-                        turn_id,
+                        turn_id: task_turn_id,
                         error: err.to_string(),
                     },
                 )
@@ -310,6 +339,8 @@ async fn start_turn(
             }
         }
     });
+
+    turns.insert(turn_id, handle).await;
 
     Ok(())
 }
