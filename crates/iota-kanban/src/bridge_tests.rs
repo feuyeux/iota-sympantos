@@ -1,7 +1,7 @@
-use crate::kanban::CreateTaskRequest;
-use crate::kanban::bridge::{AdvancedBridge, read_new_shadow_tasks};
-use crate::kanban::sqlite_store::SqliteKanbanStore;
-use crate::kanban::store::KanbanStore;
+use crate::CreateTaskRequest;
+use crate::bridge::{AdvancedBridge, read_new_shadow_tasks};
+use crate::sqlite_store::SqliteKanbanStore;
+use crate::store::KanbanStore;
 use std::path::{Path, PathBuf};
 
 #[test]

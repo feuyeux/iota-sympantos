@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 
 use iota_core::acp::AcpBackend;
 use iota_core::config::{self, backend_config, backend_process_env_with_context};
-use iota_core::kanban::types::Status;
-use iota_core::kanban::{
+use iota_kanban::types::Status;
+use iota_kanban::{
     AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore,
     default_pull_source, export_event_bundle, import_event_bundle, pull_event_bundle,
     push_event_bundle, read_event_bundle, serve_event_sync, write_event_bundle,
@@ -53,7 +53,7 @@ fn execute_kanban_command(
                 .filter(|s| !s.is_empty())
                 .context("Usage: iota kanban create-task <board-id> <title>")?
                 .join(" ");
-            use iota_core::kanban::types::{CreateTaskRequest, Status as KStatus};
+            use iota_kanban::types::{CreateTaskRequest, Status as KStatus};
             let req = CreateTaskRequest {
                 board_id,
                 title: title.clone(),

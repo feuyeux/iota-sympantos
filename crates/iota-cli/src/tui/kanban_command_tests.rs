@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use iota_core::kanban::{
+use iota_kanban::{
     AdvancedBridge, CreateTaskRequest, Dispatcher, DispatcherConfig, KanbanStore,
     SqliteKanbanStore, Status,
 };

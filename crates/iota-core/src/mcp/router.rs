@@ -37,7 +37,7 @@ pub fn try_intercept_tool_call(method: &str, params: Option<&Value>) -> Option<R
 }
 
 pub fn route_tool_call(name: &str, arguments: &Value) -> Result<Value> {
-    if tool_dispatch::is_known_tool(name) {
+    if tool_dispatch::REGISTRY.is_known_tool(name) {
         return route_via_dispatch(name, arguments);
     }
     if is_fun_tool(name) {
@@ -73,7 +73,7 @@ fn route_via_dispatch(name: &str, arguments: &Value) -> Result<Value> {
         workspace: &workspace,
     };
 
-    match tool_dispatch::dispatch_tool(&ctx, name, arguments) {
+    match tool_dispatch::REGISTRY.dispatch(name, &ctx, arguments) {
         Ok(value) => {
             let text = serde_json::to_string(&value).unwrap_or_default();
             Ok(

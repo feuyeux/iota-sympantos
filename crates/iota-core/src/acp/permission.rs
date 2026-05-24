@@ -69,6 +69,7 @@ pub async fn answer_permission_request(
     execution_id: Option<&str>,
     backend: AcpBackend,
     tool_whitelist: &[String],
+    cwd: Option<&std::path::Path>,
 ) -> Result<ApprovalDecisionEvent> {
     let tool_name = params
         .get("toolName")
@@ -139,7 +140,7 @@ pub async fn answer_permission_request(
         } else {
             None
         };
-        let dimensions = approvals::classify_operation(&tool_name, &params);
+        let dimensions = approvals::classify_operation(&tool_name, &params, cwd);
         let policy = approvals::default_decision(&dimensions);
         let result = prompt_yes_no(&format!(
             "Approve ACP tool request '{}' [{}]? ",

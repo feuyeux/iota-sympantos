@@ -6,6 +6,7 @@
 //!   composer  3 rows — single-line input with history recall
 //!   status    1 row  — bottom-left: backend · model  /  right: key hints
 
+mod autocomplete;
 mod events;
 mod input;
 mod kanban_command;
@@ -41,10 +42,8 @@ use iota_core::acp::permission::{ApprovalRequest, install_tui_approval_channel};
 use iota_core::acp::{ALL_BACKENDS, AcpBackend};
 use iota_core::config::{NimiaConfig, backend_config, configured_model};
 use iota_core::engine::IotaEngine;
-use iota_core::kanban::{
-    AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore,
-};
 use iota_core::telemetry::metrics;
+use iota_kanban::{AdvancedBridge, Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore};
 use kanban_view::KanbanViewState;
 use render::observability_line;
 use slash_command::{SlashAction, parse_slash_command, slash_completions};
@@ -96,7 +95,7 @@ struct TuiApp {
     /// Whether auto-dispatch daemon is active (background task ticks the dispatcher).
     kanban_daemon_active: Arc<AtomicBool>,
     /// Broadcast receiver for real-time kanban UI events.
-    kanban_event_rx: tokio_broadcast::Receiver<iota_core::kanban::KanbanUiEvent>,
+    kanban_event_rx: tokio_broadcast::Receiver<iota_kanban::KanbanUiEvent>,
 
     // Conversation and input state
     history: HistoryState,
@@ -417,65 +416,19 @@ impl TuiApp {
     /// slash command. For example, `/he` on Hermes returns `Some("lp")` so the
     /// render layer can append it in dim gray.
     pub(super) fn slash_ghost(&self) -> Option<String> {
-        let text = &self.composer.text;
-        if !text.starts_with('/') || text.contains(char::is_whitespace) {
-            return None;
-        }
-        if !self.composer.cursor_at_end() {
-            return None;
-        }
-        let prefix = &text[1..];
-        let completions = slash_completions(prefix, self.active_backend);
-        let first = completions.first()?;
-        if first.len() > prefix.len() {
-            Some(first[prefix.len()..].to_string())
-        } else {
-            None
-        }
+        autocomplete::Autocompleter::ghost_text(&self.composer, self.active_backend)
     }
 
     /// Returns a space-separated list of matching slash command names for the
     /// composer border title. Returns `None` when not in slash-typing mode.
     pub(super) fn slash_completion_hint(&self) -> Option<String> {
-        let text = &self.composer.text;
-        if !text.starts_with('/') || text.contains(char::is_whitespace) {
-            return None;
-        }
-        let prefix = &text[1..];
-        let completions = slash_completions(prefix, self.active_backend);
-        if completions.is_empty() {
-            return None;
-        }
-        const MAX_SHOW: usize = 8;
-        let shown: Vec<&str> = completions.iter().copied().take(MAX_SHOW).collect();
-        let mut hint = shown.join("  ");
-        if completions.len() > MAX_SHOW {
-            hint.push_str(&format!("  +{}", completions.len() - MAX_SHOW));
-        }
-        Some(hint)
+        autocomplete::Autocompleter::completion_hint(&self.composer, self.active_backend)
     }
 
     /// Accept the first slash-command completion by replacing the composer text.
     /// Returns `true` if a completion was accepted.
     pub(super) fn slash_tab_complete(&mut self) -> bool {
-        let text = self.composer.text.clone();
-        if !text.starts_with('/') || text.contains(char::is_whitespace) {
-            return false;
-        }
-        if !self.composer.cursor_at_end() {
-            return false;
-        }
-        let prefix = &text[1..];
-        let completions = slash_completions(prefix, self.active_backend);
-        if let Some(&first) = completions.first()
-            && first != prefix
-        {
-            let completed = format!("/{}", first);
-            self.composer.cursor = completed.chars().count();
-            self.composer.text = completed;
-            return true;
-        }
-        false
+        autocomplete::Autocompleter::tab_complete(&mut self.composer, self.active_backend)
     }
 
     fn cycle_backend(&mut self) {

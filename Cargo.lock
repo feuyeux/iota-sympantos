@@ -2005,6 +2005,7 @@ dependencies = [
  "futures-util",
  "hostname",
  "iota-core",
+ "iota-kanban",
  "pulldown-cmark",
  "ratatui",
  "reqwest 0.13.3",
@@ -2052,6 +2053,7 @@ dependencies = [
  "anyhow",
  "dirs",
  "iota-core",
+ "iota-kanban",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2059,6 +2061,24 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "iota-kanban"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "hostname",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "uuid",
 ]
 

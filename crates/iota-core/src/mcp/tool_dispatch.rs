@@ -29,39 +29,285 @@ pub struct ToolContext<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// dispatch_tool — single entry point
+// McpTool Trait & Registry
 // ---------------------------------------------------------------------------
 
-/// Execute a named iota tool and return the raw business-logic result.
-///
-/// Returns `Ok(Value)` on success or `Err(String)` with a human-readable
-/// message on failure.  The caller is responsible for wrapping the result in
-/// whatever protocol envelope it needs (MCP content array, JSON-RPC, etc.).
-pub fn dispatch_tool(ctx: &ToolContext, name: &str, args: &Value) -> Result<Value, String> {
-    match name {
-        "iota_memory_search" => dispatch_memory_search(ctx, args),
-        "iota_memory_write" => dispatch_memory_write(ctx, args),
-        "iota_skill_search" => dispatch_skill_search(ctx, args),
-        "iota_skill_load" => dispatch_skill_load(ctx, args),
-        "iota_session_summary" => dispatch_session_summary(ctx, args),
-        "iota_handoff_publish" => dispatch_handoff_publish(ctx, args),
-        "iota_handoff_read" => dispatch_handoff_read(ctx, args),
-        _ => Err(format!("unknown tool {}", name)),
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+/// Trait defining a dynamic MCP tool.
+pub trait McpTool: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+    fn input_schema(&self) -> Value;
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String>;
+}
+
+pub struct McpToolRegistry {
+    tools: HashMap<String, Box<dyn McpTool>>,
+}
+
+impl McpToolRegistry {
+    pub fn new() -> Self {
+        let mut tools: HashMap<String, Box<dyn McpTool>> = HashMap::new();
+
+        let t = MemorySearchTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+        let t = MemoryWriteTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+        let t = SkillSearchTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+        let t = SkillLoadTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+        let t = SessionSummaryTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+        let t = HandoffPublishTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+        let t = HandoffReadTool;
+        tools.insert(t.name().to_string(), Box::new(t));
+
+        Self { tools }
+    }
+
+    pub fn is_known_tool(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
+    pub fn dispatch(&self, name: &str, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        if let Some(tool) = self.tools.get(name) {
+            tool.execute(ctx, args)
+        } else {
+            Err(format!("unknown tool {}", name))
+        }
+    }
+
+    pub fn list_tools(&self) -> Vec<Value> {
+        // Sort tools by name to ensure stable list order
+        let mut sorted_tools: Vec<&Box<dyn McpTool>> = self.tools.values().collect();
+        sorted_tools.sort_by_key(|t| t.name());
+        sorted_tools
+            .into_iter()
+            .map(|tool| {
+                json!({
+                    "name": tool.name(),
+                    "description": tool.description(),
+                    "inputSchema": tool.input_schema(),
+                })
+            })
+            .collect()
     }
 }
 
+pub static REGISTRY: LazyLock<McpToolRegistry> = LazyLock::new(McpToolRegistry::new);
+
+/// Execute a named iota tool and return the raw business-logic result.
+///
+/// Compatibility wrapper forwarding to the global `REGISTRY`.
+#[allow(dead_code)]
+pub fn dispatch_tool(ctx: &ToolContext, name: &str, args: &Value) -> Result<Value, String> {
+    REGISTRY.dispatch(name, ctx, args)
+}
+
 /// Return whether `name` is a tool this module can dispatch.
+///
+/// Compatibility wrapper forwarding to the global `REGISTRY`.
+#[allow(dead_code)]
 pub fn is_known_tool(name: &str) -> bool {
-    matches!(
-        name,
+    REGISTRY.is_known_tool(name)
+}
+
+// ---------------------------------------------------------------------------
+// Default McpTool Implementations
+// ---------------------------------------------------------------------------
+
+struct MemorySearchTool;
+impl McpTool for MemorySearchTool {
+    fn name(&self) -> &'static str {
         "iota_memory_search"
-            | "iota_memory_write"
-            | "iota_skill_search"
-            | "iota_skill_load"
-            | "iota_session_summary"
-            | "iota_handoff_publish"
-            | "iota_handoff_read"
-    )
+    }
+
+    fn description(&self) -> &'static str {
+        "Search unified iota memory by keyword. Returns matching records across all types and scopes."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search keyword"},
+                "limit": {"type": "integer", "description": "Max results (default 20)"},
+                "mode": {"type": "string", "enum": ["hybrid", "vector", "keyword"], "description": "Search strategy (default hybrid)"}
+            }
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_memory_search(ctx, args)
+    }
+}
+
+struct MemoryWriteTool;
+impl McpTool for MemoryWriteTool {
+    fn name(&self) -> &'static str {
+        "iota_memory_write"
+    }
+
+    fn description(&self) -> &'static str {
+        "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id is optional. Defaults match Engine recall: user → \"local-user\", project → current cwd path, session → source_session_id/session_id if provided."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["content", "type", "scope", "confidence"],
+            "properties": {
+                "content":    {"type": "string"},
+                "type":       {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
+                "facet":      {"type": "string", "enum": ["identity", "preference", "strategic", "domain"]},
+                "scope":      {"type": "string", "enum": ["user", "project", "session", "global"]},
+                "scope_id":   {"type": "string"},
+                "merge_mode": {"type": "string", "enum": ["auto", "add", "update", "none"]},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "ttl_days":   {"type": "integer"},
+                "metadata":   {"type": "object"},
+                "source_backend": {"type": "string"},
+                "source_session_id": {"type": "string"},
+                "source_execution_id": {"type": "string"},
+                "supersedes": {"type": "string"}
+            },
+            "allOf": [
+                {
+                    "if": {"properties": {"type": {"const": "semantic"}}, "required": ["type"]},
+                    "then": {"required": ["facet"]}
+                },
+                {
+                    "if": {"properties": {"type": {"enum": ["episodic", "procedural"]}}, "required": ["type"]},
+                    "then": {"not": {"required": ["facet"]}}
+                }
+            ]
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_memory_write(ctx, args)
+    }
+}
+
+struct SkillSearchTool;
+impl McpTool for SkillSearchTool {
+    fn name(&self) -> &'static str {
+        "iota_skill_search"
+    }
+
+    fn description(&self) -> &'static str {
+        "Search available iota skill index for the current backend."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "backend": {"type": "string"}
+            }
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_skill_search(ctx, args)
+    }
+}
+
+struct SkillLoadTool;
+impl McpTool for SkillLoadTool {
+    fn name(&self) -> &'static str {
+        "iota_skill_load"
+    }
+
+    fn description(&self) -> &'static str {
+        "Load the full body of a named iota skill."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string"}
+            }
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_skill_load(ctx, args)
+    }
+}
+
+struct SessionSummaryTool;
+impl McpTool for SessionSummaryTool {
+    fn name(&self) -> &'static str {
+        "iota_session_summary"
+    }
+
+    fn description(&self) -> &'static str {
+        "Read summary of the current iota session."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"}
+            }
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_session_summary(ctx, args)
+    }
+}
+
+struct HandoffPublishTool;
+impl McpTool for HandoffPublishTool {
+    fn name(&self) -> &'static str {
+        "iota_handoff_publish"
+    }
+
+    fn description(&self) -> &'static str {
+        "Publish a handoff summary when switching backends."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": true
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_handoff_publish(ctx, args)
+    }
+}
+
+struct HandoffReadTool;
+impl McpTool for HandoffReadTool {
+    fn name(&self) -> &'static str {
+        "iota_handoff_read"
+    }
+
+    fn description(&self) -> &'static str {
+        "Read the latest handoff for this session."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": true
+        })
+    }
+
+    fn execute(&self, ctx: &ToolContext, args: &Value) -> Result<Value, String> {
+        dispatch_handoff_read(ctx, args)
+    }
 }
 
 // ---------------------------------------------------------------------------

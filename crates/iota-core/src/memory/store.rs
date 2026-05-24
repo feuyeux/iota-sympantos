@@ -173,12 +173,7 @@ impl MemoryStore {
     }
 
     pub fn open_with_embedding(path: &Path, config: Option<EmbeddingConfig>) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-        }
-        let conn = Connection::open(path)
-            .with_context(|| format!("Failed to open memory store {}", path.display()))?;
+        let conn = crate::store::db::open_db(path)?;
         let fts_available = init_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -202,6 +197,7 @@ impl MemoryStore {
         merge_mode: MemoryMergeMode,
     ) -> Result<Option<String>> {
         validate_taxonomy(&input)?;
+        let vector = self.embedding.embed(&input.content);
         let now = now_ts();
         let ttl_days = input.ttl_days.max(1);
         let expires_at = now + ttl_days * 86_400;
@@ -227,7 +223,7 @@ impl MemoryStore {
                 "UPDATE memory SET updated_at = ?2, expires_at = ?3, confidence = MAX(confidence, ?4) WHERE id = ?1",
                 params![existing_id, now, expires_at, input.confidence],
             )?;
-            self.upsert_embedding(&conn, &existing_id, &input.content, now)?;
+            self.upsert_embedding(&conn, &existing_id, &vector, now)?;
             return Ok(Some(existing_id));
         }
 
@@ -265,7 +261,7 @@ impl MemoryStore {
                     input.metadata_json,
                 ],
             )?;
-            self.upsert_embedding(&conn, &target_id, &input.content, now)?;
+            self.upsert_embedding(&conn, &target_id, &vector, now)?;
             return Ok(Some(target_id));
         }
 
@@ -294,7 +290,7 @@ impl MemoryStore {
                 supersedes,
             ],
         )?;
-        self.upsert_embedding(&conn, &id, &input.content, now)?;
+        self.upsert_embedding(&conn, &id, &vector, now)?;
         Ok(Some(id))
     }
 
@@ -427,6 +423,25 @@ impl MemoryStore {
             params![scope.as_str(), scope_id, keep_latest],
         )?;
         Ok(deleted)
+    }
+
+    pub fn get_session_turns(&self, session_id: &str) -> Result<Vec<(String, String)>> {
+        let conn = crate::utils::lock_or_recover(&self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT source_backend, content FROM memory
+             WHERE scope = 'session' AND scope_id = ?1 AND type = 'episodic' AND expires_at > ?2
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![session_id, now_ts()], |row| {
+            let backend: Option<String> = row.get(0)?;
+            let content: String = row.get(1)?;
+            Ok((backend.unwrap_or_default(), content))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryRecord>> {
@@ -630,14 +645,13 @@ impl MemoryStore {
         &self,
         conn: &Connection,
         memory_id: &str,
-        content: &str,
+        vector: &[f32],
         updated_at: i64,
     ) -> Result<()> {
-        let vector = self.embedding.embed(content);
         if vector.is_empty() {
             return Ok(());
         }
-        let blob = embedding::to_blob(&vector);
+        let blob = embedding::to_blob(vector);
         conn.execute(
             "INSERT INTO memory_embedding (memory_id, vector_blob, updated_at)
              VALUES (?1, ?2, ?3)
@@ -651,7 +665,6 @@ impl MemoryStore {
 }
 
 fn init_schema(conn: &Connection) -> Result<bool> {
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS memory (
   id TEXT PRIMARY KEY,

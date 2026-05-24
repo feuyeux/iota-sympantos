@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use iota_core::kanban::{Board, KanbanStore, Link, Run, Status, Task, TaskFilter, TaskId};
+use iota_kanban::{Board, KanbanStore, Link, Run, Status, Task, TaskFilter, TaskId};
 
 const STATUS_COLUMNS: [Status; 6] = [
     Status::Triage,

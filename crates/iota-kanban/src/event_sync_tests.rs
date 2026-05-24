@@ -1,9 +1,9 @@
-use crate::kanban::event_sync::{
+use crate::event_sync::{
     KanbanEventBundle, default_pull_source, export_event_bundle, handle_event_sync_stream,
     import_event_bundle, pull_event_bundle, push_event_bundle, read_event_bundle,
     write_event_bundle,
 };
-use crate::kanban::{CreateTaskRequest, KanbanStore, SqliteKanbanStore, Status};
+use crate::{CreateTaskRequest, KanbanStore, SqliteKanbanStore, Status};
 use anyhow::Context;
 use std::path::Path;
 use std::sync::Arc;
@@ -81,7 +81,7 @@ fn unapplicable_event_is_skipped_and_cursor_still_advances() {
         format_version: 1,
         source: "node-a".to_string(),
         cursor: 2,
-        events: vec![crate::kanban::KanbanEvent {
+        events: vec![crate::KanbanEvent {
             id: 2,
             event_type: "task_updated".to_string(),
             payload: serde_json::json!({

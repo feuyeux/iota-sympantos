@@ -1,8 +1,8 @@
-use crate::kanban::shadow::ShadowWatcher;
-use crate::kanban::sqlite_store::SqliteKanbanStore;
-use crate::kanban::store::KanbanStore;
-use crate::kanban::worker::WorkerHandle;
-use crate::kanban::{CreateTaskRequest, Dispatcher, DispatcherConfig, LinkKind, RunStatus, Status};
+use crate::shadow::ShadowWatcher;
+use crate::sqlite_store::SqliteKanbanStore;
+use crate::store::KanbanStore;
+use crate::worker::WorkerHandle;
+use crate::{CreateTaskRequest, Dispatcher, DispatcherConfig, LinkKind, RunStatus, Status};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;

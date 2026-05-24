@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tokio::sync::Mutex;
 
-use iota_core::kanban::{KanbanStore, SqliteKanbanStore, types::*};
+use iota_kanban::{KanbanStore, SqliteKanbanStore, types::*};
 
 pub struct AppState {
     pub kanban_store: Arc<Mutex<SqliteKanbanStore>>,

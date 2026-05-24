@@ -271,7 +271,8 @@ export function ChatWorkbench() {
                         {turn.userPrompt}
                       </div>
                     </div>
-                    <div className="flex justify-start">
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="text-[10px] font-mono text-gray-500 px-1">{turn.backend.toUpperCase()}</span>
                       <div className="max-w-[88ch] rounded-lg border border-white/5 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-gray-200 whitespace-pre-wrap font-sans">
                         {turn.assistantText ||
                           (turn.status === "failed" ? (

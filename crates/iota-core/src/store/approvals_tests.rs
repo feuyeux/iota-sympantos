@@ -41,20 +41,61 @@ fn records_request_with_execution_id_before_decision() {
 
 #[test]
 fn classify_shell_operation() {
-    let dims = classify_operation("bash_exec", &json!({}));
+    let dims = classify_operation("bash_exec", &json!({}), None);
     assert!(dims.contains(&ApprovalDimension::Shell));
 }
 
 #[test]
 fn classify_network_operation_from_url_in_payload() {
-    let dims = classify_operation("file_write", &json!({"url": "https://example.com/data"}));
+    let dims = classify_operation(
+        "file_write",
+        &json!({"url": "https://example.com/data"}),
+        None,
+    );
     assert!(dims.contains(&ApprovalDimension::Network));
 }
 
 #[test]
 fn classify_privilege_escalation_from_sudo() {
-    let dims = classify_operation("run_command", &json!({"command": "sudo apt-get update"}));
+    let dims = classify_operation(
+        "run_command",
+        &json!({"command": "sudo apt-get update"}),
+        None,
+    );
     assert!(dims.contains(&ApprovalDimension::PrivilegeEscalation));
+}
+
+#[test]
+fn classify_workspace_boundary_path() {
+    let cwd = Path::new("/Users/han/coding/creative/iota-sympantos");
+
+    // Relative path, inside workspace
+    let dims = classify_operation("file_write", &json!({"path": "src/main.rs"}), Some(cwd));
+    assert!(!dims.contains(&ApprovalDimension::FileOutsideWorkspace));
+
+    // Relative path with .., inside workspace
+    let dims = classify_operation(
+        "file_write",
+        &json!({"path": "src/../src/main.rs"}),
+        Some(cwd),
+    );
+    assert!(!dims.contains(&ApprovalDimension::FileOutsideWorkspace));
+
+    // Relative path, outside workspace
+    let dims = classify_operation("file_write", &json!({"path": "../external.txt"}), Some(cwd));
+    assert!(dims.contains(&ApprovalDimension::FileOutsideWorkspace));
+
+    // Absolute path, outside workspace
+    let dims = classify_operation("file_write", &json!({"path": "/etc/passwd"}), Some(cwd));
+    assert!(dims.contains(&ApprovalDimension::FileOutsideWorkspace));
+
+    // Absolute path, inside workspace
+    let dims = classify_operation(
+        "file_write",
+        &json!({"path": "/Users/han/coding/creative/iota-sympantos/src/main.rs"}),
+        Some(cwd),
+    );
+    assert!(!dims.contains(&ApprovalDimension::FileOutsideWorkspace));
 }
 
 #[test]

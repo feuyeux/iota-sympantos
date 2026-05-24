@@ -1,5 +1,5 @@
 use super::*;
-use iota_core::kanban::{LinkKind, RunStatus};
+use iota_kanban::{LinkKind, RunStatus};
 
 fn task(id: TaskId, status: Status, title: &str) -> KanbanTaskSnapshot {
     KanbanTaskSnapshot {

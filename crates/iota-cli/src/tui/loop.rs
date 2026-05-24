@@ -7,8 +7,8 @@ use futures_util::StreamExt;
 use tokio::sync::{mpsc, oneshot};
 
 use iota_core::acp::{AcpBackend, AcpPromptOutput};
-use iota_core::kanban::TickReport;
 use iota_core::utils::lock_or_recover;
+use iota_kanban::TickReport;
 
 use super::events::LoopSignal;
 use super::state::{ConversationEntry, ObservabilityMeta};
@@ -176,8 +176,8 @@ impl TuiApp {
         }
     }
 
-    fn run_loop_handle_kanban_ui_event(&mut self, event: iota_core::kanban::KanbanUiEvent) {
-        use iota_core::kanban::KanbanUiEvent;
+    fn run_loop_handle_kanban_ui_event(&mut self, event: iota_kanban::KanbanUiEvent) {
+        use iota_kanban::KanbanUiEvent;
         let text = match event {
             KanbanUiEvent::TaskCreated { id, title } => {
                 format!("Task #{} created: {}", id, title)

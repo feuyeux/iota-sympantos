@@ -1,7 +1,5 @@
-use crate::kanban::event_sourcing::TaskCreatedPayload;
-use crate::kanban::{
-    CreateTaskRequest, KanbanEvent, KanbanStore, LinkKind, SqliteKanbanStore, Status,
-};
+use crate::event_sourcing::TaskCreatedPayload;
+use crate::{CreateTaskRequest, KanbanEvent, KanbanStore, LinkKind, SqliteKanbanStore, Status};
 use std::path::Path;
 
 fn test_store() -> SqliteKanbanStore {

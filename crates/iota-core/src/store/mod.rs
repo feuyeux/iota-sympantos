@@ -6,6 +6,7 @@
 
 pub mod approvals;
 pub mod cache;
+pub mod db;
 pub mod observability;
 
 pub mod ledger;

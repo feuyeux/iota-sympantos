@@ -62,8 +62,11 @@ impl EnginePool {
         self.config.clone()
     }
 
-    pub fn replace_config(&mut self, config: NimiaConfig) {
-        self.config = config;
-        self.engines.clear();
+    pub async fn replace_config(&mut self, config: NimiaConfig) {
+        self.config = config.clone();
+        for engine in self.engines.values() {
+            let mut engine_guard = engine.lock().await;
+            engine_guard.update_config(config.clone()).await;
+        }
     }
 }

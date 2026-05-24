@@ -114,3 +114,70 @@ async fn run_returns_cache_begin_conflict_instead_of_continuing_without_executio
     assert!(err.to_string().contains("execution_id conflict"));
     assert_eq!(request_hash("codex", &cwd, prompt).len(), 64);
 }
+
+#[test]
+fn test_resume_session_restores_backend_and_working_memory() {
+    let ledger_path = unique_test_path("engine-ledger");
+    let memory_path = unique_test_path("engine-memory");
+    let cwd = std::env::current_dir().unwrap();
+    let session_id = "test-session-123";
+
+    // Initialize stores
+    let ledger = SessionLedger::open(&ledger_path).unwrap();
+    let memory = MemoryStore::open(&memory_path).unwrap();
+
+    // 1. Record session and active backend in ledger
+    ledger
+        .ensure_session(session_id, &cwd, Some("claude-code"), None)
+        .unwrap();
+
+    // 2. Insert a turn into memory store as episodic memory
+    let turn_content = "Prompt: write a rust script\nOutput: fn main() {}";
+    memory
+        .insert(crate::memory::MemoryInsert {
+            memory_type: MemoryType::Episodic,
+            facet: None,
+            scope: MemoryScope::Session,
+            scope_id: session_id.to_string(),
+            content: turn_content.to_string(),
+            confidence: 0.8,
+            source_backend: Some("claude-code".to_string()),
+            source_session_id: Some(session_id.to_string()),
+            source_execution_id: None,
+            metadata_json: None,
+            ttl_days: 7,
+            supersedes: None,
+        })
+        .unwrap();
+
+    // Verify latest session query works
+    let latest = ledger.latest_session_for_cwd(&cwd).unwrap().unwrap();
+    assert_eq!(latest, session_id);
+
+    // Create a config
+    let config = NimiaConfig::default();
+
+    // Instantiate engine without session_cwd
+    let mut engine = IotaEngine::create_session(config, false, 1_000, None);
+
+    // Inject our in-memory databases
+    engine.session_ledger_store = Some(ledger);
+    engine.memory_store = Some(memory);
+
+    // Assert that initially engine has no session state
+    assert!(engine.last_used_backend.is_none());
+    assert_eq!(engine.working_memory.render(800), "");
+
+    // Now resume session state with cwd
+    engine.resume_session_state(Some(&cwd));
+
+    // Verify state was correctly restored
+    assert_eq!(engine.engine_session_id, session_id);
+    assert_eq!(engine.last_used_backend, Some(AcpBackend::ClaudeCode));
+
+    // Reconstruct the expected rendered working memory summary
+    let wm_summary = engine.working_memory.render(800);
+    assert!(
+        wm_summary.contains("[claude-code] user: write a rust script; assistant: fn main() {}")
+    );
+}

@@ -7,10 +7,8 @@ pub mod sqlite_store;
 pub mod state_machine;
 pub mod store;
 pub mod types;
+pub mod utils;
 pub mod worker;
-
-#[cfg(test)]
-mod sqlite_store_tests;
 
 pub use bridge::AdvancedBridge;
 pub use dispatcher::{Dispatcher, DispatcherConfig, TickReport};

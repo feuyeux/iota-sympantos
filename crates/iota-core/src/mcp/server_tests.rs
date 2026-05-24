@@ -3,7 +3,8 @@ use serde_json::json;
 
 #[test]
 fn memory_write_schema_requires_confidence() {
-    let write_tool = tools()
+    let write_tool = tool_dispatch::REGISTRY
+        .list_tools()
         .into_iter()
         .find(|tool| tool.get("name").and_then(Value::as_str) == Some("iota_memory_write"))
         .expect("memory write tool should be listed");
@@ -16,7 +17,8 @@ fn memory_write_schema_requires_confidence() {
 
 #[test]
 fn memory_write_schema_declares_type_facet_conditions() {
-    let write_tool = tools()
+    let write_tool = tool_dispatch::REGISTRY
+        .list_tools()
         .into_iter()
         .find(|tool| tool.get("name").and_then(Value::as_str) == Some("iota_memory_write"))
         .expect("memory write tool should be listed");

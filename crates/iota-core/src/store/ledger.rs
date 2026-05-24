@@ -22,14 +22,7 @@ pub struct SessionSummary {
 
 impl SessionLedger {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-        }
-        let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
-        )?;
+        let conn = super::db::open_db(path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (iota_session_id TEXT PRIMARY KEY, cwd TEXT NOT NULL, active_backend TEXT, model TEXT, turn_count INTEGER DEFAULT 0, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL);\nCREATE TABLE IF NOT EXISTS backend_sessions (iota_session_id TEXT NOT NULL, backend TEXT NOT NULL, backend_session_id TEXT, cwd TEXT NOT NULL, created_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL, PRIMARY KEY (iota_session_id, backend, cwd));\nCREATE TABLE IF NOT EXISTS turns (turn_id TEXT PRIMARY KEY, iota_session_id TEXT NOT NULL, backend TEXT NOT NULL, execution_id TEXT, prompt_hash TEXT, output_summary TEXT, status TEXT, started_at INTEGER, finished_at INTEGER);\nCREATE TABLE IF NOT EXISTS handoffs (iota_session_id TEXT NOT NULL, from_backend TEXT, to_backend TEXT, cwd TEXT NOT NULL, summary TEXT NOT NULL, created_at INTEGER NOT NULL);",
         )?;

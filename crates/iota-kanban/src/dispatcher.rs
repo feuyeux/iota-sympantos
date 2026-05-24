@@ -211,11 +211,19 @@ impl Dispatcher {
             // --- Claim TTL exceeded ---
             if elapsed > self.config.claim_ttl.as_secs() {
                 if let Some(entry) = self.workers.get_mut(&task_id) {
-                    let _ = entry.0.kill();
+                    if let Err(e) = entry.0.kill() {
+                        tracing::warn!(task_id, error = %e, "Failed to kill expired worker process");
+                    }
                 }
-                let _ = store.complete_run(&run_id, RunStatus::TimedOut, None);
-                let _ = store.transition(task_id, Status::Ready);
-                let _ = self.materializer.cleanup(task_id);
+                if let Err(e) = store.complete_run(&run_id, RunStatus::TimedOut, None) {
+                    tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete expired run in store");
+                }
+                if let Err(e) = store.transition(task_id, Status::Ready) {
+                    tracing::error!(task_id, error = %e, "Failed to transition task to Ready after claim TTL expiration");
+                }
+                if let Err(e) = self.materializer.cleanup(task_id) {
+                    tracing::warn!(task_id, error = %e, "Failed to cleanup shadow materializer after claim TTL expiration");
+                }
                 report.timed_out += 1;
                 to_remove.push(task_id);
                 continue;
@@ -234,11 +242,19 @@ impl Dispatcher {
 
             if heartbeat_expired {
                 if let Some(entry) = self.workers.get_mut(&task_id) {
-                    let _ = entry.0.kill();
+                    if let Err(e) = entry.0.kill() {
+                        tracing::warn!(task_id, error = %e, "Failed to kill heartbeat-timeout worker process");
+                    }
                 }
-                let _ = store.complete_run(&run_id, RunStatus::TimedOut, None);
-                let _ = store.transition(task_id, Status::Ready);
-                let _ = self.materializer.cleanup(task_id);
+                if let Err(e) = store.complete_run(&run_id, RunStatus::TimedOut, None) {
+                    tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete heartbeat-timeout run in store");
+                }
+                if let Err(e) = store.transition(task_id, Status::Ready) {
+                    tracing::error!(task_id, error = %e, "Failed to transition task to Ready after heartbeat timeout");
+                }
+                if let Err(e) = self.materializer.cleanup(task_id) {
+                    tracing::warn!(task_id, error = %e, "Failed to cleanup shadow materializer after heartbeat timeout");
+                }
                 report.timed_out += 1;
                 to_remove.push(task_id);
                 continue;
@@ -250,7 +266,9 @@ impl Dispatcher {
                     && exit_code.is_none()
                     && let Some(entry) = self.workers.get_mut(&task_id)
                 {
-                    let _ = entry.0.kill();
+                    if let Err(e) = entry.0.kill() {
+                        tracing::warn!(task_id, error = %e, "Failed to kill active worker process after terminal status");
+                    }
                 }
                 let failed = exit_code.map(|c| c != 0).unwrap_or(false);
                 let rs = if failed {
@@ -258,17 +276,25 @@ impl Dispatcher {
                 } else {
                     RunStatus::Completed
                 };
-                let _ = store.complete_run(&run_id, rs, exit_code);
+                if let Err(e) = store.complete_run(&run_id, rs, exit_code) {
+                    tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete run in store");
+                }
                 if failed {
                     // Non-zero exit: transition task back to Ready for retry
-                    let _ = store.transition(task_id, Status::Ready);
+                    if let Err(e) = store.transition(task_id, Status::Ready) {
+                        tracing::error!(task_id, error = %e, "Failed to transition failed task to Ready");
+                    }
                 } else if let Some(status) = terminal_status.as_deref() {
                     match status {
                         "done" => {
-                            let _ = store.transition(task_id, Status::Done);
+                            if let Err(e) = store.transition(task_id, Status::Done) {
+                                tracing::error!(task_id, error = %e, "Failed to transition completed task to Done");
+                            }
                         }
                         "blocked" => {
-                            let _ = store.transition(task_id, Status::Blocked);
+                            if let Err(e) = store.transition(task_id, Status::Blocked) {
+                                tracing::error!(task_id, error = %e, "Failed to transition blocked task to Blocked");
+                            }
                         }
                         _ => {}
                     }
@@ -282,9 +308,13 @@ impl Dispatcher {
                         run_id = %run_id,
                         "worker exited 0 without shadow terminal status; marking Done"
                     );
-                    let _ = store.transition(task_id, Status::Done);
+                    if let Err(e) = store.transition(task_id, Status::Done) {
+                        tracing::error!(task_id, error = %e, "Failed to transition task to Done after zero exit");
+                    }
                 }
-                let _ = self.materializer.cleanup(task_id);
+                if let Err(e) = self.materializer.cleanup(task_id) {
+                    tracing::warn!(task_id, error = %e, "Failed to cleanup shadow materializer");
+                }
                 report.completed += 1;
                 to_remove.push(task_id);
             }
@@ -331,7 +361,9 @@ impl Dispatcher {
             });
 
             if all_done {
-                let _ = store.transition(task.id, Status::Ready);
+                if let Err(e) = store.transition(task.id, Status::Ready) {
+                    tracing::error!(task_id = task.id, error = %e, "Failed to transition unblocked task to Ready");
+                }
             }
         }
 
@@ -391,7 +423,9 @@ impl Dispatcher {
         let run_id = match store.create_run(task.id, &profile) {
             Ok(run_id) => run_id,
             Err(e) => {
-                let _ = store.transition(task.id, Status::Ready);
+                if let Err(te) = store.transition(task.id, Status::Ready) {
+                    tracing::error!(task_id = task.id, error = %te, "Failed to transition task back to Ready after run creation failure");
+                }
                 return Err(e);
             }
         };

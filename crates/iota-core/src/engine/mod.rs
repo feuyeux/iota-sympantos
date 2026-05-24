@@ -98,14 +98,7 @@ impl IotaEngine {
             .and_then(|path| SessionLedger::open(&path).ok());
         // Reuse the latest session for this cwd when available so daemon/TUI restarts preserve
         // continuity; otherwise create a fresh session id.
-        let engine_session_id = session_cwd
-            .and_then(|cwd| {
-                session_ledger_store
-                    .as_ref()
-                    .and_then(|ledger| ledger.latest_session_for_cwd(cwd).ok().flatten())
-            })
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        Self {
+        let mut engine = Self {
             effective_config,
             acp_clients: BTreeMap::new(),
             show_native_protocol: show_native,
@@ -115,12 +108,68 @@ impl IotaEngine {
             cache_store,
             observability_store,
             working_memory: WorkingMemoryBuffer::new(20),
-            engine_session_id,
+            engine_session_id: uuid::Uuid::new_v4().to_string(),
             session_ledger_store,
             last_used_backend: None,
             skill_registry_cache: SkillCache::default(),
             stream_output_sender: None,
             stream_event_sender: None,
+        };
+        engine.resume_session_state(session_cwd);
+        engine
+    }
+
+    /// Load the resumed session active backend and memory turns into the engine.
+    pub fn resume_session_state(&mut self, session_cwd: Option<&Path>) {
+        let mut is_resumed = false;
+        let resumed_session_id = if let Some(cwd) = session_cwd {
+            if let Some(ref ledger) = self.session_ledger_store {
+                let res = ledger.latest_session_for_cwd(cwd).ok().flatten();
+                if res.is_some() {
+                    is_resumed = true;
+                }
+                res
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(session_id) = resumed_session_id {
+            self.engine_session_id = session_id;
+        }
+
+        if is_resumed {
+            if let Some(ref ledger) = self.session_ledger_store {
+                if let Ok(Some(summary)) = ledger.summary(&self.engine_session_id) {
+                    if let Some(backend_str) = summary.active_backend {
+                        if let Ok(backend) = AcpBackend::parse(&backend_str) {
+                            self.last_used_backend = Some(backend);
+                        }
+                    }
+                }
+            }
+            if let Some(ref mem_store) = self.memory_store {
+                if let Ok(turns) = mem_store.get_session_turns(&self.engine_session_id) {
+                    self.working_memory = WorkingMemoryBuffer::new(20);
+                    for (backend_str, content) in turns {
+                        if let Ok(backend) = AcpBackend::parse(&backend_str) {
+                            if let Some(rest) = content.strip_prefix("Prompt: ") {
+                                if let Some(idx) = rest.find("\nOutput: ") {
+                                    let prompt_summary = rest[..idx].to_string();
+                                    let output_summary = rest[idx + 9..].to_string();
+                                    self.working_memory.push_turn_from_resume(
+                                        backend,
+                                        prompt_summary,
+                                        output_summary,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -144,6 +193,21 @@ impl IotaEngine {
         for client in self.acp_clients.values_mut() {
             client.set_event_sender(tx.clone());
         }
+    }
+
+    /// Get reference to the underlying memory store when available.
+    pub fn memory_store(&self) -> Option<&MemoryStore> {
+        self.memory_store.as_ref()
+    }
+
+    /// Get reference to the effective configuration.
+    pub fn effective_config(&self) -> &EffectiveConfig {
+        &self.effective_config
+    }
+
+    /// Get the current engine session ID.
+    pub fn engine_session_id(&self) -> &str {
+        &self.engine_session_id
     }
 
     /// Start ACP clients for every enabled backend in `cwd` and keep them in the client pool.
@@ -261,6 +325,22 @@ impl IotaEngine {
             client.shutdown().await;
         }
         self.record_active_sessions();
+    }
+
+    /// Update the engine configuration and shut down all currently open ACP clients.
+    pub async fn update_config(&mut self, config: crate::config::NimiaConfig) {
+        self.effective_config = crate::config::EffectiveConfig::from_config(&config);
+        self.context_engine = crate::context::ContextEngine::from_config(Some(
+            self.effective_config.context_engine(),
+        ));
+        let embedding_cfg = self.effective_config.embedding_config();
+        if let Some(path) = self.effective_config.memory_db_path() {
+            self.memory_store =
+                crate::memory::MemoryStore::open_with_embedding(path, embedding_cfg).ok();
+        } else {
+            self.memory_store = None;
+        }
+        self.shutdown_open_clients().await;
     }
 
     /// Ensure the ACP client pool contains a process for `(backend, cwd)`.

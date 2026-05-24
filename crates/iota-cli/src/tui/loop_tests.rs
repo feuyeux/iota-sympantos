@@ -5,9 +5,7 @@ use tokio::sync::oneshot;
 
 use crate::tui::Overlay;
 use iota_core::config::NimiaConfig;
-use iota_core::kanban::{
-    CreateTaskRequest, Dispatcher, DispatcherConfig, SqliteKanbanStore, Status,
-};
+use iota_kanban::{CreateTaskRequest, Dispatcher, DispatcherConfig, SqliteKanbanStore, Status};
 
 #[test]
 fn approval_request_closes_existing_overlay_so_prompt_is_visible() {
@@ -71,7 +69,7 @@ fn tick_drives_kanban_dispatcher_lifecycle() {
 
     let runs = app.kanban_store.get_runs(task_id).unwrap();
     assert_eq!(runs.len(), 1, "tick should dispatch ready task");
-    assert_eq!(runs[0].status, iota_core::kanban::RunStatus::Failed);
+    assert_eq!(runs[0].status, iota_kanban::RunStatus::Failed);
     assert_eq!(
         app.kanban_store.get_task(task_id).unwrap().status,
         Status::Ready

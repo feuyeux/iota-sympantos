@@ -1,4 +1,4 @@
-use iota_core::kanban::{
+use iota_kanban::{
     AdvancedBridge, CreateTaskRequest, Dispatcher, KanbanStore, Status, TaskFilter, TaskPatch,
 };
 use std::sync::Arc;
@@ -185,7 +185,7 @@ fn cmd_view(
         Status::Done,
     ];
 
-    let grouped: Vec<Vec<&iota_core::kanban::Task>> = columns
+    let grouped: Vec<Vec<&iota_kanban::Task>> = columns
         .iter()
         .map(|status| tasks.iter().filter(|t| t.status == *status).collect())
         .collect();

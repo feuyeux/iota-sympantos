@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -32,12 +32,7 @@ pub struct ApprovalStore {
 
 impl ApprovalStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-        }
-        let conn = Connection::open(path)
-            .with_context(|| format!("Failed to open approval store {}", path.display()))?;
+        let conn = super::db::open_db(path)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -155,9 +150,6 @@ impl ApprovalStore {
     fn init(&self) -> Result<()> {
         let conn = crate::utils::lock_or_recover(&self.conn);
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
-        )?;
-        conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS approval_requests (
   request_id TEXT PRIMARY KEY,
   execution_id TEXT,
@@ -188,7 +180,35 @@ CREATE INDEX IF NOT EXISTS idx_approval_requests_execution ON approval_requests(
     }
 }
 
-pub fn classify_operation(tool_name: &str, payload: &serde_json::Value) -> Vec<ApprovalDimension> {
+fn clean_lexical_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if let Some(std::path::Component::Normal(_)) = components.last() {
+                    components.pop();
+                } else if let Some(std::path::Component::RootDir)
+                | Some(std::path::Component::Prefix(_)) = components.last()
+                {
+                    // Cannot go above root
+                } else {
+                    components.push(component);
+                }
+            }
+            _ => {
+                components.push(component);
+            }
+        }
+    }
+    components.into_iter().collect()
+}
+
+pub fn classify_operation(
+    tool_name: &str,
+    payload: &serde_json::Value,
+    cwd: Option<&Path>,
+) -> Vec<ApprovalDimension> {
     let mut dimensions = Vec::new();
     let normalized = tool_name.to_lowercase();
 
@@ -206,7 +226,7 @@ pub fn classify_operation(tool_name: &str, payload: &serde_json::Value) -> Vec<A
     // ── Payload field-based checks (structured, not full-JSON string match) ───
     // Collect only the specific string fields that carry path / command / URL
     // values to avoid false positives from unrelated text in the payload.
-    let mut field_values: Vec<String> = Vec::new();
+    let mut field_values: Vec<(String, String)> = Vec::new();
     for key in &[
         "command",
         "cmd",
@@ -218,37 +238,71 @@ pub fn classify_operation(tool_name: &str, payload: &serde_json::Value) -> Vec<A
         "destination",
     ] {
         if let Some(v) = payload.get(key).and_then(|v| v.as_str()) {
-            field_values.push(v.to_lowercase());
+            field_values.push((key.to_string(), v.to_string()));
         }
     }
     // Also check top-level string payload if the whole value is a string.
     if let Some(v) = payload.as_str() {
-        field_values.push(v.to_lowercase());
+        field_values.push(("".to_string(), v.to_string()));
     }
 
-    for value in &field_values {
-        if (value.contains("http://") || value.contains("https://") || value.contains("ftp://"))
+    for (key, value) in &field_values {
+        let value_lower = value.to_lowercase();
+        if (value_lower.contains("http://")
+            || value_lower.contains("https://")
+            || value_lower.contains("ftp://"))
             && !dimensions.contains(&ApprovalDimension::Network)
         {
             dimensions.push(ApprovalDimension::Network);
         }
-        // Path traversal / system directory access
-        if (value.contains("../")
-            || value.contains("..\\")
-            || value.starts_with("/etc/")
-            || value.starts_with("/root/")
-            || value.contains("c:\\windows")
-            || value.contains("c:/windows"))
+
+        // Strict path analysis if it's a known path field or a relative-path traversal lookalike
+        let is_path_field =
+            key == "path" || key == "file" || key == "target" || key == "destination";
+        let has_traversal_indicators = value.contains("../") || value.contains("..\\");
+
+        if is_path_field || has_traversal_indicators {
+            let path_val = Path::new(value);
+            let absolute_path = if path_val.is_absolute() {
+                clean_lexical_path(path_val)
+            } else {
+                match cwd {
+                    Some(cwd_path) => clean_lexical_path(&cwd_path.join(path_val)),
+                    None => clean_lexical_path(path_val),
+                }
+            };
+
+            if let Some(cwd_path) = cwd {
+                let clean_cwd = clean_lexical_path(cwd_path);
+                // If the cleaned absolute path doesn't start with clean_cwd, it's outside
+                if absolute_path.is_absolute() && !absolute_path.starts_with(&clean_cwd) {
+                    if !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace) {
+                        dimensions.push(ApprovalDimension::FileOutsideWorkspace);
+                    }
+                }
+            }
+        }
+
+        // Fallback legacy blacklists for commands/general fields
+        let has_already_checked_path = is_path_field && cwd.is_some();
+        if !has_already_checked_path
+            && (value_lower.contains("../")
+                || value_lower.contains("..\\")
+                || value_lower.starts_with("/etc/")
+                || value_lower.starts_with("/root/")
+                || value_lower.contains("c:\\windows")
+                || value_lower.contains("c:/windows"))
             && !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace)
         {
             dimensions.push(ApprovalDimension::FileOutsideWorkspace);
         }
+
         // Privilege escalation indicators
-        if (value.starts_with("sudo ")
-            || value.contains(" sudo ")
-            || value.contains("runas")
-            || value.contains("administrator")
-            || value.contains("privilege"))
+        if (value_lower.starts_with("sudo ")
+            || value_lower.contains(" sudo ")
+            || value_lower.contains("runas")
+            || value_lower.contains("administrator")
+            || value_lower.contains("privilege"))
             && !dimensions.contains(&ApprovalDimension::PrivilegeEscalation)
         {
             dimensions.push(ApprovalDimension::PrivilegeEscalation);

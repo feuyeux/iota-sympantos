@@ -1,3 +1,4 @@
+pub mod adapters;
 pub mod backend;
 pub mod context;
 pub mod effective;
@@ -7,6 +8,7 @@ pub mod model;
 pub mod paths;
 pub mod schema;
 
+pub use adapters::{BackendAdapter, get_adapter};
 #[allow(unused_imports)]
 pub use backend::BackendVersionMapping;
 pub use backend::{

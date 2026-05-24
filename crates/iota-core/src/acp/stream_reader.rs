@@ -24,6 +24,7 @@ pub(super) struct PromptReadOptions<'a> {
     pub(super) stream_tx: Option<&'a mpsc::Sender<String>>,
     pub(super) event_tx: Option<&'a mpsc::Sender<RuntimeEvent>>,
     pub(super) execution_id: Option<&'a str>,
+    pub(super) cwd: &'a std::path::Path,
 }
 
 pub(super) async fn read_prompt_events_for_id<R>(
@@ -43,6 +44,7 @@ where
         stream_tx,
         event_tx,
         execution_id,
+        cwd,
     } = options;
     let mut output = String::new();
     let mut events = Vec::new();
@@ -113,6 +115,7 @@ where
                     execution_id,
                     backend,
                     tool_whitelist,
+                    Some(cwd),
                 )
                 .await?;
                 push_event(
@@ -188,7 +191,13 @@ fn push_event(
     event: RuntimeEvent,
 ) {
     if let Some(tx) = event_tx {
-        let _ = tx.try_send(event.clone());
+        if let Err(e) = tx.try_send(event.clone()) {
+            tracing::error!(
+                error = %e,
+                event = ?event,
+                "Failed to send RuntimeEvent to TUI; event may have been dropped"
+            );
+        }
     }
     events.push(event);
 }

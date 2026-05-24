@@ -286,7 +286,11 @@ async fn handle_message(
             let mut config = read_config().context("Failed to read config")?;
             apply_desktop_model_update(&mut config, backend, model);
             save_config(&config).context("Failed to save config")?;
-            engine_pool.lock().await.replace_config(config.clone());
+            engine_pool
+                .lock()
+                .await
+                .replace_config(config.clone())
+                .await;
             send_message(
                 &writer,
                 &DaemonServerMessage::ConfigSnapshot {

@@ -12,6 +12,7 @@ dirs.workspace = true
 futures-util.workspace = true
 hostname.workspace = true
 iota-core = { path = "../iota-core" }
+iota-kanban = { workspace = true }
 pulldown-cmark.workspace = true
 ratatui.workspace = true
 reqwest.workspace = true

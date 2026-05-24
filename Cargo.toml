@@ -3,6 +3,7 @@ members = [
     "crates/iota-core",
     "crates/iota-cli",
     "crates/iota-desktop/src-tauri",
+    "crates/iota-kanban",
 ]
 resolver = "3"
 
@@ -40,3 +41,4 @@ unicode-segmentation = "1.12"
 unicode-width = "0.2"
 urlencoding = "2.1"
 uuid = { version = "1.8", features = ["v4", "serde"] }
+iota-kanban = { path = "crates/iota-kanban" }

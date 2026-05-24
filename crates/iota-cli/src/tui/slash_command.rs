@@ -20,6 +20,7 @@ pub(super) enum SlashAction {
     Quit,
     SubmitToBackend,
     Kanban,
+    Memory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,8 +74,7 @@ const COMMAND_SPECS: &[SlashCommandSpec] = &[
     // Codex ACP: NOT confirmed (no slash handling found in app-server source)
     // Gemini ACP: does NOT handle /compact (no CompressCommand in acpCommandHandler)
     submit("compact", &["compress"], BACKEND_HERMES | BACKEND_OPENCODE),
-    // Gemini ACP confirmed: /memory (acpCommandHandler.ts MemoryCommand)
-    submit("memory", &[], BACKEND_GEMINI),
+    local("memory", &["mem"], SlashAction::Memory),
     // Hermes ACP confirmed: /queue (_cmd_queue)
     submit("queue", &["q"], BACKEND_HERMES),
     // Hermes ACP confirmed: /steer (_cmd_steer)

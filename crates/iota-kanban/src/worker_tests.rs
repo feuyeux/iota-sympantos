@@ -1,5 +1,5 @@
-use crate::kanban::types::{Comment, Run, RunStatus, Status, Task};
-use crate::kanban::worker::{
+use crate::types::{Comment, Run, RunStatus, Status, Task};
+use crate::worker::{
     WorkerHandle, build_worker_context, configure_process_tree_root, write_context_or_kill,
 };
 use std::process::{Command, Stdio};

@@ -80,12 +80,7 @@ impl serde::Serialize for ExecutionStatus {
 
 impl CacheStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-        }
-        let conn = Connection::open(path)
-            .with_context(|| format!("Failed to open cache store {}", path.display()))?;
+        let conn = super::db::open_db(path)?;
         let cfg = crate::config::store_config();
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -206,7 +201,6 @@ impl CacheStore {
 
     fn init(&self) -> Result<()> {
         let conn = self.lock_conn();
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cache_executions (
     execution_id  TEXT PRIMARY KEY,

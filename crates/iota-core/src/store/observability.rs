@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,15 +74,7 @@ pub struct TokenPercentiles {
 
 impl ObservabilityStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-        }
-        let conn = Connection::open(path)
-            .with_context(|| format!("Failed to open observability store {}", path.display()))?;
+        let conn = super::db::open_db(path)?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -285,7 +277,6 @@ impl ObservabilityStore {
 
     fn init(&self) -> Result<()> {
         let conn = crate::utils::lock_or_recover(&self.conn);
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS token_usage_events (
               id TEXT PRIMARY KEY,

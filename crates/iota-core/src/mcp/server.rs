@@ -80,7 +80,7 @@ fn handle_request(
             id,
             json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{}},"serverInfo":{"name":"iota-context","version":env!("CARGO_PKG_VERSION")}}),
         ),
-        "tools/list" => ok(id, json!({"tools": tools()})),
+        "tools/list" => ok(id, json!({"tools": tool_dispatch::REGISTRY.list_tools()})),
         "tools/call" => {
             let params = request.get("params").unwrap_or(&Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -211,81 +211,6 @@ fn read_resource(uri: &str, ctx: &ToolContext) -> Result<Value, String> {
         ["workspace", _, "rules"] => Ok(json!({"cwd": ctx.workspace.display().to_string()})),
         _ => Err(format!("unknown resource {}", uri)),
     }
-}
-
-fn tools() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "iota_memory_search",
-            "description": "Search unified iota memory by keyword. Returns matching records across all types and scopes.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search keyword"},
-                    "limit": {"type": "integer", "description": "Max results (default 20)"},
-                    "mode": {"type": "string", "enum": ["hybrid", "vector", "keyword"], "description": "Search strategy (default hybrid)"}
-                }
-            }
-        }),
-        json!({
-            "name": "iota_memory_write",
-            "description": "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id is optional. Defaults match Engine recall: user → \"local-user\", project → current cwd path, session → source_session_id/session_id if provided.",
-            "inputSchema": {
-                "type": "object",
-                "required": ["content", "type", "scope", "confidence"],
-                "properties": {
-                    "content":    {"type": "string"},
-                    "type":       {"type": "string", "enum": ["semantic", "episodic", "procedural"]},
-                    "facet":      {"type": "string", "enum": ["identity", "preference", "strategic", "domain"]},
-                    "scope":      {"type": "string", "enum": ["user", "project", "session", "global"]},
-                    "scope_id":   {"type": "string"},
-                    "merge_mode": {"type": "string", "enum": ["auto", "add", "update", "none"]},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "ttl_days":   {"type": "integer"},
-                    "metadata":   {"type": "object"},
-                    "source_backend": {"type": "string"},
-                    "source_session_id": {"type": "string"},
-                    "source_execution_id": {"type": "string"},
-                    "supersedes": {"type": "string"}
-                },
-                "allOf": [
-                    {
-                        "if": {"properties": {"type": {"const": "semantic"}}, "required": ["type"]},
-                        "then": {"required": ["facet"]}
-                    },
-                    {
-                        "if": {"properties": {"type": {"enum": ["episodic", "procedural"]}}, "required": ["type"]},
-                        "then": {"not": {"required": ["facet"]}}
-                    }
-                ]
-            }
-        }),
-        json!({
-            "name": "iota_skill_search",
-            "description": "Search available iota skill index for the current backend.",
-            "inputSchema": {"type": "object", "properties": {"backend": {"type": "string"}}}
-        }),
-        json!({
-            "name": "iota_skill_load",
-            "description": "Load the full body of a named iota skill.",
-            "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}
-        }),
-        json!({
-            "name": "iota_session_summary",
-            "description": "Read summary of the current iota session.",
-            "inputSchema": {"type": "object", "properties": {"session_id": {"type": "string"}}}
-        }),
-        json!({
-            "name": "iota_handoff_publish",
-            "description": "Publish a handoff summary when switching backends.",
-            "inputSchema": {"type": "object", "additionalProperties": true}
-        }),
-        json!({
-            "name": "iota_handoff_read",
-            "description": "Read the latest handoff for this session.",
-            "inputSchema": {"type": "object", "additionalProperties": true}
-        }),
-    ]
 }
 
 fn ok(id: Value, result: Value) -> Value {

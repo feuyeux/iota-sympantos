@@ -1,5 +1,5 @@
 use super::*;
-use iota_core::kanban::{CreateTaskRequest, Status};
+use iota_kanban::{CreateTaskRequest, Status};
 
 fn fake_hermes_echo_spec(tmp: &Path) -> PathBuf {
     if cfg!(windows) {

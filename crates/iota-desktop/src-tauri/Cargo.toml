@@ -23,5 +23,6 @@ dirs.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
 iota-core = { path = "../../iota-core" }
+iota-kanban = { path = "../../iota-kanban" }
 
 

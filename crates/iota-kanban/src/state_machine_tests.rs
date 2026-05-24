@@ -1,5 +1,5 @@
-use crate::kanban::state_machine::validate_transition;
-use crate::kanban::Status;
+use crate::Status;
+use crate::state_machine::validate_transition;
 
 #[test]
 fn valid_transitions() {

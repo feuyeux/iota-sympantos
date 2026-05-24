@@ -186,6 +186,7 @@ impl AcpClient {
                     stream_tx: stream_tx.as_ref(),
                     event_tx: event_tx.as_ref(),
                     execution_id,
+                    cwd: &self.cwd,
                 },
             )
             .await?;
@@ -303,9 +304,12 @@ async fn terminate_child_tree(child: &mut Child) {
 
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &_pid.to_string(), "/T", "/F"])
-            .output();
+        let pid = _pid;
+        tokio::task::spawn_blocking(move || {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .output();
+        });
     }
 
     #[cfg(not(windows))]

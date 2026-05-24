@@ -204,6 +204,22 @@ impl WorkingMemoryBuffer {
         }
     }
 
+    pub fn push_turn_from_resume(
+        &mut self,
+        backend: AcpBackend,
+        prompt_summary: String,
+        output_summary: String,
+    ) {
+        self.turns.push_back(WorkingMemoryTurn {
+            backend: backend.to_string(),
+            prompt_summary,
+            output_summary,
+        });
+        while self.turns.len() > self.max_turns {
+            self.turns.pop_front();
+        }
+    }
+
     pub fn render(&self, budget: usize) -> String {
         let mut selected = Vec::new();
         let mut current_len = 0;
