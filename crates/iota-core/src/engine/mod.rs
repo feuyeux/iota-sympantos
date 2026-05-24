@@ -146,11 +146,6 @@ impl IotaEngine {
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn shutdown_open_clients_in_place(&mut self) {
-        self.shutdown_open_clients().await;
-    }
-
     /// Start ACP clients for every enabled backend in `cwd` and keep them in the client pool.
     pub async fn warm_all_enabled_backends(&mut self, cwd: PathBuf) -> Result<usize> {
         let mut handles = Vec::new();

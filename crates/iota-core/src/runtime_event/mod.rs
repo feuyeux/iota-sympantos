@@ -198,11 +198,6 @@ impl RuntimeEvent {
     }
 }
 
-#[allow(dead_code)]
-pub fn map_acp_event(method: &str, params: Option<&Value>) -> Option<RuntimeEvent> {
-    map_acp_events(method, params).into_iter().next()
-}
-
 pub fn map_acp_events(method: &str, params: Option<&Value>) -> Vec<RuntimeEvent> {
     let Some(params) = params else {
         return Vec::new();

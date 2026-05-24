@@ -122,10 +122,6 @@ CLI / TUI
 | [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
 | [`docs/observability.md`](docs/observability.md) | logs / trace / metrics |
 | [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
-| [`docs/hermes-kanban-guide.md`](docs/hermes-kanban-guide.md) | Kanban 完整指南 |
-| [`docs/hermes-kanban-example.md`](docs/hermes-kanban-example.md) | Hermes Agent 使用 Kanban 示例 |
-| [`docs/hermes-kanban-sequence-diagrams.md`](docs/hermes-kanban-sequence-diagrams.md) | Kanban 交互时序图 |
-| [`docs/kanban-architecture-deep-dive.md`](docs/kanban-architecture-deep-dive.md) | Kanban 架构深度解析 |
 
 ## 开发
 
