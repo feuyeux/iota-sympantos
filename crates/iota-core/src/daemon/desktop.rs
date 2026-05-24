@@ -523,11 +523,8 @@ pub(crate) fn backend_check_result(config: &NimiaConfig, backend: AcpBackend) ->
             details: "missing acp.command".to_string(),
         };
     }
-    if !api_key_configured(section) {
-        return BackendCheck {
-            ok: false,
-            details: "missing API key".to_string(),
-        };
+    if let Some(details) = missing_backend_secret_detail(backend, section) {
+        return BackendCheck { ok: false, details };
     }
     BackendCheck {
         ok: true,
@@ -535,7 +532,41 @@ pub(crate) fn backend_check_result(config: &NimiaConfig, backend: AcpBackend) ->
     }
 }
 
-fn api_key_configured(section: &BackendConfig) -> bool {
+fn missing_backend_secret_detail(backend: AcpBackend, section: &BackendConfig) -> Option<String> {
+    match backend {
+        AcpBackend::OpenCode => None,
+        AcpBackend::Hermes => {
+            if model_api_key_configured(section) {
+                None
+            } else {
+                Some("missing model.api_key for Hermes provider".to_string())
+            }
+        }
+        AcpBackend::ClaudeCode => {
+            if model_api_key_configured(section) {
+                None
+            } else {
+                Some("missing model.api_key for ANTHROPIC_API_KEY".to_string())
+            }
+        }
+        AcpBackend::Codex => {
+            if model_api_key_configured(section) {
+                None
+            } else {
+                Some("missing model.api_key for OPENAI_API_KEY/ROUTER_API_KEY".to_string())
+            }
+        }
+        AcpBackend::Gemini => {
+            if model_api_key_configured(section) {
+                None
+            } else {
+                Some("missing model.api_key for GEMINI_API_KEY".to_string())
+            }
+        }
+    }
+}
+
+fn model_api_key_configured(section: &BackendConfig) -> bool {
     section
         .model
         .as_ref()

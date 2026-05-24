@@ -1,4 +1,4 @@
-use super::validate_transition;
+use crate::kanban::state_machine::validate_transition;
 use crate::kanban::Status;
 
 #[test]

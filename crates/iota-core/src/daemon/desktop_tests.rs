@@ -153,7 +153,30 @@ fn backend_check_fails_for_missing_api_key() {
     let result = backend_check_result(&config, AcpBackend::Gemini);
 
     assert!(!result.ok);
-    assert!(result.details.contains("missing API key"));
+    assert!(result.details.contains("GEMINI_API_KEY"));
+}
+
+#[test]
+fn backend_check_allows_opencode_without_api_key() {
+    let config = NimiaConfig {
+        opencode: Some(BackendConfig {
+            enabled: true,
+            acp: Some(CommandConfig {
+                command: "npx".to_string(),
+                args: vec![],
+            }),
+            model: Some(ModelConfig {
+                api_key: None,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let result = backend_check_result(&config, AcpBackend::OpenCode);
+
+    assert!(result.ok);
 }
 
 #[test]
