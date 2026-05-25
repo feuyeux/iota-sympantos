@@ -516,6 +516,11 @@ fn parse_memory_context_section(body: &str) -> Option<DesktopContextSection> {
         let Some(open_end) = after_open_start.find('>') else {
             break;
         };
+        let tag_suffix = &after_open_start["<memory".len()..open_end];
+        if !tag_suffix.is_empty() && !tag_suffix.starts_with(char::is_whitespace) {
+            rest = &after_open_start[open_end + 1..];
+            continue;
+        }
         let content_start = open_start + open_end + 1;
         let Some(close_start_relative) = rest[content_start..].find("</memory>") else {
             break;

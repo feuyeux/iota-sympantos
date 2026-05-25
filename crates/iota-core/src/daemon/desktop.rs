@@ -655,14 +655,12 @@ fn memory_buckets_for_scope(
     thresholds: RecallThresholdsConfig,
 ) -> Result<DesktopMemoryBuckets> {
     let buckets = match scope_mode {
-        DesktopMemoryScopeMode::Workspace => {
-            store.recall_buckets_with_thresholds(
-                "local-user",
-                &cwd.display().to_string(),
-                session_id,
-                thresholds,
-            )?
-        }
+        DesktopMemoryScopeMode::Workspace => store.recall_buckets_with_thresholds(
+            "local-user",
+            &cwd.display().to_string(),
+            session_id,
+            thresholds,
+        )?,
         DesktopMemoryScopeMode::All => store.all_scope_buckets(100)?,
     };
     Ok(DesktopMemoryBuckets::from(buckets))

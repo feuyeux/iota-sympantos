@@ -1,6 +1,8 @@
 use super::*;
 use crate::config::{ContextEngineConfig, ContextInjection, NimiaConfig, RecallThresholdsConfig};
-use crate::memory::{MemoryFacet, MemoryInsert, MemoryMergeMode, MemoryScope, MemoryStore, MemoryType};
+use crate::memory::{
+    MemoryFacet, MemoryInsert, MemoryMergeMode, MemoryScope, MemoryStore, MemoryType,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -178,8 +180,7 @@ async fn memory_context_snapshot_workspace_uses_configured_recall_thresholds() {
         1000,
     )));
 
-    let snapshot =
-        memory_context_snapshot(cwd, DesktopMemoryScopeMode::Workspace, pool).await;
+    let snapshot = memory_context_snapshot(cwd, DesktopMemoryScopeMode::Workspace, pool).await;
     assert!(snapshot.memory.identity.is_empty());
 }
 
@@ -198,8 +199,7 @@ async fn memory_context_snapshot_reports_injection_off_as_disabled() {
         1000,
     )));
 
-    let snapshot =
-        memory_context_snapshot(cwd, DesktopMemoryScopeMode::Workspace, pool).await;
+    let snapshot = memory_context_snapshot(cwd, DesktopMemoryScopeMode::Workspace, pool).await;
     assert!(!snapshot.context_engine.enabled);
 }
 

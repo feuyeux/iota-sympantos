@@ -237,3 +237,26 @@ fn recent_context_snapshot_parses_memory_sections_with_attributes() {
             .any(|section| section.name == "memory" && section.preview.contains("User is Han"))
     );
 }
+
+#[test]
+fn recent_context_snapshot_ignores_memory_tools_when_parsing_memory_sections() {
+    let mut engine = test_engine();
+    let cwd = std::env::current_dir().unwrap();
+    engine.capture_runtime_context_snapshot(
+        "turn-memory-tools".to_string(),
+        AcpBackend::Codex,
+        cwd,
+        None,
+        "<iota-context>\n<memory-tools>\nUse iota_memory_write.\n</memory-tools>\n\n<memory type=\"identity\">\n- User is Han\n</memory>\n</iota-context>\n\nUser request:\nhello".to_string(),
+    );
+
+    let snapshot = engine.recent_runtime_context_snapshot().unwrap();
+    let memory_section = snapshot
+        .sections
+        .iter()
+        .find(|section| section.name == "memory")
+        .expect("memory section should be parsed");
+    assert!(memory_section.preview.contains("User is Han"));
+    assert!(!memory_section.preview.contains("memory-tools"));
+    assert!(!memory_section.preview.contains("iota_memory_write"));
+}

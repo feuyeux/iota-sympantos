@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:clean": "../../scripts/dev-desktop.sh",
+    "dev:clean": "node ../../scripts/dev-desktop.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
