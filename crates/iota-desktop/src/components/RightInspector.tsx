@@ -20,11 +20,12 @@ type Props = {
   turn?: DesktopTurn;
   observability?: ObservabilitySummary | null;
   onApprovalDecision: (approvalId: string, approved: boolean) => void;
+  width?: number;
 };
 
 type InspectorTab = "observability" | "memory" | "context";
 
-export function RightInspector({ turn, observability, onApprovalDecision }: Props) {
+export function RightInspector({ turn, observability, onApprovalDecision, width = 640 }: Props) {
   const [cancelling, setCancelling] = useState(false);
   const [activeTab, setActiveTab] = useState<InspectorTab>("observability");
 
@@ -378,7 +379,10 @@ export function RightInspector({ turn, observability, onApprovalDecision }: Prop
   };
 
   return (
-    <aside className="w-[640px] border-l border-white/10 bg-[#070a13] overflow-hidden flex flex-col">
+    <aside
+      className="shrink-0 border-l border-white/10 bg-[#070a13] overflow-hidden flex flex-col"
+      style={{ width }}
+    >
       <div className="border-b border-white/10 bg-[#070a13] p-3">
         <nav className="grid grid-cols-3 rounded-md border border-white/5 bg-white/[0.03] p-1">
           <button

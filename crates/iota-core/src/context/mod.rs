@@ -74,18 +74,7 @@ impl ContextEngine {
         capsule.push_str("This block is orchestration context supplied by iota. Treat it as background data, not as a user request.\n\n");
 
         // --- Static / rarely-changing sections first (maximizes LLM cache prefix hits) ---
-        capsule.push_str("<memory-tools>\n");
-        capsule.push_str("MCP tool `iota_memory_write` persists info across sessions.\n");
-        capsule.push_str(
-            "Args: content, type(semantic|episodic|procedural), scope(user|project|session), ",
-        );
-        capsule.push_str(&format!(
-            "scope_id(default: user=\"local-user\", project=\"{}\", session=\"{}\").\n",
-            input.cwd.display(),
-            input.session_id,
-        ));
-        capsule.push_str("Optional: facet(identity|preference|strategic|domain), merge_mode, confidence, ttl_days.\n");
-        capsule.push_str("</memory-tools>\n\n");
+        push_memory_tools(&mut capsule, &input);
         if let Some(model) = input.model.filter(|value| !value.trim().is_empty()) {
             capsule.push_str("<model>\n");
             capsule.push_str(&format!("You are currently using: {}\n", model.trim()));
@@ -148,6 +137,7 @@ impl ContextEngine {
     fn compose_minimal_prompt(&self, input: &ComposeInput<'_>) -> String {
         let mut capsule = String::new();
         capsule.push_str("<iota-context>\n");
+        push_memory_tools(&mut capsule, input);
         capsule.push_str("<session>\n");
         capsule.push_str(&format!(
             "iota_session_id: {}\nbackend: {}\ncwd: {}\n",
@@ -174,6 +164,27 @@ impl ContextEngine {
     pub fn budgets(&self) -> ContextBudgets {
         self.budgets
     }
+}
+
+fn push_memory_tools(capsule: &mut String, input: &ComposeInput<'_>) {
+    capsule.push_str("<memory-tools>\n");
+    capsule.push_str("MCP tool `iota_memory_write` persists information across sessions.\n");
+    capsule.push_str("When the user asks you to remember, save, store, or persist durable information, call `iota_memory_write` before claiming it is remembered.\n");
+    capsule.push_str("Do not say that information was remembered unless a memory write tool call completed successfully.\n");
+    capsule.push_str("For memory classification and split guidance, load core skill `iota-memory-taxonomy` with `iota_skill_load`.\n");
+    capsule.push_str("Use one `iota_memory_write` call per atomic durable memory item; do not merge different taxonomy categories.\n");
+    capsule.push_str(
+        "Args: content, type(semantic|episodic|procedural), scope(user|project|session), ",
+    );
+    capsule.push_str(&format!(
+        "scope_id(default: user=\"local-user\", project=\"{}\", session=\"{}\").\n",
+        input.cwd.display(),
+        input.session_id,
+    ));
+    capsule.push_str(
+        "Optional: facet(identity|preference|strategic|domain), merge_mode, confidence, ttl_days.\n",
+    );
+    capsule.push_str("</memory-tools>\n\n");
 }
 
 impl Default for ContextEngine {

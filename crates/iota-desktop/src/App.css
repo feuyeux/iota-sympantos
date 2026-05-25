@@ -17,3 +17,64 @@ select,
 textarea {
   font: inherit;
 }
+
+/* --- Iota Logo Animations & Styles --- */
+@keyframes iota-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.95;
+    filter: drop-shadow(0 0 4px rgba(255, 0, 127, 0.4)) drop-shadow(0 0 1px rgba(189, 52, 254, 0.3));
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+    filter: drop-shadow(0 0 10px rgba(255, 0, 127, 0.7)) drop-shadow(0 0 4px rgba(189, 52, 254, 0.5));
+  }
+}
+
+@keyframes iota-rotate-clockwise {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes iota-rotate-counter {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+.iota-logo-core {
+  transform-origin: 50px 50px;
+  animation: iota-pulse 3s ease-in-out infinite;
+}
+
+.iota-logo-ring-outer {
+  transform-origin: 50px 50px;
+  animation: iota-rotate-clockwise 14s linear infinite;
+}
+
+.iota-logo-ring-inner {
+  transform-origin: 50px 50px;
+  animation: iota-rotate-counter 10s linear infinite;
+}
+
+/* Interactive Hover States - Speed up animations & increase glow */
+.iota-logo-container:hover .iota-logo-core {
+  animation: iota-pulse 1.2s ease-in-out infinite;
+}
+
+.iota-logo-container:hover .iota-logo-ring-outer {
+  animation: iota-rotate-clockwise 4s linear infinite;
+}
+
+.iota-logo-container:hover .iota-logo-ring-inner {
+  animation: iota-rotate-counter 3s linear infinite;
+}
+

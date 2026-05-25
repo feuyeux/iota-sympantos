@@ -146,3 +146,53 @@ fn context_with_handoff_includes_handoff_section() {
     assert!(prompt.contains("<handoff>"));
     assert!(prompt.contains("auth module"));
 }
+
+#[test]
+fn memory_tools_points_model_to_core_memory_taxonomy_skill() {
+    let engine = ContextEngine {
+        enabled: true,
+        budgets: ContextBudgets::default(),
+    };
+    let working_memory = WorkingMemoryBuffer::new(2);
+    let prompt = engine.compose_effective_prompt(ComposeInput {
+        backend: AcpBackend::Codex,
+        cwd: Path::new("."),
+        session_id: "s",
+        model: Some("m"),
+        prompt: "remember durable memory",
+        memory: None,
+        skills: None,
+        working_memory: &working_memory,
+        handoff: None,
+        workspace: None,
+    });
+
+    assert!(prompt.contains("iota-memory-taxonomy"));
+    assert!(prompt.contains("iota_skill_load"));
+    assert!(prompt.contains("iota_memory_write"));
+}
+
+#[test]
+fn minimal_context_still_includes_memory_write_contract() {
+    let engine = ContextEngine {
+        enabled: true,
+        budgets: ContextBudgets::default(),
+    };
+    let working_memory = WorkingMemoryBuffer::new(2);
+    let prompt = engine.compose_effective_prompt(ComposeInput {
+        backend: AcpBackend::Hermes,
+        cwd: Path::new("."),
+        session_id: "s",
+        model: None,
+        prompt: "ping",
+        memory: None,
+        skills: None,
+        working_memory: &working_memory,
+        handoff: None,
+        workspace: None,
+    });
+
+    assert!(prompt.contains("<memory-tools>"));
+    assert!(prompt.contains("iota_memory_write"));
+    assert!(prompt.contains("Do not say that information was remembered"));
+}

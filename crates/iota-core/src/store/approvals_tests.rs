@@ -67,7 +67,19 @@ fn classify_privilege_escalation_from_sudo() {
 
 #[test]
 fn classify_workspace_boundary_path() {
-    let cwd = Path::new("/Users/han/coding/creative/iota-sympantos");
+    let (cwd, inside_path, outside_path) = if cfg!(windows) {
+        (
+            Path::new("C:\\Users\\han\\coding\\creative\\iota-sympantos"),
+            "C:\\Users\\han\\coding\\creative\\iota-sympantos\\src\\main.rs",
+            "C:\\etc\\passwd",
+        )
+    } else {
+        (
+            Path::new("/Users/han/coding/creative/iota-sympantos"),
+            "/Users/han/coding/creative/iota-sympantos/src/main.rs",
+            "/etc/passwd",
+        )
+    };
 
     // Relative path, inside workspace
     let dims = classify_operation("file_write", &json!({"path": "src/main.rs"}), Some(cwd));
@@ -86,15 +98,11 @@ fn classify_workspace_boundary_path() {
     assert!(dims.contains(&ApprovalDimension::FileOutsideWorkspace));
 
     // Absolute path, outside workspace
-    let dims = classify_operation("file_write", &json!({"path": "/etc/passwd"}), Some(cwd));
+    let dims = classify_operation("file_write", &json!({"path": outside_path}), Some(cwd));
     assert!(dims.contains(&ApprovalDimension::FileOutsideWorkspace));
 
     // Absolute path, inside workspace
-    let dims = classify_operation(
-        "file_write",
-        &json!({"path": "/Users/han/coding/creative/iota-sympantos/src/main.rs"}),
-        Some(cwd),
-    );
+    let dims = classify_operation("file_write", &json!({"path": inside_path}), Some(cwd));
     assert!(!dims.contains(&ApprovalDimension::FileOutsideWorkspace));
 }
 

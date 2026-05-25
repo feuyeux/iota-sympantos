@@ -1,105 +1,10 @@
-use std::path::Path;
-
 use crate::acp::AcpBackend;
-use crate::memory::{MemoryFacet, MemoryInsert, MemoryScope, MemoryType, RecallBuckets};
+use crate::memory::{MemoryInsert, MemoryScope, MemoryType, RecallBuckets};
 use crate::utils::summarize;
 
 use super::IotaEngine;
 
-struct ClassifiedMemory {
-    memory_type: MemoryType,
-    facet: Option<MemoryFacet>,
-    scope: MemoryScope,
-    confidence: f64,
-    ttl_days: i64,
-}
-
-impl ClassifiedMemory {
-    fn scope_id(&self, cwd: &Path) -> String {
-        match self.scope {
-            MemoryScope::User => "user-sympantos".to_string(),
-            MemoryScope::Project => cwd
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("iota-sympantos")
-                .to_string(),
-            MemoryScope::Session => "session".to_string(),
-            MemoryScope::Global => "global".to_string(),
-        }
-    }
-}
-
 impl IotaEngine {
-    /// Extract simple keyword-based memories directly from user prompts.
-    ///
-    /// This is intentionally conservative: it only handles obvious memory statements and leaves
-    /// richer memory writes to the `iota_memory_write` MCP tool.
-    pub(super) fn extract_keyword_memories(
-        &self,
-        backend: AcpBackend,
-        cwd: &Path,
-        prompt: &str,
-        execution_id: Option<&str>,
-    ) -> Vec<String> {
-        let Some(store) = &self.memory_store else {
-            return Vec::new();
-        };
-        classify_memory_prompt(prompt)
-            .into_iter()
-            .filter_map(|classified| {
-                let scope_id = classified.scope_id(cwd);
-                self.log_engine_event(
-                    execution_id,
-                    backend,
-                    "info",
-                    "memory.write.call",
-                    serde_json::json!({
-                        "source": "engine-keyword",
-                        "type": classified.memory_type.as_str(),
-                        "facet": classified.facet.as_ref().map(MemoryFacet::as_str),
-                        "scope": classified.scope.as_str(),
-                        "scope_id": scope_id.clone(),
-                        "confidence": classified.confidence,
-                        "content_chars": prompt.trim().chars().count(),
-                    }),
-                );
-                tracing::info!(
-                    backend = %backend,
-                    execution_id = execution_id.unwrap_or("-"),
-                    session_id = %self.engine_session_id,
-                    memory_type = %classified.memory_type.as_str(),
-                    facet = classified.facet.as_ref().map(MemoryFacet::as_str).unwrap_or("-"),
-                    scope = %classified.scope.as_str(),
-                    scope_id = %scope_id,
-                    source = "engine-keyword",
-                    "engine structured memory write started"
-                );
-                store
-                    .insert(MemoryInsert {
-                        memory_type: classified.memory_type.clone(),
-                        facet: classified.facet.clone(),
-                        scope: classified.scope.clone(),
-                        scope_id,
-                        content: prompt.trim().to_string(),
-                        confidence: classified.confidence,
-                        source_backend: Some(backend.to_string()),
-                        source_session_id: Some(self.engine_session_id.clone()),
-                        source_execution_id: execution_id.map(str::to_string),
-                        metadata_json: Some("{\"extraction\":\"engine-keyword\"}".to_string()),
-                        ttl_days: classified.ttl_days,
-                        supersedes: None,
-                    })
-                    .inspect(|id| {
-                        self.log_memory_write_ok(execution_id, backend, "engine-keyword", id);
-                    })
-                    .inspect_err(|err| {
-                        self.log_memory_write_err(execution_id, backend, "engine-keyword", err);
-                    })
-                    .ok()
-            })
-            .collect()
-    }
-
     /// Persist a summarized prompt/output pair as session-scoped episodic memory.
     pub(super) fn persist_turn_as_episodic_memory(
         &self,
@@ -211,7 +116,7 @@ impl IotaEngine {
         }
     }
 
-    fn log_memory_write_ok(
+    pub(super) fn log_memory_write_ok(
         &self,
         execution_id: Option<&str>,
         backend: AcpBackend,
@@ -239,7 +144,7 @@ impl IotaEngine {
         );
     }
 
-    fn log_memory_write_err(
+    pub(super) fn log_memory_write_err(
         &self,
         execution_id: Option<&str>,
         backend: AcpBackend,
@@ -266,80 +171,6 @@ impl IotaEngine {
             "engine memory write failed"
         );
     }
-}
-
-fn classify_memory_prompt(prompt: &str) -> Vec<ClassifiedMemory> {
-    let lower = prompt.to_lowercase();
-    let mut memories = Vec::new();
-    let is_procedure =
-        prompt.contains("实验步骤") || lower.contains("steps:") || lower.contains("procedure");
-    if prompt.contains("我叫") || lower.contains("my name") || lower.contains("i am") {
-        memories.push(ClassifiedMemory {
-            memory_type: MemoryType::Semantic,
-            facet: Some(MemoryFacet::Identity),
-            scope: MemoryScope::User,
-            confidence: 0.95,
-            ttl_days: 365,
-        });
-    }
-    if prompt.contains("偏好") || lower.contains("prefer") || prompt.contains("报告格式") {
-        memories.push(ClassifiedMemory {
-            memory_type: MemoryType::Semantic,
-            facet: Some(MemoryFacet::Preference),
-            scope: MemoryScope::User,
-            confidence: 0.92,
-            ttl_days: 365,
-        });
-    }
-    if prompt.contains("项目目标") || lower.contains("project goal") || lower.contains("q2") {
-        memories.push(ClassifiedMemory {
-            memory_type: MemoryType::Semantic,
-            facet: Some(MemoryFacet::Strategic),
-            scope: MemoryScope::Project,
-            confidence: 0.90,
-            ttl_days: 365,
-        });
-    }
-    if !is_procedure
-        && (prompt.contains("SQLite")
-            || prompt.contains("SHA-256")
-            || prompt.contains("存储层")
-            || lower.contains("rust 实现"))
-    {
-        memories.push(ClassifiedMemory {
-            memory_type: MemoryType::Semantic,
-            facet: Some(MemoryFacet::Domain),
-            scope: MemoryScope::Project,
-            confidence: 0.90,
-            ttl_days: 365,
-        });
-    }
-    if is_procedure {
-        memories.push(ClassifiedMemory {
-            memory_type: MemoryType::Procedural,
-            facet: None,
-            scope: MemoryScope::Project,
-            confidence: 0.88,
-            ttl_days: 365,
-        });
-    }
-    if prompt.contains("本轮") || prompt.contains("已通过") || lower.contains("this session") {
-        memories.push(ClassifiedMemory {
-            memory_type: MemoryType::Episodic,
-            facet: None,
-            scope: MemoryScope::Project,
-            confidence: 0.82,
-            ttl_days: 30,
-        });
-    }
-    memories
-}
-
-pub(super) fn is_memory_write_only_prompt(prompt: &str) -> bool {
-    !classify_memory_prompt(prompt).is_empty()
-        && !prompt.contains('？')
-        && !prompt.contains('?')
-        && !prompt.contains("请")
 }
 
 pub(super) fn is_explicit_memory_tool_prompt(prompt: &str) -> bool {

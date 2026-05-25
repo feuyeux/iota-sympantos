@@ -178,7 +178,7 @@ function runChecked(command, args, options = {}) {
   const child = spawn(commandName(command), args, {
     cwd: options.cwd ?? ROOT_DIR,
     env: options.env ?? process.env,
-    shell: false,
+    shell: process.platform === "win32",
     stdio: "inherit",
     windowsHide: false,
   });

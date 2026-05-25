@@ -6,13 +6,13 @@
 | 本次执行日期 | 2026-05-07 |
 | 执行目录 | `D:\coding\creative\iota-sympantos` |
 | 参考规范 | iota-guides/08-memory.md v2.1 |
-| 存储层 | SQLite `~/.i6/context/memory.sqlite`（Rust `memory.rs`） |
+| 存储层 | SQLite `~/.i6/context/memory.sqlite`（Rust `crates/iota-core/src/memory/store.rs`） |
 | 结果日志 | `gefsi/logs/exp01-final-*`、`gefsi/logs/exp01-full-log-*-fixed.*` |
 | git branch | `work` |
 | git commit | `c9d4ec62f148` |
 | Rust toolchain | `rustc 1.95.0 (59807616e 2026-04-14)` |
 | binary sha256 | Linux release binary `47f38006e9fb4155fe1a0243ac59f5ac1a18cc246927acb23e9af9b6cb1bd3e9`；Windows `iota.exe` 本轮实验原始哈希未记录 |
-| cargo test | Step 10.10 验证：`107 passed` |
+| cargo test | Step 10.10 验证：`330 passed` |
 
 ---
 
@@ -777,7 +777,7 @@ cargo build --release
 
 | 检查项 | 本次结果 |
 | :--------| :----------|
-| `cargo test` | 通过，107 passed |
+| `cargo test` | 通过，330 passed |
 | `cargo build --release` | 通过 |
 | 控制台 trace | memory-write-only turn 输出 `[memory:write] {...LogEvent...}`，event 为 `memory.write` |
 | `observability logging logs` | 查到 `event_type=log`，`event=memory.write.result`，`backend=codex`，`route=engine`，`ok=true` |

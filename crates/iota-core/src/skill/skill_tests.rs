@@ -58,3 +58,43 @@ fn skill_metadata_validation() {
     ];
     assert!(metadata.validate().is_err());
 }
+
+#[test]
+fn core_memory_taxonomy_skill_is_available_without_workspace_files() {
+    let workspace = std::env::temp_dir().join(format!(
+        "iota-empty-skill-workspace-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let registry = SkillRegistry::load(&workspace, &[]);
+
+    let skill = registry
+        .get("iota-memory-taxonomy")
+        .expect("core memory taxonomy skill should be built in");
+
+    assert_eq!(
+        skill.path,
+        PathBuf::from("<iota-core>/iota-memory-taxonomy")
+    );
+    assert!(skill.body.contains("identity"));
+    assert!(skill.body.contains("preference"));
+    assert!(skill.body.contains("strategic"));
+    assert!(skill.body.contains("domain"));
+    assert!(skill.body.contains("procedural"));
+    assert!(skill.body.contains("episodic"));
+    assert!(skill.body.contains("one iota_memory_write call"));
+    assert!(!skill.body.contains("主驾"));
+    assert!(!skill.body.contains("智舱"));
+}
+
+#[test]
+fn core_memory_taxonomy_skill_appears_in_skill_index() {
+    let workspace = std::env::temp_dir().join(format!(
+        "iota-empty-skill-workspace-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let registry = SkillRegistry::load(&workspace, &[]);
+    let index = registry.skill_index(AcpBackend::Codex, 4000);
+
+    assert!(index.contains("iota-memory-taxonomy"));
+    assert!(index.contains("classify and write persistent memories"));
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
-import { Cpu, Send, CheckCircle2 } from "lucide-react";
+import { Send, CheckCircle2 } from "lucide-react";
 import {
   checkBackend,
   currentWorkspace,
@@ -15,10 +15,13 @@ import { ConfigPanel } from "./ConfigPanel";
 import type { BackendCheckResult, DesktopConfigSnapshot, ObservabilitySummary } from "../types";
 
 const BACKENDS = ["gemini", "claude", "hermes", "codex", "opencode"];
+const DEFAULT_INSPECTOR_WIDTH = 640;
+const MIN_INSPECTOR_WIDTH = 420;
+const MAX_INSPECTOR_WIDTH = 920;
 
 export function ChatWorkbench() {
   const [state, dispatch] = useReducer(turnsReducer, initialTurnsState);
-  const [backend, setBackend] = useState("gemini");
+  const [backend, setBackend] = useState("hermes");
   const [input, setInput] = useState("");
   const [view, setView] = useState<"chat" | "config">("chat");
   const [config, setConfig] = useState<DesktopConfigSnapshot | null>(null);
@@ -26,6 +29,8 @@ export function ChatWorkbench() {
   const [observability, setObservability] = useState<ObservabilitySummary | null>(null);
   const [workspace, setWorkspace] = useState("");
   const [daemonStatus, setDaemonStatus] = useState<"connecting" | "connected" | "error">("connecting");
+  const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
+  const [isResizingInspector, setIsResizingInspector] = useState(false);
 
   const activeTurn = state.activeTurnId ? state.turns[state.activeTurnId] : undefined;
 
@@ -172,26 +177,172 @@ export function ChatWorkbench() {
         ? "Connecting"
         : "Daemon Error";
 
+  const statusTheme =
+    daemonStatus === "connected"
+      ? {
+          badge: "border-emerald-500/20 bg-emerald-500/5 text-emerald-400",
+          dot: "bg-emerald-400",
+          ping: "bg-emerald-400",
+        }
+      : daemonStatus === "connecting"
+        ? {
+            badge: "border-amber-500/20 bg-amber-500/5 text-amber-400",
+            dot: "bg-amber-400",
+            ping: "bg-amber-400",
+          }
+        : {
+            badge: "border-rose-500/20 bg-rose-500/5 text-rose-400",
+            dot: "bg-rose-400",
+            ping: "bg-rose-400",
+          };
+
   const handleConfigUpdate = (updated: DesktopConfigSnapshot) => {
     setConfig(updated);
     refreshBackendChecks();
   };
 
+  const startInspectorResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = inspectorWidth;
+    setIsResizingInspector(true);
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const nextWidth = startWidth - (moveEvent.clientX - startX);
+      setInspectorWidth(Math.min(MAX_INSPECTOR_WIDTH, Math.max(MIN_INSPECTOR_WIDTH, nextWidth)));
+    };
+    const onPointerUp = () => {
+      setIsResizingInspector(false);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [inspectorWidth]);
+
   return (
-    <div className="flex h-screen bg-[#0b0f19] text-gray-100 font-sans select-none">
+    <div
+      className={`flex h-screen bg-[#0b0f19] text-gray-100 font-sans ${
+        isResizingInspector ? "cursor-col-resize select-none" : "select-none"
+      }`}
+    >
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Header Bar */}
         <header className="flex items-center justify-between border-b border-white/10 bg-[#070a13] px-5 py-3 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary shadow-lg shadow-primary/20">
-              <Cpu className="h-5 w-5 text-white" />
+            <div className="iota-logo-container relative flex h-10 w-10 items-center justify-center cursor-pointer transition-transform duration-300 hover:scale-105 active:scale-95">
+              <svg
+                viewBox="0 0 100 100"
+                className="h-full w-full"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <defs>
+                  {/* Glow filters for futuristic look */}
+                  <filter id="iota-glow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="4" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                  {/* Vibrant Gradients */}
+                  <linearGradient id="gradient-outer" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#ff007f" />
+                    <stop offset="50%" stopColor="#7928ca" />
+                    <stop offset="100%" stopColor="#00f2fe" />
+                  </linearGradient>
+                  <linearGradient id="gradient-inner" x1="100%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#00f2fe" />
+                    <stop offset="100%" stopColor="#ff007f" />
+                  </linearGradient>
+                  <linearGradient id="gradient-core" x1="0%" y1="50%" x2="100%" y2="50%">
+                    <stop offset="0%" stopColor="#ff007f" />
+                    <stop offset="100%" stopColor="#bd34fe" />
+                  </linearGradient>
+                </defs>
+
+                {/* Outer Orbit / Ring - Dashed for tech/cyberpunk dashboard look */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  stroke="url(#gradient-outer)"
+                  strokeWidth="2.5"
+                  strokeDasharray="12 8 4 8"
+                  className="iota-logo-ring-outer opacity-70"
+                />
+
+                {/* Inner Orbit - Different dashes, counter-rotating */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="30"
+                  stroke="url(#gradient-inner)"
+                  strokeWidth="1.5"
+                  strokeDasharray="6 6"
+                  className="iota-logo-ring-inner opacity-80"
+                />
+
+                {/* Nodes on the orbits (represents agents / nodes in orchestration) */}
+                <circle
+                  cx="50"
+                  cy="10"
+                  r="3"
+                  fill="#00f2fe"
+                  className="iota-logo-ring-outer"
+                  filter="url(#iota-glow)"
+                />
+                <circle
+                  cx="50"
+                  cy="90"
+                  r="3"
+                  fill="#ff007f"
+                  className="iota-logo-ring-outer"
+                  filter="url(#iota-glow)"
+                />
+
+                {/* Core glowing central sphere */}
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="18"
+                  fill="url(#gradient-core)"
+                  className="iota-logo-core"
+                  filter="url(#iota-glow)"
+                  opacity="0.9"
+                />
+
+                {/* Elegant stylized letter "ι" in the center */}
+                <path
+                  d="M50 38V56C50 59 52 61 55 61"
+                  stroke="white"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="iota-logo-core"
+                />
+                <circle
+                  cx="50"
+                  cy="31"
+                  r="2"
+                  fill="white"
+                  className="iota-logo-core"
+                />
+              </svg>
             </div>
             <div>
-              <h1 className="text-sm font-semibold flex items-center gap-2">
-                Iota Desktop
-                <span className="flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-medium">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  ● {daemonStatusText}
+              <h1 className="text-sm flex items-center gap-2">
+                <span className="bg-gradient-to-r from-white via-neutral-100 to-neutral-400 bg-clip-text text-transparent font-extrabold tracking-wide">
+                  Iota
+                </span>
+                <span className="text-primary font-semibold tracking-wide">
+                  Desktop
+                </span>
+                <span className={`flex items-center gap-1.5 text-[10px] border px-2 py-0.5 rounded-full font-medium transition-all duration-300 backdrop-blur-sm ${statusTheme.badge}`}>
+                  <span className="relative flex h-2 w-2">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${statusTheme.ping}`} />
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${statusTheme.dot}`} />
+                  </span>
+                  {daemonStatusText}
                 </span>
               </h1>
               <p className="text-[11px] text-gray-500 font-mono truncate max-w-xs md:max-w-md">
@@ -331,10 +482,27 @@ export function ChatWorkbench() {
         )}
       </main>
 
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize inspector panel"
+        className={`group relative z-10 w-2 shrink-0 cursor-col-resize bg-[#070a13] transition-colors ${
+          isResizingInspector ? "bg-primary/20" : "hover:bg-primary/10"
+        }`}
+        onPointerDown={startInspectorResize}
+      >
+        <div
+          className={`absolute left-1/2 top-0 h-full w-px -translate-x-1/2 transition-colors ${
+            isResizingInspector ? "bg-primary" : "bg-white/10 group-hover:bg-primary/80"
+          }`}
+        />
+      </div>
+
       {/* Side Inspector Panel */}
       <RightInspector
         turn={activeTurn}
         observability={observability}
+        width={inspectorWidth}
         onApprovalDecision={(approvalId, approved) =>
           dispatch({ type: "approval_decision", approvalId, approved })
         }

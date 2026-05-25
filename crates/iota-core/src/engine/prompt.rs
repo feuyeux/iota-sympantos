@@ -10,8 +10,7 @@ use crate::store::cache::{ExecutionStatus, request_hash};
 
 use super::IotaEngine;
 use super::memory_ops::{
-    deterministic_memory_answer, is_explicit_memory_tool_prompt, is_memory_query,
-    is_memory_write_only_prompt, memory_inject_payload,
+    deterministic_memory_answer, is_explicit_memory_tool_prompt, memory_inject_payload,
 };
 use super::telemetry::event_payload;
 
@@ -105,42 +104,6 @@ impl IotaEngine {
                 detail: None,
             }),
         );
-
-        // Keyword memory extraction happens before backend execution; write-only prompts can
-        // complete locally without spending an ACP turn.
-        let extracted_memories = if is_memory_query(prompt) || prompt.contains("iota_memory_write")
-        {
-            Vec::new()
-        } else {
-            self.extract_keyword_memories(backend, &cwd, prompt, execution_id.as_deref())
-        };
-        if !extracted_memories.is_empty() && is_memory_write_only_prompt(prompt) {
-            let mut events = Vec::new();
-            for memory_id in &extracted_memories {
-                let event = RuntimeEvent::Memory(MemoryEvent {
-                    action: "write".to_string(),
-                    memory_id: Some(memory_id.clone()),
-                    payload: serde_json::json!({"source":"engine-extract"}),
-                });
-                self.record_runtime_event(&execution_id, backend, event.clone());
-                events.push(event);
-            }
-            let text = format!("已记录 {} 条记忆。", extracted_memories.len());
-            let output_event = RuntimeEvent::Output(OutputEvent {
-                text: text.clone(),
-                role: Some("engine".to_string()),
-            });
-            self.record_runtime_event(&execution_id, backend, output_event.clone());
-            events.push(output_event);
-            return Ok(self.finalize_local_turn(
-                backend,
-                &execution_id,
-                &request_hash,
-                prompt,
-                text,
-                events,
-            ));
-        }
 
         if let Some(skill) = matched_skill {
             // Engine-run skills are local deterministic handlers. When they match, they replace

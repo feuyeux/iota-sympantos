@@ -8,12 +8,12 @@ Generate a clean, professional, high-readability software architecture diagram f
 
 Use a wide horizontal canvas, preferably 21:9 or ultra-wide landscape.
 
-Use a structured 4-layer architecture map:
+Use a structured 4-layer architecture map coordinating the four Cargo workspace crates (`iota-cli`, `iota-core`, `iota-kanban`, and `iota-desktop`):
 
-1. Entry and interaction layer
-2. Runtime orchestration layer
-3. Integration and execution layer
-4. Persistence and observability foundation
+1. Entry and Interaction Layer (`iota-cli` TUI and `iota-desktop` Tauri GUI)
+2. Runtime Orchestration Layer (`iota-core` TCP daemon and core engines)
+3. Integration, Execution, and Kanban Planning Layer (`iota-core` integration, `iota-kanban` engines, and desktop local database CRUD)
+4. Persistence and Telemetry Foundation (`iota-core` store and telemetry systems)
 
 Use a white or very light warm-gray background, precise grid alignment, rounded rectangle modules, thin vector-style arrows, large readable typography, generous padding, and clear hierarchy. Use compact labels instead of paragraphs.
 
@@ -36,39 +36,36 @@ Use a modern technical infographic style:
 
 Color palette:
 
-- Pink = CLI / TUI
-- Orange = Daemon
-- Blue = Engine
-- Green = Context / Memory
-- Cyan = ACP
-- Teal = Backend
-- Purple = Skill / MCP / Fn / Kanban
-- Gray = Store / Telemetry
+- Pink = CLI / TUI (inside `iota-cli`)
+- Violet = Desktop GUI (inside `iota-desktop` React & Tauri UI)
+- Orange = Daemon (inside `iota-core`)
+- Blue = Engine Core (inside `iota-core`)
+- Green = Context / Memory (inside `iota-core`)
+- Cyan = ACP Adapter (inside `iota-core`)
+- Teal = Backend Processes
+- Purple = Skill / MCP / Fn / Kanban (inside `iota-core` and `iota-kanban`)
+- Gray = Store / Telemetry (inside `iota-core` foundation)
 
 ## Main Modules / 主模块内容
 
-### 1. Entry / CLI / TUI
+### 1. Presentation & Interaction (iota-cli & iota-desktop crates)
 
 Files:
 
-`src/main.rs`, `src/cli/mod.rs`, `src/cli/run_cmd.rs`, `src/cli/daemon_cmd.rs`, `src/cli/observability_cmd.rs`, `src/cli/kanban_cmd.rs`, `src/tui/mod.rs`, `src/tui/loop.rs`, `src/tui/render.rs`, `src/tui/input.rs`, `src/tui/scrollback.rs`, `src/tui/status_bar.rs`, `src/tui/events.rs`, `src/tui/terminal_lifecycle.rs`
+- CLI/TUI: `crates/iota-cli/src/main.rs`, `crates/iota-cli/src/cli/mod.rs`, `crates/iota-cli/src/cli/observability_cmd.rs`, `crates/iota-cli/src/tui/mod.rs`, `crates/iota-cli/src/tui/loop.rs`, `crates/iota-cli/src/tui/render.rs`, `crates/iota-cli/src/tui/input.rs`, `crates/iota-cli/src/tui/scrollback.rs`, `crates/iota-cli/src/tui/status_bar.rs`, `crates/iota-cli/src/tui/events.rs`, `crates/iota-cli/src/tui/terminal_lifecycle.rs`
+- Desktop: `crates/iota-desktop/src/App.tsx`, `crates/iota-desktop/src/components/ChatWorkbench.tsx`, `crates/iota-desktop/src/components/RightInspector.tsx`, `crates/iota-desktop/src-tauri/src/main.rs`, `crates/iota-desktop/src-tauri/src/lib.rs`, `crates/iota-desktop/src-tauri/src/daemon_client.rs`
 
 Show:
 
-- User input enters CLI prompt or TUI composer
-- `main.rs → cli::run()`
-- Default no-args path enters TUI
-- Commands: `run`, `check`, `bench <cold|warm>`, `observability`, `logs`, `trace`, `mcp <context|fun>`, `context-mcp`, `fun-mcp`, `kanban`, `skill`, `__daemon`
-- TUI native terminal scrollback, background engine task, streaming output
-- Approval overlay, pager, help, quit confirmation
-- Prompt queue while engine is running
-- Slash commands and Kanban view
+- CLI/TUI: User input, `cli::run()` command routing, TUI prompt queue, background engine task, streaming output, approval overlay, and native scrollback.
+- Desktop GUI: Tauri desktop app running React frontend. Chat workbench with resizable split layout (dragging splitter) containing a main chat area (Hermes default backend) and a right inspector panel (RightInspector) housing tabs for observability summary/percentiles, memory context snapshot, and active tool approvals.
+- Desktop IPC: `daemon_client.rs` connecting to daemon at `127.0.0.1:47661` for config snapshot, prompt submission, approval responses, and turn cancellation.
 
-### 2. Daemon TCP Plane
+### 2. Daemon TCP Plane (iota-core crate)
 
 Files:
 
-`src/daemon/mod.rs`, `src/daemon/pool.rs`, `src/daemon/proto.rs`
+`crates/iota-core/src/daemon/mod.rs`, `crates/iota-core/src/daemon/pool.rs`, `crates/iota-core/src/daemon/proto.rs`
 
 Show:
 
@@ -78,15 +75,13 @@ Show:
 - Auto-start through `current_exe __daemon`
 - JSON-line request / response
 - `EnginePool` reuses `IotaEngine` per cwd
-- Connection concurrency limit
-- Request size cap
-- Graceful Ctrl+C shutdown
+- Connection concurrency limit and graceful Ctrl+C shutdown
 
-### 3. Engine Core
+### 3. Engine Core (iota-core crate)
 
 Files:
 
-`src/engine/mod.rs`, `src/engine/prompt.rs`, `src/engine/memory_ops.rs`, `src/engine/session_ledger.rs`, `src/engine/telemetry.rs`, `src/runtime_event/mod.rs`
+`crates/iota-core/src/engine/mod.rs`, `crates/iota-core/src/engine/prompt.rs`, `crates/iota-core/src/engine/memory_ops.rs`, `crates/iota-core/src/engine/session_ledger.rs`, `crates/iota-core/src/engine/telemetry.rs`, `crates/iota-core/src/runtime_event.rs`
 
 Show:
 
@@ -106,11 +101,11 @@ Normalized `RuntimeEvent`:
 
 `Output`, `State`, `Log`, `ToolCall`, `ToolResult`, `Error`, `Extension`, `TokenUsage`, `Memory`, `ApprovalRequest`, `ApprovalDecision`
 
-### 4. Context Fabric + Memory
+### 4. Context Fabric + Memory (iota-core crate)
 
 Files:
 
-`src/context/mod.rs`, `src/memory/store.rs`, `src/memory/embedding.rs`, `src/mcp/server.rs`
+`crates/iota-core/src/context/mod.rs`, `crates/iota-core/src/memory/store.rs`, `crates/iota-core/src/memory/embedding.rs`, `crates/iota-core/src/mcp/server.rs`
 
 Show:
 
@@ -130,21 +125,18 @@ Six memory taxonomy buckets:
 
 `identity`, `preference`, `strategic`, `domain`, `procedural`, `episodic`
 
-### 5. ACP Adapter
+### 5. ACP Adapter (iota-core crate)
 
 Files:
 
-`src/acp/mod.rs`, `src/acp/backend.rs`, `src/acp/client.rs`, `src/acp/stream_reader.rs`, `src/acp/wire.rs`, `src/acp/session.rs`, `src/acp/permission.rs`, `src/acp/message.rs`, `src/acp/types.rs`, `src/acp/parser.rs`
+`crates/iota-core/src/acp/mod.rs`, `crates/iota-core/src/acp/backend.rs`, `crates/iota-core/src/acp/client.rs`, `crates/iota-core/src/acp/stream_reader.rs`, `crates/iota-core/src/acp/wire.rs`, `crates/iota-core/src/acp/session.rs`, `crates/iota-core/src/acp/permission.rs`, `crates/iota-core/src/acp/message.rs`, `crates/iota-core/src/acp/types.rs`, `crates/iota-core/src/acp/parser.rs`, `crates/iota-core/src/acp/util.rs`
 
 Show:
 
 - `AcpClient` owns backend child process stdin/stdout
 - JSON-RPC 2.0 newline-delimited protocol
 - `initialize → session/new → session/prompt → session/update → session/request_permission → session/complete`
-- Session id reuse
-- `mcpServers` rendering
-- Supports empty `mcpServers`
-- Supports `string_array` and `object` env shapes
+- Session id reuse and `mcpServers` rendering
 - ACP-side MCP tool call intercept through router
 - Auto-approve `iota_*` and `mcp__iota-*`
 - Otherwise route permission request to TUI overlay or stdin
@@ -164,68 +156,62 @@ Show:
 - Credentials sourced from `~/.i6/nimia.yaml`
 - Environment built via `backend_process_env_with_context()`
 - Windows `npx` normalized to `npx.cmd`
-- Do not show raw API keys
-- Do not show `HERMES_HOME` override
 
-### 7. Skill / MCP / Fn / Kanban
+### 7. Skill / MCP / Fn / Kanban (iota-core & iota-kanban crates)
 
 Files:
 
-`src/skill/mod.rs`, `src/skill/runner.rs`, `src/skill/cache.rs`, `src/skill/fun.rs`, `src/mcp/client.rs`, `src/mcp/router.rs`, `src/mcp/tool_dispatch.rs`, `src/kanban/mod.rs`, `src/kanban/sqlite_store.rs`, `src/kanban/dispatcher.rs`, `src/kanban/worker.rs`, `src/kanban/bridge.rs`
+`crates/iota-core/src/skill/mod.rs`, `crates/iota-core/src/skill/runner.rs`, `crates/iota-core/src/skill/cache.rs`, `crates/iota-core/src/skill/fun.rs`, `crates/iota-core/src/mcp/client.rs`, `crates/iota-core/src/mcp/router.rs`, `crates/iota-core/src/mcp/tool_dispatch.rs`
+
+`crates/iota-kanban/src/lib.rs`, `crates/iota-kanban/src/types.rs`, `crates/iota-kanban/src/store.rs`, `crates/iota-kanban/src/sqlite_store.rs`, `crates/iota-kanban/src/state_machine.rs`, `crates/iota-kanban/src/event_sourcing.rs`, `crates/iota-kanban/src/dispatcher.rs`, `crates/iota-kanban/src/worker.rs`, `crates/iota-kanban/src/shadow.rs`, `crates/iota-kanban/src/bridge.rs`, `crates/iota-kanban/src/event_sync.rs`
 
 Show:
 
-- `SkillRegistry`
-- Load roots: workspace `skills/`, workspace `.iota/skills`, configured skill roots, `~/.i6/skills`
-- Frontmatter parsing and trigger matching
-- Backend compatibility
-- `SkillRunner`
-- `execution.mode = mcp`
-- Sequential or parallel MCP tool calls
-- `iota-fun` MCP stdio server
-- Seven Fn runners: `Python`, `TypeScript`, `Rust`, `Go`, `Java`, `C++`, `Zig`
-- Kanban task board, event sourcing, dispatcher, Hermes worker, shadow materializer, event sync
+- `SkillRegistry` loading from roots: `skills/`, `.iota/skills`, configured skill roots, `~/.i6/skills`
+- `SkillRunner` execution (mcp mode, sequential/parallel)
+- `iota-fun` 7 language stdio MCP server (Python, TypeScript, Rust, Go, Java, C++, Zig)
+- Kanban Engine: event-sourced SqliteKanbanStore, triage→todo→ready→running→done→archived state machine, Dispatcher, WorkerHandle (spawns hermes -z), ShadowMaterializer/Watcher, AdvancedBridge (decompose/specify), cross-node EventSync (export/import/serve/pull/push)
+- Desktop integration: Tauri command handlers (`list_boards`, `list_tasks`, `create_task`, `transition_task`) calling `SqliteKanbanStore` methods directly in Rust backend to synchronize React board views.
 
-### 8. Store / Telemetry / Observability
+### 8. Store / Telemetry / Observability (iota-core crate foundation)
 
 Bottom wide foundation band.
 
 Files:
 
-`src/store/cache.rs`, `src/store/observability.rs`, `src/store/approvals.rs`, `src/store/ledger.rs`, `src/telemetry/mod.rs`, `src/telemetry/metrics.rs`, `src/telemetry/stderr.rs`
+`crates/iota-core/src/store/mod.rs`, `crates/iota-core/src/store/cache.rs`, `crates/iota-core/src/store/observability.rs`, `crates/iota-core/src/store/approvals.rs`, `crates/iota-core/src/store/ledger.rs`, `crates/iota-core/src/store/db.rs`, `crates/iota-core/src/telemetry/mod.rs`, `crates/iota-core/src/telemetry/metrics.rs`, `crates/iota-core/src/telemetry/stderr.rs`
 
 Show store blocks:
 
 - CacheStore: `~/.i6/context/events.sqlite`, replay, dedupe, request hash, running join, fencing token, retention
-- ObservabilityStore: `~/.i6/context/events.sqlite`, token usage events, execution-level best-record dedupe, P50/P95/P99, time-window query, backend summary
-- MemoryStore: `~/.i6/context/memory.sqlite` or `context_engine.memory_db`, six buckets, FTS/LIKE, vector/hybrid search, dedup, TTL, merge
-- ApprovalStore: `~/.i6/context/approvals.sqlite`, request / decision recording, risk classification
-- SessionLedger: `~/.i6/context/sessions.sqlite`, sessions, turns, handoff tracking
-- Local logs: daily files under `~/.i6/logs/`, override `IOTA_LOG_DIR`
-- OpenTelemetry: default endpoint `http://localhost:4317`, `OTEL_ENABLED=false`, traces, logs, metrics
-- Docker Observability Stack: OTel Collector `4317 / 4318`, Loki `3100`, Jaeger `16686`, Prometheus `9090`, Grafana `3000`
+- ObservabilityStore: token usage events, execution-level best-record dedupe, P50/P95/P99, time-window query, backend summary
+- MemoryStore: `~/.i6/context/memory.sqlite` (six taxonomy buckets, FTS/LIKE, vector/hybrid, dedup, merge)
+- ApprovalStore: approvals logging & policy
+- SessionLedger: sessions/turns/handoff tracking
+- Local daily logs under `~/.i6/logs/` (override `IOTA_LOG_DIR`)
+- OpenTelemetry: endpoints, metrics/traces/logs OTLP export, Jaeger/Grafana Docker stack
 
 ## Flow Markers / 流程编号
 
 Show numbered circular markers:
 
-1. CLI / TUI entry
-2. Command dispatch
-3. Optional daemon route
-4. EnginePool reuse
-5. Engine request lifecycle
-6. Skill registry load
-7. Memory recall
-8. Context capsule
-9. ACP client ensure
-10. ACP session protocol
-11. Backend streaming update
-12. Permission handling
-13. MCP / skill / fn / kanban route
-14. Cache / memory / ledger writeback
-15. Observability and OTel export
-16. TUI streaming render / approval overlay
+1. CLI / TUI / Desktop Entry (`iota-cli` or `iota-desktop`)
+2. Command Dispatch (`cli/mod.rs` or Tauri handlers)
+3. Optional TCP Daemon Route (`daemon/pool.rs` or `daemon_client.rs` from desktop)
+4. Engine lifecycle initialization (`iota-core` engine)
+5. Skill Registry loading & trigger matching
+6. Memory recall (MemoryStore 6 buckets)
+7. Context Capsule composition (git status & short/full prompts)
+8. ACP Client instantiation (Stdio subprocess spawn)
+9. ACP Session Protocol (initialize → session/new → session/prompt)
+10. Stream updating & approval routing (TUI overlay, Desktop approval component, or CLI approval)
+11. Tool intercept through MCP router
+12. Kanban task ready transition & dispatcher pick-up
+13. Kanban Dispatcher spawns Hermes Worker
+14. Event syncing and shadow materializer project
+15. Store writebacks (Cache, memory, approvals, ledger)
+16. Telemetry aggregation & OpenTelemetry export
 
 ## Negative Prompt / 避免内容
 
-Avoid unreadable tiny text, random fake file paths, obsolete modules, `src/store/events.rs`, single `context.db`, Promtail, project-level config discovery, Hermes home override, excessive decorative art, messy arrows, 3D render, dark background, neon cyberpunk, stock cloud icons, blurry labels, incorrect backend names, Korean text, non-Chinese non-English labels, `telemetry/console.rs`, `context/server.rs`, `skill/sandbox_executor.rs`, `src/tui.rs` as a single-file TUI, and `src/memory/store.rs` shown as `src/store/memory.rs`.
+Avoid unreadable tiny text, random fake file paths, obsolete module mappings, `src/store/events.rs`, single `context.db`, Promtail, project-level config discovery, Hermes home override, excessive decorative art, messy arrows, 3D render, dark background, neon cyberpunk, stock cloud icons, blurry labels, incorrect backend names, Korean text, non-Chinese non-English labels, `telemetry/console.rs`, `context/server.rs`, `skill/sandbox_executor.rs`, `src/tui.rs` as a single-file TUI, `src/memory/store.rs` shown as `src/store/memory.rs`, and legacy single-crate root path `src/` prefix instead of `crates/iota-cli/src/`, `crates/iota-core/src/`, `crates/iota-desktop/src-tauri/src/`, or `crates/iota-kanban/src/`.
