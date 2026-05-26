@@ -20,6 +20,15 @@
 4. [观测性与调试](#4-观测性与调试)
    - 4.1 [OpenTelemetry 观测性架构](#41-opentelemetry-观测性架构)
    - 4.2 [调试工作流](#42-调试工作流)
+5. [Kanban 任务编排系统](#5-kanban-任务编排系统)
+   - 5.1 [Kanban 状态机与事件溯源](#51-kanban-状态机与事件溯源)
+   - 5.2 [Kanban 分布式同步与桥接](#52-kanban-分布式同步与桥接)
+6. [Desktop (Tauri) 架构](#6-desktop-tauri-架构)
+   - 6.1 [Desktop 应用架构与通信流](#61-desktop-应用架构与通信流)
+7. [配置与环境变量映射](#7-配置与环境变量映射)
+   - 7.1 [配置层次与后端环境变量映射](#71-配置层次与后端环境变量映射)
+8. [技能系统 (Skill System)](#8-技能系统-skill-system)
+   - 8.1 [技能加载、匹配与执行](#81-技能加载匹配与执行)
 
 ---
 
@@ -29,44 +38,52 @@
 
 **用途**: 展示 iota-sympantos 的四层架构和组件间的依赖关系
 
+![分层架构与组件依赖](../img_result/layered_architecture.png)
+
 **Prompt**:
 ```
-A technical layered architecture diagram in a clean colored-pen schematic style, titled "iota-sympantos Component Layers and Dependencies". 
-The background is off-white. The diagram is divided vertically into four distinct boxes representing layers with strict dependency flow:
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a layered architecture diagram titled "iota-sympantos Component Layers and Dependencies".
+The diagram is divided vertically into four distinct boxes representing layers with strict dependency flow:
 
 1. Layer 1: "Presentation (cli & tui)" - outlined in deep navy blue
-   - Blocks: "main.rs", "cli/mod.rs", "tui.rs", "tui/composer.rs", "tui/markdown.rs", "tui/status_bar.rs"
+   - Blocks: "crates/iota-cli/src/main.rs", "cli/mod.rs", "tui/mod.rs (render/loop/input/state/status_bar/theme)"
    
-2. Layer 2: "Orchestration" - outlined in muted forest green
-   - Large block: "IotaEngine (engine.rs)"
+2. Layer 2: "Orchestration & Kanban" - outlined in muted forest green
+   - Large block: "IotaEngine (crates/iota-core/src/engine/mod.rs)"
    - Block: "daemon/mod.rs & pool.rs (EnginePool)"
-   - Block: "runtime_event.rs (RuntimeEvent normalization)"
+   - Block: "runtime_event/mod.rs (RuntimeEvent normalization)"
+   - Block: "crates/iota-kanban/src/ (dispatcher, worker, shadow system, bridge)"
    
 3. Layer 3: "Protocol & Tools" - outlined in terracotta orange
-   - Blocks: "AcpClient (acp/mod.rs)", "acp::permission", "acp::session", "acp::wire"
+   - Blocks: "AcpClient (crates/iota-core/src/acp/mod.rs)", "acp::permission", "acp::session", "acp::wire"
    - Blocks: "mcp::router", "mcp::client"
-   - Blocks: "context::ContextEngine", "skill::SkillRegistry", "skill::runner"
+   - Blocks: "context::ContextEngine", "skill::SkillRegistry", "skill::runner (execution)"
    
 4. Layer 4: "External Boundaries" - outlined in dark charcoal gray
    - Block: "Backend Subprocesses" (Claude Code, Codex, Gemini CLI, Hermes, OpenCode)
    - Block: "MCP Sidecars" (iota-context, iota-fun)
-   - Block: "SQLite Stores" (events.sqlite, memory.sqlite, sessions.sqlite, approvals.sqlite)
+   - Block: "SQLite Stores" (events.sqlite, memory.sqlite, sessions.sqlite, approvals.sqlite in ~/.i6/context/; iota.db in ~/.i6/kanban/)
 
 Connections and Flows:
-- Purple solid arrows from "IotaEngine" to "SQLite Stores" labeled "SQL I/O"
+- Purple solid arrows from "IotaEngine" and "Kanban system" to "SQLite Stores" labeled "SQL I/O"
 - Terracotta arrow from "IotaEngine" to "AcpClient" labeled "injects EffectiveConfig"
 - Terracotta arrow from "AcpClient" to "mcp::router" labeled "delegates tool_call filter"
-- Dual connection between "tui.rs" and "IotaEngine":
+- Dual connection between "tui" and "IotaEngine":
   - Blue arrow labeled "mpsc (streams output chunks)"
   - Red arrow labeled "oneshot (TUI approval decision)"
 - Dark gray socket line between "cli/mod.rs" and "daemon" labeled "TCP 127.0.0.1:47661"
 - Blue pipe lines between "AcpClient" and "Backend Subprocesses" labeled "Stdio (stdin/stdout/stderr)"
 
 Style instructions:
-- Colored pen-on-paper schematic style, off-white background
-- Clean sans-serif typeface, consistent font size within each layer
-- Harmonious color coding for layers and connections
-- Continuous, solid lines with no overlapping, generous white borders
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact, readable module labels and consistent font size within each layer
+- Use continuous solid lines with no overlapping and generous white borders
+- Do not invent module names, file paths, stores, backend names, or commands
 ```
 
 ---
@@ -75,12 +92,19 @@ Style instructions:
 
 **用途**: 展示完整的运行时架构，包含所有模块、数据流和序列标记（双语版本）
 
+![完整运行时架构图](../img_result/runtime_architecture.png)
+
 **Prompt**:
 ```
-A wide landscape technical architecture infographic titled "iota-sympantos Runtime Architecture / 运行时架构".
-Use clean bilingual system diagram style with thin line vector layout, pen-and-ink engineering poster aesthetic, precise module map, color-coded flow arrows.
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a wide landscape technical architecture infographic titled "iota-sympantos Runtime Architecture / 运行时架构".
+Use a precise module map, color-coded flow arrows, compact bilingual labels, and thin ink vector lines.
 
-Canvas: 16:9 or 2:1 ratio, white background, rounded module columns, precise grid alignment.
+Canvas: 16:9 or 2:1 ratio, warm off-white paper background, rounded module columns, precise grid alignment.
 
 Top legend:
 - Pink: TUI / Presentation
@@ -97,16 +121,16 @@ Sequence suffixes: T=TUI, C=CLI, D=Daemon, M=Memory, A=ACP, B=Backend, K=Skill, 
 Main layout: 8 vertical columns + wide bottom store/telemetry band
 
 Column 1: Entry / CLI / TUI
-Files: src/main.rs, src/cli/mod.rs, src/tui.rs, src/tui/composer.rs, src/tui/markdown.rs, src/tui/state.rs, src/tui/status_bar.rs, src/tui/theme.rs, src/config.rs, src/native/mod.rs, src/utils.rs
+Files: crates/iota-cli/src/main.rs, crates/iota-cli/src/cli/mod.rs, crates/iota-cli/src/tui/ (mod.rs, render.rs, loop.rs, input.rs, state.rs, status_bar.rs, theme.rs)
 Show:
-- User input enters CLI prompt or TUI composer
+- User input enters CLI prompt or TUI input area
 - main.rs -> cli::run()
 - Default no-args path enters TUI
-- Commands: iota run/check/bench/logs/trace/native/skill
+- Commands: iota run/check/bench/logs/trace/observability/kanban/mcp/skill
 - TUI background engine task, streaming output, approval overlay, pager/help/quit overlays, prompt queue while engine running
 
 Column 2: Daemon TCP Plane
-Files: src/daemon/mod.rs, src/daemon/pool.rs, src/daemon/proto.rs
+Files: crates/iota-core/src/daemon/mod.rs, crates/iota-core/src/daemon/pool.rs, crates/iota-core/src/daemon/proto.rs
 Show:
 - iota run --daemon
 - Local TCP daemon at 127.0.0.1:47661 (overridable by IOTA_DAEMON_ADDR)
@@ -117,21 +141,21 @@ Show:
 - Graceful Ctrl+C shutdown
 
 Column 3: Engine Core
-Files: src/engine.rs, src/runtime_event.rs
+Files: crates/iota-core/src/engine/mod.rs, crates/iota-core/src/engine/prompt.rs, crates/iota-core/src/runtime_event/mod.rs
 Show:
 - IotaEngine
 - ACP client pool keyed by (backend, cwd)
-- Request hash replay, join running execution
+- Concurrency fencing/locking via cache_executions table UNIQUE index
 - Session ledger and handoff
 - Memory extraction / deterministic memory answer
 - Skill match and optional engine-run MCP skill
 - Memory recall, context capsule composition
-- ACP invocation, CacheStore writeback
+- ACP invocation
 - OTel metrics/logs/spans
 - Normalized RuntimeEvent
 
-Column 4: Context Fabric + Memory
-Files: src/context/mod.rs, src/context/server.rs, src/store/memory.rs, src/store/embedding.rs
+Column 4: Context Fabric & Memory Store
+Files: crates/iota-core/src/context/mod.rs, crates/iota-core/src/memory/store.rs, crates/iota-core/src/memory/embedding.rs
 Show:
 - ContextEngine
 - <iota-context> capsule, DialogueBuffer
@@ -145,7 +169,7 @@ Show:
 - Ollama embeddings if configured, fallback 128-dimension local trigram embedding
 
 Column 5: ACP Adapter
-Files: src/acp/mod.rs, src/acp/wire.rs, src/acp/session.rs, src/acp/permission.rs
+Files: crates/iota-core/src/acp/mod.rs, crates/iota-core/src/acp/wire.rs, crates/iota-core/src/acp/session.rs, crates/iota-core/src/acp/permission.rs
 Show:
 - AcpClient owns backend child process stdin/stdout
 - JSON-RPC 2.0 newline-delimited protocol
@@ -169,32 +193,36 @@ Show five backend rows:
 - OpenCode: command npx, aliases opencode/open-code
   Env: OPENCODE_MODEL
 
-Column 7: Skill / MCP / Fn Runners
-Files: src/skill/mod.rs, src/skill/runner.rs, src/skill/cache.rs, src/skill/fun_server.rs, src/mcp/mod.rs, src/mcp/client.rs, src/mcp/router.rs
+Column 7: Skill & MCP System
+Files: crates/iota-core/src/skill/mod.rs, crates/iota-core/src/skill/runner.rs, crates/iota-core/src/skill/cache.rs, crates/iota-core/src/skill/fun.rs, crates/iota-core/src/mcp/mod.rs, crates/iota-core/src/mcp/client.rs, crates/iota-core/src/mcp/router.rs
 Show:
 - SkillRegistry load roots: workspace skills/, workspace .iota/skills, configured skill roots, ~/.i6/skills
 - Frontmatter parsing, trigger matching, backend compatibility
-- SkillRunner, execution.mode = mcp, sequential or parallel MCP tool calls, template rendering
+- SkillRunner, execution.mode = mcp, sequential or parallel MCP tool calls, simple placeholder rendering
 - MCP client, ACP-side MCP router
 - Intercept methods: tools/call, mcp/tools/call, mcp/tool_call
 - Route iota memory/skill/session/handoff/fun tools, reject external tools
 - iota-fun MCP stdio server
 - Seven Fn runners: Python, TypeScript, Rust, Go, Java, C++, Zig
 
-Column 8: Native Projection
-Files: src/native/mod.rs
+Column 8: Kanban sub-system
+Files: crates/iota-kanban/src/ (sqlite_store.rs, dispatcher.rs, worker.rs, shadow.rs, bridge.rs, event_sync.rs)
 Show:
-- iota native-materialize
-- Memory/skill native file projection, backend-native files
-- Block replacement markers: <!-- IOTA_START -->, <!-- IOTA_END -->
-- Useful for backends without MCP support
+- SQLite event-sourced store (~/.i6/kanban/iota.db)
+- Dispatcher polling ready tasks (default 30s)
+- WorkerHandle spawning hermes -z child processes
+- ShadowMaterializer creating temporary shadow directories with task.md and skills
+- ShadowWatcher recycling shadow and updating task status to done
+- AdvancedBridge decomposing and specifying tasks
+- EventSyncManager pulling/pushing event syncs via serve-sync/pull/push
 
 Bottom wide band: Store / Telemetry / Observability
-Files: src/store/mod.rs, src/store/cache.rs, src/store/memory.rs, src/store/embedding.rs, src/store/approval.rs, src/store/ledger.rs, src/telemetry/mod.rs, src/telemetry/console.rs, src/telemetry/logs.rs, src/telemetry/metrics.rs, src/telemetry/spans.rs
+Files: crates/iota-core/src/store/mod.rs, crates/iota-core/src/store/cache.rs, crates/iota-core/src/store/approvals.rs, crates/iota-core/src/store/ledger.rs, crates/iota-core/src/store/observability.rs, crates/iota-core/src/telemetry/mod.rs, crates/iota-core/src/telemetry/metrics.rs, crates/iota-core/src/telemetry/stderr.rs
 
 Show store blocks:
-- CacheStore: path ~/.i6/context/events.sqlite, replay/dedupe only, request hash, running join, fencing token, output replay, 30-day completed/failed retention
-- MemoryStore: path ~/.i6/context/memory.sqlite (may be overridden by context_engine.memory_db), taxonomy, dedup, TTL, merge mode, FTS/LIKE, vector/hybrid search, memory_embedding table
+- CacheStore: path ~/.i6/context/events.sqlite, concurrency fencing/locking only (fencing_token, status, request_hash), 30-day completed/failed retention
+- MemoryStore: path ~/.i6/context/memory.sqlite (may be overridden by context_engine.memory_db), taxonomy (6 buckets), dedup, TTL, FTS5/LIKE, vector/hybrid search, memory_embedding table
+- KanbanStore: path ~/.i6/kanban/iota.db, events table (event-sourcing), boards, tasks, runs, comments, links tables (materialized views)
 - ApprovalStore: path ~/.i6/context/approvals.sqlite, request/decision recording, default risk classification
 - SessionLedger: path ~/.i6/context/sessions.sqlite, iota session, backend session, turn, handoff
 - Local logs: stderr tracing layer, daily files under ~/.i6/logs/, controlled by IOTA_LOG_FILE
@@ -222,12 +250,12 @@ Sequence markers (use circled markers):
 1C CLI entry, 1T TUI entry, 2C command dispatch, 3D daemon route, 4D daemon EnginePool, 5E engine request lifecycle, 6K skill registry load, 7M memory recall, 8C context capsule, 9A ensure ACP client, 10A initialize/session/new/session/prompt, 11B backend streaming update, 12A permission handling, 13K MCP/skill/fn tool route, 14S cache/memory/ledger writeback, 15O telemetry export, 16T TUI streaming render/approval overlay
 
 Visual style:
+- Follow the technical diagram rules and palette stated at the top of this prompt
 - Wide landscape infographic, 16:9 or 2:1 ratio
-- White background, thin rounded rectangles, precise grid alignment
+- Warm off-white paper background, thin rounded rectangles, precise grid alignment
 - Bilingual labels: Chinese first, English second, separated by /
 - Keep labels readable and concise
 - Use small icons only when they clarify meaning: terminal, database, gear, shield, book, network socket, telescope, chart
-- Clean technical pen-line style with light color accents matching the legend
 - The image must look like an updated version of a reference architecture diagram, not a new unrelated poster
 
 Negative prompt:
@@ -240,21 +268,28 @@ Unreadable tiny text, random fake file paths, obsolete modules, src/store/events
 
 **用途**: 以故事化的方式展示整体架构，适合用于文档封面或概览
 
+![架构总览海报](../img_result/architecture_overview.png)
+
 **Prompt**:
 ```
-Use gpt-image-2-style-library: pen-and-ink technical story poster, hand-drawn architectural cutaway, fine cross-hatching, precise black ink, warm paper texture, playful engineering narrative.
+Use the "Iota Technical Field Notebook" story poster style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Use a pen-and-ink technical story poster layout with a hand-drawn architectural cutaway, light cross-hatching, precise black ink, warm paper texture, and restrained iota magenta highlights.
 
 Create a vertical poster for the document "iota-sympantos architecture overview".
 
-Scene: a compact Rust CLI/TUI control tower named "iota-sympantos" sits in the center like a tiny railway signal station. From the tower, five labeled rail lines run outward to five AI backend stations: Claude Code, Codex, Gemini CLI, Hermes, and OpenCode. Below the tower is a transparent underground cutaway showing Context Fabric, SQLite stores, ACP JSON-RPC pipes, MCP sidecars, telemetry instruments, and native projection workshops as connected rooms. Small human engineers in simple work clothes carry context capsules, memory ledgers, skill scrolls, and approval stamps between rooms. The story should feel like a busy but orderly miniature city where every subsystem has a job.
+Scene: a compact Rust CLI/TUI control tower named "iota-sympantos" sits in the center like a tiny railway signal station. From the tower, five labeled rail lines run outward to five AI backend stations: Claude Code, Codex, Gemini CLI, Hermes, and OpenCode. Below the tower is a transparent underground cutaway showing Context Fabric, SQLite stores, ACP JSON-RPC pipes, MCP sidecars, telemetry instruments, and Kanban dispatcher/worker workshops as connected rooms. Small human engineers in simple work clothes carry context capsules, memory ledgers, skill scrolls, task cards, and approval stamps between rooms. The story should feel like a busy but orderly miniature city where every subsystem has a job.
 
 Composition: portrait poster, 2:3 aspect ratio. Strong central vertical hierarchy: Entry at the top, Presentation below it, Service Orchestration in the middle, Context/Protocol/Store/Runtime Events as four connected chambers, External Boundaries at the bottom. Use arrows, pipes, labels, and little signs, but keep all text short and readable. Add the title "iota-sympantos Architecture" as hand-lettered text at the top.
 
-Style: elegant black-and-white steel-nib pen drawing, precise linework, dense but legible cross-hatching, technical diagram mixed with storybook world-building, subtle magenta accent only on the main tower beacon and status rail. No photorealism, no 3D render, no glossy UI mockup, no gradient background.
+Style: follow the story poster rules and palette stated at the top of this prompt. Keep the drawing precise, diagram-like, and legible; use subtle magenta only on the main tower beacon and active status rail. No photorealism, no 3D render, no glossy UI mockup, no gradient background.
 
 Mood: curious, clever, organized, a little whimsical, showing complex orchestration as a navigable machine-city.
 
-Negative prompt: blurry text, unreadable labels, crowded random symbols, corporate stock art, neon cyberpunk, colored comic style, watercolor, oil paint, low-detail sketch, distorted terminals, broken arrows, fake code blocks.
+Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels; also avoid blurry text, crowded random symbols, colored comic style, watercolor, oil paint, distorted terminals, broken arrows, and fake code blocks.
 ```
 
 ---
@@ -265,43 +300,47 @@ Negative prompt: blurry text, unreadable labels, crowded random symbols, corpora
 
 **用途**: 展示从用户输入到输出返回的完整执行时序，包括快速路径和完整执行路径
 
+![Prompt 执行时序](../img_result/execution_flowchart.png)
+
 **Prompt**:
 ```
-A technical execution flowchart representing the core prompt sequence of the "IotaEngine", styled as a colored-pen schematic on off-white paper with a Left-to-Right two-column layout.
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical execution flowchart representing the core prompt sequence of the "IotaEngine" with a left-to-right two-column layout.
 
-Left Column: "Initialization & Fast Paths" (outlined in navy blue)
-- Start Node: "TuiApp / CLI" (navy blue block) triggers submit(prompt) and calls IotaEngine::prompt_in_cwd_timed()
-- "request_hash" block (forest green): calculates SHA256 of backend + null-byte + cwd + null-byte + prompt as idempotency key
+Left Column: "Initialization & Concurrency Locking" (outlined in navy blue)
+- Start Node: "TuiApp / CLI" triggers submit(prompt) and calls IotaEngine::run_with_timing()
+- "request_hash" block (forest green): calculates SHA256 of backend + null-byte + cwd + null-byte + prompt as concurrency & fencing key
 - Decision Diamond (terracotta orange): "Is matched skill execution mode == MCP?"
-  - If YES: route (orange arrow) to skill::runner::run_engine_skill() which calls mcp::client to execute local script tools, bypass ACP and exit
+  - If YES: route (orange arrow) to skill::runner::run_engine_skill() which spawns stdio MCP server (iota-fun/iota-context), bypasses ACP backend and exit
   - If NO: proceed
-- Decision Diamond (terracotta orange): "CacheStore::find_completed_by_request_hash() matches?"
-  - If YES: route (blue arrow) to read completed execution, return cached text (Replay hit), and exit
-  - If NO: proceed
-- Decision Diamond (terracotta orange): "CacheStore::find_running_by_request_hash() matches?"
-  - If YES: route (red arrow) to wait for running execution ID to complete, join, and exit
-  - If NO: proceed to CacheStore::begin_execution_with_id() to allocate a fencing token and start execution
+- Decision Diamond (terracotta orange): "Is there a running execution with the same request_hash (UNIQUE constraint)?"
+  - If YES: begin_execution_with_id() fails or updates status (fencing check), abort duplicate parallel execution
+  - If NO: proceed to CacheStore::begin_execution_with_id() to allocate a fencing token, insert record with status 'running', and start execution
 
 Right Column: "Execution & Completion" (outlined in forest green)
-- "Session Ledger Handoff" block (purple): calls SessionLedger::ensure_session() and SessionLedger::publish_handoff()
-- "Recall" block (purple): calls MemoryStore::recall_buckets_with_thresholds() querying memory.sqlite
-- "Compose Prompt" block (forest green): calls ContextEngine::compose_effective_prompt() to inject rendered memory buckets, git status workspace output, and skill index into an XML <iota-context> capsule, limited by character budgets
-- "AcpClient" block (terracotta): calls ensure_session_timed(). If CWD changes, sends session/new (injecting context and fun mcpServers list). Then sends session/prompt request to backend stdin
+- "Session Ledger Setup" block (purple): calls SessionLedger::ensure_session() and preparse handoff text if backend switching occurs
+- "Recall" block (purple): calls MemoryStore::recall_buckets_with_thresholds() concurrently with workspace git summary rendering
+- "Compose Prompt" block (forest green): calls ContextEngine::compose_effective_prompt() to assemble the XML <iota-context> capsule with recalled memory, workspace state, and skill indexes (budget-aware)
+- "AcpClient" block (terracotta): calls ensure_acp_client(). If CWD changed, sends session/new (injecting context and fun mcpServers list). Then sends session/prompt request to backend stdin
 - "Read Loop" block (terracotta): polls stdout line-by-line using BufReader::lines():
   - If session/update -> stream text chunks to TUI mpsc channel (blue line)
   - If session/request_permission -> check tool_whitelist or request confirmation in TUI overlay (red line)
   - If tools/call -> call mcp::router::try_intercept_tool_call() to execute memory search/write locally (purple line), then write JSON-RPC result back to stdin
-  - If session/complete or prompt response matches -> exit loop
-- End Node: calls MemoryStore::insert(episodic), writes CacheStore::finish_execution(), and returns text output
+  - If session/complete -> exit loop
+- End Node: calls MemoryStore::insert(episodic), writes CacheStore::finish_execution() setting status to completed/failed, records ledger turn, and returns prompt output
 
 Connections:
 - Draw horizontal colored arrows from the Left Column decision paths to the Right Column execution blocks
 
 Style instructions:
-- Colored pen-on-paper schematic style on off-white background
-- Clean sans-serif typeface, consistent font size within each hierarchical level
-- Harmonious color coding for components
-- Continuous, solid lines with no overlapping or broken strokes, generous white borders
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not add extra fast paths, cache semantics, or backend calls not listed above
 ```
 
 ---
@@ -310,22 +349,29 @@ Style instructions:
 
 **用途**: 展示从入口点到运行时边界的完整代码调用链，包括直接路径和 Daemon 路径
 
+![代码调用链路](../img_result/code_call_chains.png)
+
 **Prompt**:
 ```
-Use gpt-image-2-style-library: pen-and-ink technical story poster, sequential flow diagram, hand-lettered annotations, fine cross-hatching, mechanical process narrative, warm paper texture.
+Use the "Iota Technical Field Notebook" story poster style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Use a pen-and-ink sequential flow poster with hand-lettered annotations, light cross-hatching, mechanical process details, warm paper texture, and restrained iota magenta highlights.
 
 Create a vertical poster for the document "iota-sympantos code call chains".
 
-Scene: depict a journey of one prompt as a small sealed message capsule traveling through a mechanical dispatch system. It begins at src/main.rs, enters cli::run(), passes command switches for run, tui, check, bench, logs, trace, context-mcp, fun-mcp, native-materialize, and __daemon, then splits into two illustrated paths: the direct ACP route and the daemon TCP route.
+Scene: depict a journey of one prompt as a small sealed message capsule traveling through a mechanical dispatch system. It begins at crates/iota-cli/src/main.rs, enters cli::run(), passes command switches for run, tui, check, bench, logs, trace, observability, kanban, mcp, and __daemon, then splits into two illustrated paths: the direct ACP route and the daemon TCP route.
 
 Direct route moves through:
 - Parsing, configuration
-- Engine orchestration
-- Cache replay (request_hash lookup)
+- Engine orchestration (crates/iota-core/src/engine/mod.rs)
+- Cache lock check (UNIQUE constraint on request_hash)
 - Memory recall (MemoryStore::recall_buckets_with_thresholds)
 - Skill matching (SkillRegistry)
 - Context capsule assembly (ContextEngine::compose_effective_prompt)
-- ACP session creation (AcpClient::ensure_session_timed)
+- ACP client creation (AcpClient::ensure_acp_client)
 - Streaming updates (session/update)
 - Final output
 
@@ -340,11 +386,11 @@ Put "initialize -> session/new -> session/prompt -> session/update -> session/co
 Show external boundaries as illustrated gates: git subprocess, ACP child process, MCP stdio sidecar, SQLite files, and TCP socket. 
 Add the title "Code Call Chains" at the top and a small subtitle "from entry point to runtime boundary".
 
-Style: black ink steel-nib illustration, crisp contour lines, engineering notebook feel, fine stippling and cross-hatching, readable miniature labels, light magenta accent on the active message capsule and protocol ribbon. Keep it playful through the journey metaphor, but technically accurate and structured.
+Style: follow the story poster rules and palette stated at the top of this prompt. Keep crisp contour lines, readable miniature labels, and light magenta accents only on the active message capsule and protocol ribbon. Keep the journey metaphor technically accurate and structured.
 
 Mood: adventurous debugging map, a prompt crossing checkpoints and machines, clear enough to teach the runtime path at a glance.
 
-Negative prompt: unreadable spaghetti arrows, random pseudo-code, fantasy map parchment cliches, photorealistic devices, glossy dashboard, cyberpunk glow, excessive colors, cluttered icons, distorted terminal text.
+Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels; also avoid unreadable spaghetti arrows, random pseudo-code, fantasy map cliches, excessive colors, cluttered icons, and distorted terminal text.
 ```
 
 ---
@@ -353,9 +399,16 @@ Negative prompt: unreadable spaghetti arrows, random pseudo-code, fantasy map pa
 
 **用途**: 展示 Backend 调用的三个阶段：预处理、IPC 调用、后处理
 
+![Backend 调用与 IPC](../img_result/backend_ipc_stages.png)
+
 **Prompt**:
 ```
-A technical column-based layout diagram titled "Backend Call Stages and IPC Interface", rendered in a colored-pen schematic on off-white paper. 
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical column-based layout diagram titled "Backend Call Stages and IPC Interface".
 The diagram is split into three vertical sections showing the exact execution and tool invocation pipelines:
 
 Column 1: "Preprocessing Stage & Context Loading" (outlined in forest green)
@@ -379,9 +432,10 @@ Connections and Flow:
 - Distinct colored arrows show trace pipelines (purple for memory data flow, orange for skill loading/execution, blue for MCP tool routing, red for process execution)
 
 Style instructions:
-- Colored pen-on-paper schematic style on off-white background
-- Clean sans-serif typeface, consistent font size within each hierarchical level
-- Continuous, solid lines with no overlapping or broken strokes, generous white borders
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent additional IPC protocols, tools, stores, or cleanup paths
 ```
 
 ---
@@ -392,9 +446,17 @@ Style instructions:
 
 **用途**: 展示记忆系统的数据库模式、分类体系和生命周期管理
 
+![记忆分类与生命周期](../img_result/memory_taxonomy_lifecycle.png)
+
+
 **Prompt**:
 ```
-A technical data-mapping and database schema diagram titled "Memory Taxonomy, Scopes and Lifecycles", rendered in a colored-pen schematic style on off-white paper. 
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical data-mapping and database schema diagram titled "Memory Taxonomy, Scopes and Lifecycles".
 The diagram contains three interconnected schema blocks:
 
 Left Block: "SQLite Table Schema & Visibility Candidates" (outlined in purple)
@@ -421,10 +483,11 @@ Right Block: "Lifecycle Controls" (outlined in terracotta orange)
 Solid lines with arrows trace the lifecycles from DB tables, through scope-filtering, into the XML prompt injection.
 
 Style instructions:
-- Colored pen-on-paper schematic style on off-white background
-- Clean sans-serif typeface, consistent font size within each hierarchical level
-- Harmonious color coding for components
-- Continuous, solid lines with no overlapping or broken strokes, generous white borders
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Use continuous solid lines with no overlapping or broken strokes
+- Show schema snippets in monospace while keeping them readable
+- Do not invent columns, scopes, facets, or table names
 ```
 
 ---
@@ -433,9 +496,17 @@ Style instructions:
 
 **用途**: 展示六桶记忆系统的召回流程和向量/混合搜索机制
 
+![六桶记忆召回机制](../img_result/memory_recall_buckets.png)
+
+
 **Prompt**:
 ```
-A technical flow diagram titled "Six-Bucket Memory Recall and Search Mechanisms", rendered in a colored-pen schematic style on off-white paper.
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical flow diagram titled "Six-Bucket Memory Recall and Search Mechanisms".
 
 The diagram shows three interconnected sections:
 
@@ -482,11 +553,11 @@ Bottom: "Output Assembly" (outlined in purple)
 - Character budget enforcement by ContextEngine
 
 Style instructions:
-- Colored pen-on-paper schematic style on off-white background
-- Clean sans-serif typeface, consistent font size within each hierarchical level
-- Harmonious color coding for components
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
 - Show SQL snippets in monospace font
-- Continuous, solid lines with no overlapping or broken strokes, generous white borders
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent query modes, thresholds, or scoring formulas
 ```
 
 ---
@@ -497,9 +568,17 @@ Style instructions:
 
 **用途**: 展示完整的观测性架构，包括本地日志和 Docker 观测性栈
 
+![OpenTelemetry 观测性架构](../img_result/observability_architecture.png)
+
+
 **Prompt**:
 ```
-Use gpt-image-2-style-library: pen-and-ink technical story poster, observatory control room, signal routing diagram, fine cross-hatching, hand-drawn infrastructure map, warm paper texture.
+Use the "Iota Technical Field Notebook" story poster style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Use a pen-and-ink observability story poster with a signal routing diagram, hand-drawn infrastructure map, light cross-hatching, warm paper texture, and restrained iota magenta highlights.
 
 Create a vertical poster for the document "iota observability".
 
@@ -507,11 +586,11 @@ Scene: show iota as a small command desk sending three kinds of signals into an 
 
 Composition: portrait poster, 2:3 aspect ratio. Central hub-and-spoke layout with the OTel Collector as the main switching lens. Put Docker observability stack on the right side and local fallback behavior on the left side. Include readable short labels: OTLP :4317, Loki :3100, Jaeger :16686, Prometheus :9090, Grafana :3000, OTEL_ENABLED=false, and iota logs / iota trace / iota metrics. Add the title "iota Observability" at the top.
 
-Style: meticulous black-and-white pen drawing, Victorian scientific instrument meets modern infrastructure diagram, cross-hatching, stippled shadows, precise arrows, minimal magenta accent on live telemetry pulses. Avoid making it look like a generic cloud architecture slide.
+Style: follow the story poster rules and palette stated at the top of this prompt. Keep precise arrows, readable infrastructure labels, and minimal magenta accents on live telemetry pulses. Avoid generic cloud architecture slide aesthetics.
 
 Mood: investigative, transparent, a control room where every runtime signal can be followed from source to storage.
 
-Negative prompt: blurry dashboards, unreadable labels, stock cloud icons, overbright neon, colorful SaaS illustration, 3D render, abstract blobs, random graphs without meaning, fake brand logos.
+Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels; also avoid blurry dashboards, random graphs without meaning, fake brand logos, and colorful SaaS illustration.
 ```
 
 ---
@@ -520,9 +599,17 @@ Negative prompt: blurry dashboards, unreadable labels, stock cloud icons, overbr
 
 **用途**: 展示使用 VS Code 和 CodeLLDB 调试 iota-sympantos 的完整工作流
 
+![调试工作流](../img_result/debugging_workflow.png)
+
+
 **Prompt**:
 ```
-Use gpt-image-2-style-library: pen-and-ink technical story poster, debugging workshop, hand-drawn developer desk, fine cross-hatching, annotated troubleshooting map, warm paper texture.
+Use the "Iota Technical Field Notebook" story poster style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Use a pen-and-ink debugging workshop poster with a hand-drawn developer desk, annotated troubleshooting map, light cross-hatching, warm paper texture, and restrained iota magenta highlights.
 
 Create a vertical poster for the document "iota-sympantos debugging guide".
 
@@ -530,11 +617,579 @@ Scene: an engineer sits at a VS Code workbench with CodeLLDB tools arranged like
 
 Composition: portrait poster, 2:3 aspect ratio. Make the story read from top to bottom: prerequisites, configurations, breakpoints, stepping controls, variable inspection, TUI debugging, ACP subprocess boundary. Include a small keyboard strip with F5, F10, F11, Shift+F11, and Shift+F5. Add the title "Debugging iota-sympantos" at the top.
 
-Style: black ink pen illustration, crisp technical linework, cross-hatched shadows, annotated workshop poster, readable labels, subtle magenta accent on breakpoint dots and the active debug path. It should feel practical, hands-on, and slightly playful without becoming cartoonish.
+Style: follow the story poster rules and palette stated at the top of this prompt. Keep crisp technical linework, readable labels, subtle magenta accents on breakpoint dots and the active debug path, and a practical repair-manual feeling without becoming cartoonish.
 
 Mood: focused troubleshooting, a repair manual for a complex but understandable runtime.
 
-Negative prompt: chaotic code wall, unreadable text, photorealistic office, glossy app screenshot, neon cyberpunk, excessive red, fantasy laboratory, distorted keyboards, fake stack traces, low-detail doodle.
+Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels; also avoid chaotic code walls, photorealistic office scenes, glossy app screenshots, excessive red, fantasy laboratory details, distorted keyboards, fake stack traces, and low-detail doodles.
+```
+
+---
+
+---
+
+## 5. Kanban 任务编排系统
+
+### 5.1 Kanban 状态机与事件溯源
+
+**用途**: 展示 Kanban 任务的完整状态机、事件溯源架构和状态转换规则
+
+![Kanban 状态机与事件溯源](../img_result/kanban_state_machine_event_sourcing.png)
+
+
+**Prompt**:
+```
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical state machine and event sourcing diagram titled "Kanban Task State Machine & Event Sourcing Architecture".
+
+The diagram is divided into three interconnected sections:
+
+Left Section: "Task State Machine" (outlined in navy blue)
+Shows a state transition diagram with the following states and transitions:
+- States (rounded rectangles):
+  - triage (entry state, light gray)
+  - todo (yellow)
+  - ready (green)
+  - running (blue)
+  - blocked (red)
+  - done (purple)
+  - archived (dark gray)
+
+- Transitions (labeled arrows):
+  - triage → todo: "transition"
+  - todo → ready: "transition"
+  - ready → running: "claim/start" (dispatcher or manual dispatch)
+  - running → done: "complete"
+  - running → blocked: "blocked/failure"
+  - running → ready: "claim expired"
+  - blocked → ready: "unblock/retry"
+  - blocked → done: "manual resolution"
+  - done → archived: "archive"
+
+- Annotations:
+  - "Dispatcher watches ready queue"
+  - "Worker spawns hermes -z process"
+  - "Shadow materializer projects files"
+  - "Shadow watcher recycles on completion"
+
+Center Section: "Event Sourcing Store" (outlined in forest green)
+Shows the event-sourced architecture:
+- Table "events": columns (id [INTEGER PRIMARY KEY], event_type [TEXT], payload [TEXT JSON], created_at [INTEGER])
+- Table "tasks": columns (id [INTEGER PRIMARY KEY], board_id [INTEGER], title [TEXT], body [TEXT], status [TEXT], assignee [TEXT], priority [INTEGER], tags [TEXT JSON], workspace_kind [TEXT], workspace_path [TEXT], created_at, updated_at, claimed_at, claim_ttl_secs)
+- Table "boards": columns (id [INTEGER PRIMARY KEY], slug [TEXT UNIQUE], name [TEXT], created_at)
+- Table "runs": columns (id [TEXT PRIMARY KEY], task_id [INTEGER], profile [TEXT], status [TEXT], started_at, finished_at, last_heartbeat, exit_code, output_summary)
+- Table "comments": columns (id [INTEGER PRIMARY KEY], task_id [INTEGER], author [TEXT], body [TEXT], created_at)
+- Table "links": columns (from_id [INTEGER], to_id [INTEGER], kind [TEXT], PRIMARY KEY(from_id, to_id, kind))
+- Table "event_sync_cursors": columns (source [TEXT PRIMARY KEY], cursor [INTEGER], updated_at)
+
+Event types shown:
+- board_created, task_created, task_updated, task_deleted
+- task_transitioned
+- link_created, link_removed
+- comment_added
+- run_started, run_completed
+
+Arrows show:
+- Events append-only to events table
+- Structured payload JSON can be replayed to rebuild state
+- Current SQLite store writes events plus normalized tables for boards/tasks/runs/comments/links
+
+Right Section: "Dispatcher & Worker Pipeline" (outlined in terracotta orange)
+Shows the execution pipeline:
+- Dispatcher (top):
+  - Polls ready tasks every tick_interval (default 30 seconds)
+  - Checks worker capacity (max concurrent workers)
+  - Assigns task to available worker
+  - Emits RunStarted event
+
+- WorkerHandle (middle):
+  - Spawns hermes -z <task_id> subprocess
+  - Captures stdout/stderr to output file
+  - Monitors process health
+  - Emits run_completed event with status completed, failed, timed_out, or cancelled
+
+- ShadowMaterializer (bottom left):
+  - Projects task context to shadow directory
+  - Creates task.md, context files, skill files
+  - Injects task-specific memory and skills
+
+- ShadowWatcher (bottom right):
+  - Watches for task completion
+  - Recycles shadow directory
+  - Extracts artifacts and logs
+  - Updates task status to done
+
+Connections and Flow:
+- Blue arrows from state machine to event store (state changes → events)
+- Green arrows from event store to dispatcher (event replay → state reconstruction)
+- Orange arrows from dispatcher through worker to shadow system (execution pipeline)
+- Purple arrows from shadow watcher back to event store (completion → events)
+
+Style instructions:
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Show SQL table schemas in monospace font
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent extra state transitions, event names, or table columns
+```
+
+---
+
+### 5.2 Kanban 分布式同步与桥接
+
+**用途**: 展示 Kanban 的跨节点事件同步、任务分解和规格化桥接机制
+
+![Kanban 分布式同步与桥接](../img_result/kanban_event_sync_bridge.png)
+
+
+**Prompt**:
+```
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical distributed system diagram titled "Kanban Event Sync & Advanced Bridge".
+
+The diagram is divided into three interconnected sections:
+
+Left Section: "Event Synchronization" (outlined in navy blue)
+Shows the distributed event sync architecture:
+- Node A (local):
+  - KanbanStore with iota.db (located at ~/.i6/kanban/iota.db)
+  - EventSyncManager
+  - HTTP TCP server on :8080 (serve-sync mode)
+  - Export to JSON file
+
+- Node B (remote):
+  - KanbanStore with iota.db
+  - EventSyncManager
+  - Pull from Node A HTTP TCP endpoint
+  - Import from JSON file
+
+- Sync operations (labeled arrows):
+  - export: events → JSON file
+  - import: JSON file → events (with conflict resolution)
+  - serve-sync: HTTP TCP server exposes event sync stream
+  - pull: HTTP TCP client fetches events from remote
+  - push: HTTP TCP POST events to remote
+
+- Conflict resolution strategies:
+  - Last-write-wins by timestamp
+  - Event ID deduplication
+  - Board/task ID namespace isolation
+
+Center Section: "Advanced Bridge" (outlined in forest green)
+Shows the task decomposition and specification bridge:
+- AdvancedBridge orchestrator:
+  - decompose(task) → subtasks
+  - specify(task) → detailed requirements
+  - Uses requirement-detailer sub-agent
+  - Integrates with IotaEngine for AI-powered analysis
+
+- Decomposition flow:
+  1. Input: high-level task description
+  2. AI analysis: identify subtasks, dependencies, priorities
+  3. Output: task_created events for each subtask
+  4. link_created events for parent-child relationships
+
+- Specification flow:
+  1. Input: task with vague requirements
+  2. AI analysis: QA-based requirement detailing
+  3. Output: task_updated event with detailed description
+  4. Metadata: acceptance criteria, technical notes
+
+Right Section: "Integration Points" (outlined in terracotta orange)
+Shows how Kanban integrates with the rest of iota:
+- TUI Kanban View:
+  - /kanban or /kb command enters kanban mode
+  - Board list, task list, task detail views
+  - Keyboard navigation (j/k/h/l to move focus, Tab to cycle view modes, Enter to inspect details, Esc/q to close)
+  - Keyboard hotkeys (d to dispatch/start task, m to prefill /kanban move command, c to comment, a to assign, s to specify, x to decompose)
+
+- CLI Kanban Commands:
+  - iota kanban create-board <slug> <name>
+  - iota kanban create-task <board-id> <title>
+  - iota kanban move <id> <status>
+  - iota kanban dispatch <id> [--timeout <secs>]
+  - iota kanban specify <id>
+  - iota kanban decompose <id>
+  - iota kanban export <path> [cursor]
+  - iota kanban import <path>
+  - iota kanban serve-sync [addr]
+  - iota kanban pull <addr> [cursor]
+  - iota kanban push <addr> [cursor]
+
+- Engine Integration:
+  - Worker uses IotaEngine for task execution
+  - Task context injected into memory system
+  - Task-specific skills loaded from shadow directory
+  - Execution results captured as task artifacts
+
+Connections and Flow:
+- Blue arrows between nodes showing event sync
+- Green arrows from bridge to event store (decompose/specify → events)
+- Orange arrows from integration points to core Kanban system
+- Purple arrows showing feedback loops (execution results → task updates)
+
+Style instructions:
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent sync endpoints, bridge commands, or keyboard shortcuts
+```
+
+---
+
+## 6. Desktop (Tauri) 架构
+
+### 6.1 Desktop 应用架构与通信流
+
+**用途**: 展示 iota-desktop Tauri 应用的前后端架构、Daemon 通信和状态管理
+
+![Desktop 应用架构与通信流](../img_result/desktop_tauri_architecture.png)
+
+
+**Prompt**:
+```
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical application architecture diagram titled "iota-desktop (Tauri) Architecture & Communication Flow".
+
+The diagram is divided into four vertical sections:
+
+Left Section: "React Frontend" (outlined in cyan)
+Shows the React UI architecture:
+- Components:
+  - App.tsx (root)
+  - ChatWorkbench.tsx (main chat panel, streams text chunks, handles approvals, displays context state)
+  - ConfigPanel.tsx (model configurations and backend switching)
+  - MemoryContextWorkspace.tsx (persistent memory taxonomy view & context inspection)
+  - RightInspector.tsx (individual turn details, timing stats, event trace inspector)
+
+- State Management:
+  - turnReducer.ts (Redux-style reducer managing conversation history)
+  - Turn states: pending, streaming, completed, failed
+  - Message types: user, assistant, system
+  - Event accumulation per turn
+
+- UI Features:
+  - Markdown rendering with syntax highlighting
+  - Code block copy buttons
+  - Approval request overlays
+  - Real-time streaming updates
+  - Turn detail expansion/collapse
+
+Center-Left Section: "Tauri Commands" (outlined in purple)
+Shows the Rust backend commands exposed to frontend:
+- submit_prompt(prompt, backend_str, turn_id, window) → turn_id
+- cancel_turn(turn_id, window) → success
+- handle_approval(req_id, approved) → success
+- get_config() → DesktopConfigSnapshot
+- save_backend_model(backend_str, model) → DesktopConfigSnapshot
+- check_backend(backend_str) → DaemonServerMessage
+- get_observability_summary() → Value
+- get_memory_context_snapshot(scope_mode) → DesktopMemoryContextSnapshot
+- current_workspace() → String
+- Kanban commands: list_boards(), list_tasks(filter), create_task(req), transition_task(task_id, to_status), list_comments(task_id), add_comment(task_id, author, body)
+
+- Window Events (Tauri emit):
+  - "daemon-message" → DaemonServerMessage
+    - TextChunk(turn_id, text)
+    - TurnEvent(turn_id, event)
+    - ApprovalRequested(turn_id, request)
+    - TurnComplete(turn_id, timing)
+    - TurnFailed(turn_id, error)
+
+Center-Right Section: "Daemon Client" (outlined in orange)
+Shows the daemon communication layer:
+- DaemonClient:
+  - connect_or_start() → auto-start daemon if not running
+  - start_turn(window, turn_id, cwd, backend, prompt)
+  - cancel_turn(turn_id)
+  - respond_approval(turn_id, decision)
+
+- Protocol:
+  - TCP connection to 127.0.0.1:47661
+  - Newline-delimited JSON messages
+  - DaemonClientMessage (Hello, StartTurn, CancelTurn, RespondApproval, etc.)
+  - DaemonServerMessage (TextChunk, TurnEvent, ApprovalRequested, TurnComplete, TurnFailed, etc.)
+
+- ApprovalRegistry:
+  - Tracks pending approvals per turn
+  - Routes approval responses to correct turn
+  - Timeout handling for stale approvals
+
+Right Section: "Daemon & Engine" (outlined in forest green)
+Shows the backend execution:
+- Daemon:
+  - handle_desktop_connection()
+  - Spawns tokio task per turn
+  - Streams messages back to client
+  - Manages EnginePool per cwd
+
+- IotaEngine:
+  - run_with_timing() execution
+  - Streams RuntimeEvent to daemon
+  - Approval requests routed through daemon
+  - Turn completion with timing stats
+
+- EnginePool:
+  - Reuses IotaEngine per cwd
+  - Config hot-reload support
+  - Engine reset on config change
+
+Connections and Flow:
+- Cyan arrows from React components to Tauri commands (invoke)
+- Purple arrows from Tauri backend to daemon client (TCP)
+- Orange arrows from daemon client to daemon server (JSON protocol)
+- Green arrows from daemon to engine (execution)
+- Red arrows showing reverse flow (events → frontend)
+
+Sequence markers (use circled markers):
+1. User types prompt in ChatWorkbench
+2. Click Send → submit_prompt Tauri command
+3. Tauri backend → DaemonClient.start_turn()
+4. DaemonClient → TCP StartTurn message
+5. Daemon → spawn turn task
+6. Turn task → IotaEngine.run_with_timing()
+7. Engine → stream RuntimeEvent
+8. Daemon → DaemonServerMessage
+9. DaemonClient → emit "daemon-message" window event
+10. React → turnReducer processes message
+11. ChatWorkbench → re-renders with new content
+
+Style instructions:
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Show TypeScript/Rust type signatures in monospace font
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent Tauri commands, daemon messages, or frontend components
+```
+
+---
+
+## 7. 配置与环境变量映射
+
+### 7.1 配置层次与后端环境变量映射
+
+**用途**: 展示 nimia.yaml 配置结构和各后端的环境变量映射规则
+
+![配置层次与后端环境变量映射](../img_result/configuration_env_mapping.png)
+
+
+**Prompt**:
+```
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical configuration mapping diagram titled "Configuration Hierarchy & Backend Environment Variable Mapping".
+
+The diagram is divided into three sections:
+
+Top Section: "Configuration Hierarchy" (outlined in navy blue)
+Shows the configuration file structure:
+- ~/.i6/nimia.yaml (single source of truth):
+  - Global settings:
+    - context_engine (enabled, injection [auto/off/prompt/mcp], memory_db, skill_roots, budgets, recall_thresholds, episodic_compaction_keep, mcp, fun, embedding)
+    - context_engine_backend (maps backends: "claude-code", "codex", "gemini", "hermes", "opencode" to context options)
+    - store (cache_retention_days, cache_running_ttl_secs, observability_retention_days, approvals_max_pending_age_secs)
+
+  - Backend sections (5 backends in nimia.yaml):
+    - claude_code, codex, gemini, hermes, opencode
+    - Each with: enabled, acp (command, args), version_mapping, home, model (provider, name, base_url, api_key), tool_whitelist
+
+- No project-level config discovery
+- No automatic config merging
+- Template: nimia.yaml.template
+
+Center Section: "Backend Environment Variable Mapping" (outlined in forest green)
+Shows five backend mapping tables:
+
+1. Claude Code (cyan box):
+   - api_key → ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN
+   - base_url → ANTHROPIC_BASE_URL
+   - name → ANTHROPIC_MODEL, ANTHROPIC_SMALL_FAST_MODEL, ANTHROPIC_DEFAULT_*_MODEL
+   - Additional: API_TIMEOUT_MS=3000000, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+   - home → CLAUDE_CONFIG_DIR (if override_home=true)
+
+2. Codex (blue box):
+   - api_key → OPENAI_API_KEY, ROUTER_API_KEY
+   - base_url → OPENAI_BASE_URL
+   - name → OPENAI_MODEL
+   - Additional: -c args (model, model_provider, base_url, env_key, wire_api)
+   - home → not mapped
+
+3. Gemini CLI (yellow box):
+   - api_key → GEMINI_API_KEY
+   - name → GEMINI_MODEL
+   - home → GEMINI_CONFIG_DIR (if override_home=true)
+
+4. Hermes Agent (purple box):
+   - provider → HERMES_INFERENCE_PROVIDER
+   - name → HERMES_MODEL
+   - api_key + base_url → provider-native env vars (e.g., MINIMAX_CN_API_KEY, MINIMAX_CN_BASE_URL)
+   - home → NOT MAPPED (Hermes uses its own default HERMES_HOME)
+   - Note: Do not override HERMES_HOME
+
+5. OpenCode (orange box):
+   - name → OPENCODE_MODEL
+   - home → OPENCODE_CONFIG_DIR (if override_home=true)
+
+Bottom Section: "Context Options & MCP Injection" (outlined in terracotta orange)
+Shows per-backend context configuration from context_engine_backend:
+- mcp_session_new:
+  - "try": inject mcpServers for Claude Code and Codex only
+  - "always": inject for all backends
+  - "never": never inject
+
+- always_send_empty_mcp_servers:
+  - true: send empty mcpServers array even when no servers configured
+  - false: omit mcpServers field when empty
+
+- mcp_env_shape:
+  - "string_array": env as ["KEY=value", ...]
+  - "object": env as {"KEY": "value", ...}
+
+- override_home:
+  - true: map backend home to corresponding env var (e.g., CLAUDE_CONFIG_DIR)
+  - false: let backend use its default home
+
+- MCP server injection:
+  - iota-context: memory search/write, skill search/load, session summary, handoff publish/read
+  - iota-fun: 7 language function runners (Python, TypeScript, Rust, Go, Java, C++, Zig)
+
+Connections and Flow:
+- Blue arrows from config file to backend sections
+- Green arrows from backend sections and context_engine_backend to environment variable mappings
+- Orange arrows from context options to MCP injection logic
+- Purple arrows showing runtime config → EffectiveConfig → backend process env
+
+Style instructions:
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Show YAML structure and env var names in monospace font
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent config files, environment variables, or backend home mappings
+```
+
+---
+
+## 8. 技能系统 (Skill System)
+
+### 8.1 技能加载、匹配与执行
+
+**用途**: 展示技能系统的完整生命周期：加载、触发匹配、模板渲染和执行
+
+![技能加载、匹配与执行](../img_result/skill_system_pipeline.png)
+
+
+**Prompt**:
+```
+Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
+Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
+Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
+Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
+Create a technical skill system diagram titled "Skill Loading, Matching & Execution Pipeline".
+
+The diagram is divided into four sections:
+
+Left Section: "Skill Loading Roots" (outlined in navy blue)
+Shows the skill loading hierarchy:
+- SkillRegistry loads from multiple roots (in order):
+  1. Workspace skills/ directory
+  2. Workspace .iota/skills/ directory
+  3. Configured skill_roots from nimia.yaml
+  4. ~/.i6/skills/ (user-global skills)
+
+- Skill structure:
+  - .md / .yaml / .yml file with YAML frontmatter:
+    - name, description, version
+    - summary, tags, triggers
+    - backends: [claude, codex, gemini, hermes, opencode]
+    - execution:
+      - mode: "mcp" or "advisory"
+      - server: MCP server name (for mode=mcp)
+      - tools: [tool calls] (for mode=mcp)
+      - parallel: true/false (for mode=mcp)
+    - output.template for optional rendered response text
+  - Additional files: scripts, data, documentation
+
+- Skill cache:
+  - iota skill pull <source> [name]
+  - Downloads from HTTP(S) or copies from local path
+  - Extracts to ~/.i6/skills/<name>
+
+Center-Left Section: "Trigger Matching" (outlined in forest green)
+Shows the skill matching logic:
+- Match criteria:
+  1. Backend compatibility check through `backends`
+  2. Trigger keyword match (case-insensitive substring)
+  3. Skill is eligible when `backends` is empty or contains current backend
+
+- Matching algorithm:
+  - Iterate through all loaded skills
+  - Check `backends` contains current backend or is empty
+  - Check if any trigger matches prompt or context
+  - Return the first compatible matched skill from registry order
+
+- Context injection:
+  - Matched skills injected into <iota-context> capsule
+  - Skill index shows available skills to backend LLM
+  - Backend can reference skills in its reasoning
+
+Center-Right Section: "Template Rendering" (outlined in purple)
+Shows the template rendering logic:
+- Template variables (simple placeholder replace, no Handlebars engine):
+  - {{prompt}}: user's original prompt string
+  - {{skill.name}}: matched skill name
+  - {{alias}}: (for mode=mcp) maps tool result placeholders
+  - {{tool_results}}: (for mode=mcp) maps all aggregated tool results
+
+- Rendering engine:
+  - Pure string replacement (.replace) on metadata templates
+  - Prepares final advisory text or tool payload strings
+
+Right Section: "Execution Modes" (outlined in terracotta orange)
+Shows the two execution modes:
+
+1. Mode: "advisory" (top):
+   - Skill body matches and acts as system-prompt instruction
+   - Injected into <iota-context> capsule advisor context
+   - Backend LLM processes as part of runtime context
+   - No separate script execution step
+
+2. Mode: "mcp" (bottom):
+   - Skill bypasses ACP backend execution
+   - skill::runner::run_engine_skill() executes directly
+   - Spawns target MCP server (stdio)
+   - Performs sequential or parallel tools/call requests
+   - Tool results captured as RuntimeEvent and replaced in template
+   - Output returned directly to CLI / TUI
+
+Connections and Flow:
+- Blue arrows from loading roots to SkillRegistry
+- Green arrows from SkillRegistry to trigger matching
+- Purple arrows from matched skills to template rendering
+- Orange arrows from execution modes to output
+- Red arrows showing mode=mcp bypassing ACP backend
+
+Style instructions:
+- Follow the technical diagram rules and palette stated at the top of this prompt
+- Use compact labels, clean sans-serif type, and consistent font size within each hierarchy level
+- Show YAML structure and template placeholders in monospace font
+- Use continuous solid lines with no overlapping or broken strokes
+- Do not invent skill metadata fields, matching rules, or execution modes
 ```
 
 ---
@@ -543,14 +1198,36 @@ Negative prompt: chaotic code wall, unreadable text, photorealistic office, glos
 
 ### 生成建议
 
-1. **技术架构图** (1.1, 1.2, 3.1, 3.2): 适合使用 GPT-4 with DALL-E 或 Midjourney，强调清晰的技术细节和准确的标签
-2. **故事化海报** (1.3, 2.2, 4.1, 4.2): 适合使用 Midjourney 或 Stable Diffusion，强调艺术风格和叙事性
+1. **技术架构图** (1.1, 1.2, 3.1, 3.2, 5.1, 5.2, 6.1, 7.1, 8.1): 每个 Prompt 已内置 `Iota Technical Field Notebook` 技术图规则，强调清晰模块、准确标签和紧凑信息层级
+2. **故事化海报** (1.3, 2.2, 4.1, 4.2): 每个 Prompt 已内置 `Iota Technical Field Notebook` 故事海报规则，强调钢笔线稿、工程剖面和可读叙事标签
 
 ### 风格一致性
 
 所有图表遵循统一的视觉语言：
-- **技术图**: 彩色笔绘示意图风格，米白色背景，清晰的无衬线字体
-- **海报图**: 钢笔墨水插画风格，精细交叉阴影，温暖纸质纹理，洋红色点缀
+- **统一风格名**: `Iota Technical Field Notebook / iota 技术野外笔记图册`
+- **技术图**: 暖白纸底、细线工程图、圆角模块、清晰无衬线字体、克制色板和实体箭头
+- **海报图**: 钢笔墨水插画、轻量交叉阴影、工程剖面叙事、可读标签和少量 iota 洋红高亮
+- **共同约束**: 不生成 3D、霓虹、企业云图标、装饰渐变块、虚构模块、错误路径或不可读小字
+
+### 图表索引
+
+| 编号 | 标题 | 类型 | 用途 |
+| :---| :---| :---| :---|
+| 1.1 | 分层架构与组件依赖 | 技术图 | 展示四层架构和模块依赖关系 |
+| 1.2 | 完整运行时架构图 | 技术图 | 展示所有模块、数据流和序列标记 |
+| 1.3 | 架构总览海报 | 海报 | 故事化展示整体架构 |
+| 2.1 | Prompt 执行时序 | 技术图 | 展示从输入到输出的完整时序 |
+| 2.2 | 代码调用链路 | 海报 | 故事化展示调用链路 |
+| 2.3 | Backend 调用与 IPC | 技术图 | 展示三阶段执行流程 |
+| 3.1 | 记忆分类与生命周期 | 技术图 | 展示数据库模式和分类体系 |
+| 3.2 | 六桶记忆召回机制 | 技术图 | 展示召回流程和搜索机制 |
+| 4.1 | OpenTelemetry 观测性架构 | 海报 | 故事化展示观测性栈 |
+| 4.2 | 调试工作流 | 海报 | 故事化展示调试流程 |
+| 5.1 | Kanban 状态机与事件溯源 | 技术图 | 展示状态机和事件溯源架构 |
+| 5.2 | Kanban 分布式同步与桥接 | 技术图 | 展示事件同步和任务分解 |
+| 6.1 | Desktop 应用架构与通信流 | 技术图 | 展示 Tauri 应用架构 |
+| 7.1 | 配置层次与后端环境变量映射 | 技术图 | 展示配置结构和环境变量映射 |
+| 8.1 | 技能加载、匹配与执行 | 技术图 | 展示技能系统完整生命周期 |
 
 ### 更新维护
 
@@ -559,8 +1236,23 @@ Negative prompt: chaotic code wall, unreadable text, photorealistic office, glos
 - 执行流程变化 → 更新 2.1, 2.3
 - 记忆系统变化 → 更新 3.1, 3.2
 - 观测性变化 → 更新 4.1
+- Kanban 系统变化 → 更新 5.1, 5.2
+- Desktop 应用变化 → 更新 6.1
+- 配置模型变化 → 更新 7.1
+- 技能系统变化 → 更新 8.1
 
----
+### 使用场景
 
-**文档版本**: 2024-01 (基于 AGENTS.md 最新实现)
-**维护者**: iota-sympantos 开发团队
+| 场景 | 推荐图表 |
+| :---| :---|
+| 新人入职，了解整体架构 | 1.3, 1.2, 1.1 |
+| 理解执行流程 | 2.1, 2.2, 2.3 |
+| 开发记忆功能 | 3.1, 3.2 |
+| 配置观测性 | 4.1 |
+| 调试问题 | 4.2, 2.2 |
+| 开发 Kanban 功能 | 5.1, 5.2 |
+| 开发 Desktop 应用 | 6.1 |
+| 配置后端 | 7.1 |
+| 开发技能 | 8.1 |
+| 技术分享 | 1.3, 2.2, 4.1, 4.2 |
+| 文档封面 | 1.3 |
