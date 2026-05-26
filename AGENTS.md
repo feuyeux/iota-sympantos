@@ -16,73 +16,114 @@ iota-sympantos 是一个轻量级 Rust CLI，通过 ACP（Agent Control Protocol
 
 ```
 iota-sympantos/
-├── src/
-│   ├── main.rs              # 程序入口
-│   ├── cli/
-│   │   └── mod.rs           # 命令分发（run/check/tui/bench 等）
-│   ├── tui.rs               # 交互式 TUI 主循环
-│   ├── tui/
-│   │   ├── input.rs        # 多行输入组件（kill buffer/Ctrl+R/word motion）
-│   │   ├── scrollback.rs   # 终端回滚缓冲（insert_before）
-│   │   ├── loop.rs         # TUI 主事件循环
-│   │   ├── markdown.rs      # markdown 渲染（pulldown-cmark）
-│   │   ├── status_bar.rs    # 底部状态栏（后端·模型 / 快捷键提示）
-│   │   ├── theme.rs         # ratatui 颜色主题（洋红主色）
-│   │   └── state.rs         # TUI 状态
-│   ├── engine.rs            # IotaEngine 编排，ACP client pool、context、memory、skill、ledger
-│   ├── acp/
-│   │   ├── mod.rs           # ACP JSON-RPC 2.0 协议驱动、AcpClient
-│   │   ├── permission.rs    # 权限请求处理（iota 工具自动批准）
-│   │   ├── session.rs       # session/new 参数渲染、mcpServers shape
-│   │   └── wire.rs          # line read/parse、response id 匹配
-│   ├── daemon/
-│   │   ├── mod.rs           # 内部 daemon TCP server（127.0.0.1:47661）
-│   │   ├── pool.rs          # EnginePool（按 cwd 维度复用 IotaEngine）
-│   │   └── proto.rs         # DaemonPromptRequest/Response wire types
-│   ├── config.rs            # nimia.yaml 配置解析 + per-backend context options
-│   ├── runtime_event.rs     # 统一事件类型（Output/ToolCall/Approval 等）
-│   ├── store/
-│   │   ├── mod.rs           # Store layer 入口
-│   │   ├── cache.rs         # CacheStore execution replay / dedupe
-│   │   ├── memory.rs        # MemoryStore（6 桶分类体系）
-│   │   ├── approvals.rs     # ApprovalStore + policy
-│   │   └── ledger.rs        # SessionLedger + 后端切换 handoff
-│   ├── context/
-│   │   └── mod.rs           # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
-│   ├── kanban/
-│   │   ├── mod.rs           # 模块入口 + re-exports
-│   │   ├── types.rs         # Task/Board/Run/Comment/Link 领域类型
-│   │   ├── store.rs         # KanbanStore trait（CRUD + event sourcing 接口）
-│   │   ├── sqlite_store.rs  # SqliteKanbanStore 实现（event-sourced）
-│   │   ├── state_machine.rs # 状态机（triage→todo→ready→running→done→archived + blocked）
-│   │   ├── event_sourcing.rs# Event replay、apply_event
-│   │   ├── dispatcher.rs    # Dispatcher — 调度 ready 任务给 hermes worker
-│   │   ├── worker.rs        # WorkerHandle — spawn/kill hermes -z 进程
-│   │   ├── shadow.rs        # ShadowMaterializer + ShadowWatcher（投影 + 回收）
-│   │   ├── bridge.rs        # AdvancedBridge（decompose/specify 编排）
-│   │   └── event_sync.rs    # 跨节点事件同步（export/import/serve/pull/push）
-│   ├── skill/
-│   │   ├── mod.rs           # SkillRegistry（分布式加载 + trigger 匹配）
-│   │   ├── runner.rs        # engine-run skill 执行
-│   │   ├── cache.rs         # skill pull/cache（HTTP 或本地）
-│   │   └── fun.rs           # iota-fun 7 语言 MCP server（stdio）
-│   ├── mcp/
-│   │   ├── mod.rs           # MCP 层入口
-│   │   ├── client.rs        # engine 侧 MCP 客户端
-│   │   ├── server.rs        # iota-context MCP stdio server（JSON-RPC 协议适配）
-│   │   ├── router.rs        # ACP tool-call 拦截，委托 tool_dispatch
-│   │   └── tool_dispatch.rs # 共享工具派发逻辑（解析器、验证器、handlers）
-│   ├── native/
-│   │   └── mod.rs           # 原生文件投影（可选）
-│   └── utils.rs             # 共享工具函数
+├── crates/
+│   ├── iota-cli/
+│   │   └── src/
+│   │       ├── main.rs              # CLI 入口
+│   │       ├── cli/                # 命令模块（run/check/info/kanban/skill/observability）
+│   │       └── tui/                # TUI 组件
+│   │           ├── input.rs        # 多行输入组件（kill buffer/Ctrl+R/word motion）
+│   │           ├── scrollback.rs   # 终端回滚缓冲
+│   │           ├── loop.rs         # TUI 主事件循环
+│   │           ├── markdown.rs     # markdown 渲染（pulldown-cmark）
+│   │           ├── status_bar.rs   # 底部状态栏（后端·模型 / 快捷键提示）
+│   │           ├── theme.rs        # ratatui 颜色主题（洋红主色）
+│   │           ├── state.rs        # TUI 状态
+│   │           ├── render.rs       # 渲染逻辑
+│   │           ├── exporter.rs     # 对话记录导出
+│   │           ├── autocomplete.rs # 自动补全
+│   │           ├── kanban_view.rs   # Kanban 视图
+│   │           ├── kanban_command.rs # /kanban slash command
+│   │           ├── slash_command.rs  # slash 命令处理
+│   │           └── terminal_lifecycle.rs # 终端生命周期管理
+│   ├── iota-core/
+│   │   └── src/
+│   │       ├── lib.rs              # 核心库入口
+│   │       ├── acp/                # ACP JSON-RPC 2.0 协议驱动
+│   │       │   ├── mod.rs          # AcpClient、协议驱动
+│   │       │   ├── backend.rs      # AcpBackend 枚举（5 后端）
+│   │       │   ├── client.rs      # ACP 客户端
+│   │       │   ├── message.rs     # 消息类型
+│   │       │   ├── parser.rs       # JSON-RPC 解析
+│   │       │   ├── session.rs     # session/new 参数渲染、mcpServers shape
+│   │       │   ├── stream_reader.rs # 流式读取器
+│   │       │   ├── permission.rs  # 权限请求处理
+│   │       │   ├── wire.rs        # line read/parse、response id 匹配
+│   │       │   └── types.rs       # 类型定义
+│   │       ├── config/            # nimia.yaml 配置解析
+│   │       │   ├── mod.rs         # 配置入口、store_config
+│   │       │   ├── schema.rs      # NimiaConfig/StoreConfig 结构
+│   │       │   ├── loader.rs      # 配置加载
+│   │       │   ├── backend.rs     # BackendConfig、后端环境变量映射
+│   │       │   ├── model.rs       # ModelConfig
+│   │       │   ├── context.rs    # ContextEngineConfig 等
+│   │       │   └── adapters.rs    # BackendAdapter
+│   │       ├── daemon/            # 内部 daemon TCP server
+│   │       │   ├── mod.rs         # daemon 入口
+│   │       │   ├── pool.rs        # EnginePool（按 cwd 维度复用 IotaEngine）
+│   │       │   ├── proto.rs       # DaemonPromptRequest/Response wire types
+│   │       │   └── desktop.rs      # 桌面端集成
+│   │       ├── engine/            # IotaEngine 编排
+│   │       │   ├── mod.rs        # IotaEngine、ACP client pool、context、memory、skill
+│   │       │   ├── prompt.rs      # prompt 处理
+│   │       │   ├── memory_ops.rs  # 记忆操作
+│   │       │   ├── session_ledger.rs # SessionLedger
+│   │       │   └── telemetry.rs   # 遥测
+│   │       ├── context/          # ContextFabric 实现
+│   │       │   └── mod.rs         # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
+│   │       ├── memory/            # 记忆系统
+│   │       │   ├── mod.rs        # MemoryStore 入口
+│   │       │   ├── store.rs       # 6 桶分类体系
+│   │       │   └── embedding.rs  # 向量化嵌入
+│   │       ├── skill/            # 技能系统
+│   │       │   ├── mod.rs        # SkillRegistry（分布式加载 + trigger 匹配）
+│   │       │   ├── runner.rs     # engine-run skill 执行
+│   │       │   ├── cache.rs       # skill pull/cache（HTTP 或本地）
+│   │       │   └── fun.rs        # iota-fun 7 语言 MCP server（stdio）
+│   │       ├── mcp/              # MCP 层
+│   │       │   ├── mod.rs        # MCP 层入口
+│   │       │   ├── client.rs      # engine 侧 MCP 客户端
+│   │       │   ├── server.rs     # iota-context MCP stdio server（JSON-RPC 协议适配）
+│   │       │   ├── router.rs     # ACP tool-call 拦截，委托 tool_dispatch
+│   │       │   └── tool_dispatch.rs # 共享工具派发逻辑
+│   │       ├── store/            # 存储层
+│   │       │   ├── mod.rs        # Store layer 入口
+│   │       │   ├── cache.rs      # CacheStore execution replay / dedupe
+│   │       │   ├── approvals.rs  # ApprovalStore + policy
+│   │       │   ├── ledger.rs     # SessionLedger + 后端切换 handoff
+│   │       │   ├── db.rs         # SQLite 数据库管理
+│   │       │   └── observability.rs # 可观测性存储
+│   │       ├── runtime_event.rs  # 统一事件类型（Output/ToolCall/Approval 等）
+│   │       ├── telemetry/        # 遥测
+│   │       │   ├── mod.rs
+│   │       │   ├── metrics.rs
+│   │       │   └── stderr.rs
+│   │       └── utils.rs
+│   ├── iota-kanban/
+│   │   └── src/
+│   │       ├── lib.rs            # Kanban 模块入口 + re-exports
+│   │       ├── types.rs          # Task/Board/Run/Comment/Link 领域类型
+│   │       ├── store.rs          # KanbanStore trait（CRUD + event sourcing 接口）
+│   │       ├── sqlite_store.rs   # SqliteKanbanStore 实现（event-sourced）
+│   │       ├── state_machine.rs  # 状态机（triage→todo→ready→running→done→archived + blocked）
+│   │       ├── event_sourcing.rs # Event replay、apply_event
+│   │       ├── dispatcher.rs     # Dispatcher — 调度 ready 任务给 hermes worker
+│   │       ├── worker.rs        # WorkerHandle — spawn/kill hermes -z 进程
+│   │       ├── shadow.rs         # ShadowMaterializer + ShadowWatcher（投影 + 回收）
+│   │       ├── bridge.rs         # AdvancedBridge（decompose/specify 编排）
+│   │       ├── event_sync.rs     # 跨节点事件同步（export/import/serve/pull/push）
+│   │       └── utils.rs
+│   └── iota-desktop/
+│       └── src-tauri/            # Tauri 桌面端
 ├── docs/
-│   ├── architecture.md      # 分层架构和模块职责
-│   ├── code-call-chains.md  # 入口、IPC 和调用链
-│   └── observability.md     # logs/trace、RuntimeEvent、metrics、CacheStore 边界
+│   ├── architecture.md           # 分层架构和模块职责
+│   ├── code-call-chains.md       # 入口、IPC 和调用链
+│   ├── observability.md          # logs/trace、RuntimeEvent、metrics、CacheStore 边界
+│   └── debugging.md              # 调试指南
 ├── gefsi/
-│   └── exp03-acp-runtime.md # ACP 进程模型和 benchmark 验证报告
+│   └── exp03-acp-runtime.md     # ACP 进程模型和 benchmark 验证报告
 ├── Cargo.toml
-└── ~/.i6/nimia.yaml         # 唯一配置来源
+└── ~/.i6/nimia.yaml              # 唯一配置来源
 ```
 
 ---
@@ -106,11 +147,11 @@ initialize → session/new → session/prompt → 流式 session/update → sess
 
 | 后端 | 命令 | 别名 |
 | :------| :------| :------|
-| Claude Code | `npx` | `claude`, `claudecode` |
-| Codex | `npx` | `codex` |
-| Gemini CLI | `npx` | `gemini`, `gemini-cli` |
-| Hermes Agent | `hermes acp` | `hermes` |
-| OpenCode | `npx` | `opencode`, `open-code` |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@latest` | `claude`, `claude-code`, `claudecode` |
+| Codex | `npx -y @zed-industries/codex-acp@0.12.0` | `codex` |
+| Gemini CLI | `npx -y @google/gemini-cli@latest --acp` | `gemini`, `gemini-cli` |
+| Hermes Agent | `hermes acp` | `hermes`, `hermes-agent` |
+| OpenCode | `npx -y opencode-ai@latest acp` | `opencode`, `open-code` |
 
 ---
 
@@ -151,16 +192,19 @@ nimia.yaml 中的 hermes 配置映射为 Hermes 通过 `os.getenv()` 读取的 p
 ## CLI 命令
 
 ```bash
-iota                     # 进入 TUI（默认）
-iota check [--daemon|-d] # 输出合并的 JSON 后端信息
-iota run <backend> ...   # 单次执行
-iota run --daemon ...    # 经 daemon 路由，自动静默启动
+iota                        # 进入 TUI（默认）
+iota check [--daemon|-d]    # 输出合并的 JSON 后端信息
+iota run <backend> ...       # 单次执行
+iota run --daemon ...       # 经 daemon 路由，自动静默启动
 iota bench-cold [轮次] [--daemon]
 iota bench-warm [轮次] [--daemon]
-iota context-mcp         # 启动 iota-context MCP sidecar（stdio）
-iota fun-mcp            # 启动 iota-fun 7 语言 MCP server（stdio）
+iota context-mcp            # 启动 iota-context MCP sidecar（stdio）
+iota fun-mcp               # 启动 iota-fun 7 语言 MCP server（stdio）
 iota skill pull <源> [名称]
-iota __daemon           # 内部 daemon 入口
+iota kanban <cmd>           # kanban 命令（list/add/update/sync 等）
+iota info                   # 显示后端、配置信息
+iota observability          # 可观测性状态
+iota __daemon               # 内部 daemon 入口
 ```
 
 ---
@@ -177,26 +221,26 @@ iota __daemon           # 内部 daemon 入口
 | Ctrl+R 增量历史搜索 | `tui/input.rs` | ✅ |
 | Markdown 渲染 | `tui/markdown.rs` | ✅ |
 | 状态栏（洋红主色，后端·模型） | `tui/status_bar.rs` | ✅ |
-| 运行指示器（spinner + 耗时） | `tui.rs` | ✅ |
-| Ctrl+T 全屏 pager | `tui.rs` | ✅ |
-| ? 帮助浮层 | `tui.rs` | ✅ |
-| 二次 Ctrl+C 退出确认 | `tui.rs` | ✅ |
-| Esc 中断运行中任务 | `tui.rs` | ✅ |
-| Tab 队列（运行时缓存输入） | `tui.rs` | ✅ |
-| 浮层枚举（None/Help/Pager/QuitConfirm） | `tui.rs` | ✅ |
+| 运行指示器（spinner + 耗时） | `tui/loop.rs` | ✅ |
+| Ctrl+T 全屏 pager | `tui/loop.rs` | ✅ |
+| ? 帮助浮层 | `tui/loop.rs` | ✅ |
+| 二次 Ctrl+C 退出确认 | `tui/loop.rs` | ✅ |
+| Esc 中断运行中任务 | `tui/loop.rs` | ✅ |
+| Tab 队列（运行时缓存输入） | `tui/loop.rs` | ✅ |
+| 浮层枚举（None/Help/Pager/QuitConfirm） | `tui/loop.rs` | ✅ |
 
 ### TUI 当前状态
 
 | 功能 | 文件 | 状态 |
 | :------| :------| :------|
-| Panic hook 终端恢复 | `tui.rs` | ✅ |
-| 错误路径终端恢复（RAII guard） | `tui.rs` | ✅ |
-| stdout is-terminal 检查 | `tui.rs` | ✅ |
-| Engine turn 后台 task 执行 | `tui.rs` | ✅ |
-| Approval 浮层 | `tui.rs` / `acp/permission.rs` | ✅ |
-| 帧率限制器（约 120 FPS） | `tui.rs` | ✅ |
-| 流式输出增量渲染 | `tui.rs` / `engine.rs` / `acp/mod.rs` | ✅ |
-| 鼠标捕获启用 | `tui.rs` | ✅ |
+| Panic hook 终端恢复 | `tui/terminal_lifecycle.rs` | ✅ |
+| 错误路径终端恢复（RAII guard） | `tui/terminal_lifecycle.rs` | ✅ |
+| stdout is-terminal 检查 | `tui/terminal_lifecycle.rs` | ✅ |
+| Engine turn 后台 task 执行 | `tui/loop.rs` | ✅ |
+| Approval 浮层 | `tui/loop.rs` / `acp/permission.rs` | ✅ |
+| 帧率限制器（约 120 FPS） | `tui/loop.rs` | ✅ |
+| 流式输出增量渲染 | `tui/loop.rs` / `engine/mod.rs` / `acp/mod.rs` | ✅ |
+| 鼠标捕获启用 | `tui/loop.rs` | ✅ |
 
 ### TUI 仍可改进
 
@@ -213,12 +257,12 @@ iota __daemon           # 内部 daemon 入口
 
 | Phase | 内容 | 文件 | 状态 |
 | :-------| :------| :------| :-------|
-| 1 | RuntimeEvent 归一化 | `runtime_event.rs` | ✅ |
+| 1 | RuntimeEvent 归一化 | `runtime_event/mod.rs` | ✅ |
 | 1 | CacheStore execution replay / dedupe | `store/cache.rs` | ✅ |
 | 1 | Execution idempotency + lock + fencing | `store/cache.rs` | ✅ |
 | 2 | Context Capsule + budget | `context/mod.rs` | ✅ |
-| 3 | MemoryStore（6 桶分类） | `store/memory.rs` | ✅ |
-| 3 | 6 桶 Recall 查询 | `store/memory.rs` | ✅ |
+| 3 | MemoryStore（6 桶分类） | `memory/mod.rs` | ✅ |
+| 3 | 6 桶 Recall 查询 | `memory/mod.rs` | ✅ |
 | 3 | WorkingMemoryBuffer（短期工作记忆） | `context/mod.rs` | ✅ |
 | 4 | SkillRegistry 分布式加载 | `skill/mod.rs` | ✅ |
 | 4 | Skill trigger 匹配 | `skill/mod.rs` | ✅ |
@@ -230,7 +274,7 @@ iota __daemon           # 内部 daemon 入口
 | 5b | MCP response channel / 拦截 | `mcp/router.rs` | ✅ |
 | 6 | Approval 归一化 + 持久化 | `store/approvals.rs` | ✅ |
 | 7 | SessionLedger + handoff | `store/ledger.rs` | ✅ |
-| 8 | Config 扩展（context_engine） | `config.rs` | ✅ |
+| 8 | Config 扩展（context_engine） | `config/mod.rs` | ✅ |
 
 **所有 Phase 均已实现。**
 
@@ -282,20 +326,59 @@ fn my_test() { ... }
 
 **已有规范化的测试文件：**
 
-- `tui/input_tests.rs` — 7 个测试
-- `tui/events_tests.rs` — 2 个测试
-- `tui/loop_tests.rs` — 3 个测试
-- `tui/kanban_view_tests.rs` — 4 个测试
+**iota-cli：**
+- `cli/info_cmd_tests.rs`
+- `cli/kanban_cmd_tests.rs`
+- `cli/mod_tests.rs`
+- `cli/observability_cmd_tests.rs`
+- `tui/events_tests.rs`
+- `tui/input_tests.rs`
+- `tui/kanban_command_tests.rs`
+- `tui/kanban_view_tests.rs`
+- `tui/loop_tests.rs`
+- `tui/scrollback_tests.rs`
+- `tui/slash_command_tests.rs`
+- `tui/status_bar_tests.rs`
+
+**iota-core：**
+- `acp/acp_tests.rs`
+- `acp/backend_tests.rs`
+- `acp/message_tests.rs`
+- `acp/parser_tests.rs`
+- `acp/permission_tests.rs`
+- `acp/session_tests.rs`
+- `acp/wire_tests.rs`
+- `config/backend_tests.rs`
 - `context/context_tests.rs`
-- `utils/tests.rs`
+- `daemon/daemon_tests.rs`
+- `daemon/desktop_tests.rs`
+- `daemon/proto_tests.rs`
+- `mcp/router_tests.rs`
+- `mcp/server_tests.rs`
+- `mcp/tool_dispatch_tests.rs`
+- `memory/embedding_tests.rs`
+- `memory/store_tests.rs`
+- `skill/cache_tests.rs`
+- `skill/fun_tests.rs`
+- `skill/skill_tests.rs`
+- `store/approvals_tests.rs`
+- `store/ledger_tests.rs`
+- `store/observability_tests.rs`
 - `runtime_event/tests.rs`
-- `kanban/worker_tests.rs` — 4 个测试
-- `kanban/sqlite_store_tests.rs` — 8 个测试
-- `kanban/dispatcher_tests.rs` — 5 个测试
-- `kanban/shadow_tests.rs` — 4 个测试
-- `kanban/bridge_tests.rs` — 3 个测试
-- `kanban/state_machine_tests.rs` — 3 个测试
-- `kanban/event_sync_tests.rs` — 6 个测试
+- `utils/tests.rs`
+
+**iota-kanban：**
+- `worker_tests.rs`
+- `sqlite_store_tests.rs`
+- `dispatcher_tests.rs`
+- `shadow_tests.rs`
+- `bridge_tests.rs`
+- `state_machine_tests.rs`
+- `event_sync_tests.rs`
+- `event_sourcing_tests.rs`
+
+**iota-desktop：**
+- `lib_tests.rs`
 
 ---
 
