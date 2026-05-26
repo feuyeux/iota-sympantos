@@ -1,10 +1,8 @@
 /target/
-.worktrees/
 .DS_Store
 .idea/
 .vscode/
 .qoder/
-.claude/worktrees/
 __pycache__/
 *.py[cod]
 
@@ -18,8 +16,4 @@ nimia.yaml
 
 # Generated experiment logs
 gefsi/logs/
-$zigOut.pdb
-$zigOut
-logs/
 .antigravitycli/
-.superpowers/
