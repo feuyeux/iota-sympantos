@@ -13,35 +13,20 @@ pub const LOCAL_DIM: usize = 128;
 #[derive(Clone, Default)]
 pub struct EmbeddingEngine {
     config: Option<EmbeddingConfig>,
-    client: Option<reqwest::blocking::Client>,
 }
 
 impl EmbeddingEngine {
     /// Create from optional config. If config is None or has no base_url, falls back to local.
     pub fn from_config(config: Option<EmbeddingConfig>) -> Self {
-        let has_api = config
-            .as_ref()
-            .map(|c| c.base_url.is_some())
-            .unwrap_or(false);
-        let client = if has_api {
-            reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .ok()
-        } else {
-            None
-        };
-        Self { config, client }
+        Self { config }
     }
 
     /// Whether this engine uses an API (Ollama / OpenAI-compatible).
     pub fn is_api(&self) -> bool {
-        self.client.is_some()
-            && self
-                .config
-                .as_ref()
-                .map(|c| c.base_url.is_some())
-                .unwrap_or(false)
+        self.config
+            .as_ref()
+            .map(|c| c.base_url.is_some())
+            .unwrap_or(false)
     }
 
     /// Compute embedding for content. Uses API if configured, else local trigram.
@@ -65,41 +50,49 @@ impl EmbeddingEngine {
         let config = self
             .config
             .as_ref()
-            .context("embedding config not initialized")?;
-        let client = self
-            .client
-            .as_ref()
-            .context("embedding client not initialized")?;
-        let base_url = config
-            .base_url
-            .as_deref()
-            .context("embedding base_url not configured")?;
-        let model = config.model.as_deref().unwrap_or("nomic-embed-text");
+            .context("embedding config not initialized")?
+            .clone();
+        let text = text.to_string();
 
-        let url = format!("{}/api/embeddings", base_url.trim_end_matches('/'));
-
-        let mut request = client.post(&url).json(&OllamaEmbeddingRequest {
-            model: model.to_string(),
-            prompt: text.to_string(),
-        });
-
-        if let Some(api_key) = config.api_key.as_deref().filter(|k| !k.is_empty()) {
-            request = request.bearer_auth(api_key);
-        }
-
-        let response = request.send()?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            anyhow::bail!("embedding API returned {status}: {body}");
-        }
-
-        let parsed: OllamaEmbeddingResponse = response.json()?;
-        if parsed.embedding.is_empty() {
-            anyhow::bail!("embedding API returned empty vector");
-        }
-        Ok(parsed.embedding)
+        std::thread::spawn(move || embed_api_blocking(config, text))
+            .join()
+            .map_err(|_| anyhow::anyhow!("embedding API worker thread panicked"))?
     }
+}
+
+fn embed_api_blocking(config: EmbeddingConfig, text: String) -> anyhow::Result<Vec<f32>> {
+    let base_url = config
+        .base_url
+        .as_deref()
+        .context("embedding base_url not configured")?;
+    let model = config.model.as_deref().unwrap_or("nomic-embed-text");
+
+    let url = format!("{}/api/embeddings", base_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    let mut request = client.post(&url).json(&OllamaEmbeddingRequest {
+        model: model.to_string(),
+        prompt: text,
+    });
+
+    if let Some(api_key) = config.api_key.as_deref().filter(|key| !key.is_empty()) {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request.send()?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        anyhow::bail!("embedding API returned {status}: {body}");
+    }
+
+    let parsed: OllamaEmbeddingResponse = response.json()?;
+    if parsed.embedding.is_empty() {
+        anyhow::bail!("embedding API returned empty vector");
+    }
+    Ok(parsed.embedding)
 }
 
 /// Ollama native /api/embeddings request shape.

@@ -128,6 +128,18 @@ impl CacheStore {
             }
             bail!("execution_id conflict: request_hash differs");
         }
+        if let Some(existing_execution_id) = tx
+            .query_row(
+                "SELECT execution_id FROM cache_executions
+                 WHERE backend = ?1 AND request_hash = ?2 AND status = 'running'
+                 ORDER BY started_at DESC LIMIT 1",
+                params![backend, request_hash],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            bail!("execution already running for request: {existing_execution_id}");
+        }
         let fencing_token: i64 = tx
             .query_row(
                 "SELECT COALESCE(MAX(fencing_token), 0) + 1 FROM cache_executions",
@@ -211,8 +223,11 @@ impl CacheStore {
     started_at    INTEGER NOT NULL,
     finished_at   INTEGER,
     fencing_token INTEGER NOT NULL DEFAULT 0
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_running_lock
+);",
+        )?;
+        migrate_legacy_backend_request_hash_unique_index(&conn)?;
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_running_lock
     ON cache_executions(backend, request_hash) WHERE status = 'running';",
         )?;
         // Clean up stale running executions globally on startup.
@@ -263,6 +278,68 @@ fn purge_old_records(conn: &Connection, retention_days: i64) {
     );
 }
 
+fn migrate_legacy_backend_request_hash_unique_index(conn: &Connection) -> Result<()> {
+    if !has_full_backend_request_hash_unique_index(conn)? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "BEGIN IMMEDIATE;
+ALTER TABLE cache_executions RENAME TO cache_executions_legacy;
+CREATE TABLE cache_executions (
+    execution_id  TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL,
+    backend       TEXT NOT NULL,
+    request_hash  TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    started_at    INTEGER NOT NULL,
+    finished_at   INTEGER,
+    fencing_token INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO cache_executions
+    (execution_id, session_id, backend, request_hash, status, started_at, finished_at, fencing_token)
+SELECT execution_id, session_id, backend, request_hash, status, started_at, finished_at, fencing_token
+FROM cache_executions_legacy;
+DROP TABLE cache_executions_legacy;
+COMMIT;",
+    )
+    .or_else(|err| {
+        let _ = conn.execute_batch("ROLLBACK;");
+        Err(err)
+    })?;
+    Ok(())
+}
+
+fn has_full_backend_request_hash_unique_index(conn: &Connection) -> Result<bool> {
+    let mut stmt = conn.prepare("PRAGMA index_list(cache_executions)")?;
+    let indexes = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)? == 1,
+            row.get::<_, i64>(4)? == 1,
+        ))
+    })?;
+
+    for index in indexes {
+        let (name, unique, partial) = index?;
+        if unique && !partial && index_columns(conn, &name)? == ["backend", "request_hash"] {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn index_columns(conn: &Connection, index_name: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA index_info({index_name})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(2))?;
+    let mut columns = Vec::new();
+    for row in rows {
+        columns.push(row?);
+    }
+    Ok(columns)
+}
+
 /// Standalone deduplication query helper (e.g. for observability cross-checks).
 #[allow(dead_code)]
 pub fn get_execution_status(
@@ -277,3 +354,7 @@ pub fn get_execution_status(
     .optional()
     .context("Failed to query execution status")
 }
+
+#[cfg(test)]
+#[path = "cache_tests.rs"]
+mod tests;

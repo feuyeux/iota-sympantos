@@ -33,6 +33,28 @@ fn renders_hermes_mcp_servers_with_env_var_array() {
 }
 
 #[test]
+fn all_backends_render_nonempty_mcp_servers_in_session_new() {
+    for backend in [
+        AcpBackend::ClaudeCode,
+        AcpBackend::Codex,
+        AcpBackend::Gemini,
+        AcpBackend::Hermes,
+        AcpBackend::OpenCode,
+    ] {
+        let params = session_new_params(backend, &PathBuf::from("."), &[server()]);
+        let servers = params["mcpServers"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{backend} should include mcpServers"));
+        assert_eq!(servers.len(), 1, "{backend} should include one MCP server");
+        assert_eq!(servers[0]["name"], "iota-context");
+        assert_eq!(servers[0]["type"], "stdio");
+        assert_eq!(servers[0]["command"], "iota");
+        assert_eq!(servers[0]["args"][0], "mcp");
+        assert_eq!(servers[0]["args"][1], "context");
+    }
+}
+
+#[test]
 fn opencode_session_new_includes_empty_mcp_servers() {
     let params = session_new_params(AcpBackend::OpenCode, &PathBuf::from("."), &[]);
     assert_eq!(

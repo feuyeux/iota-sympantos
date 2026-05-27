@@ -10,7 +10,8 @@ use crate::store::cache::{ExecutionStatus, request_hash};
 
 use super::IotaEngine;
 use super::memory_ops::{
-    deterministic_memory_answer, is_explicit_memory_tool_prompt, memory_inject_payload,
+    deterministic_memory_answer, has_successful_memory_write, is_explicit_memory_tool_prompt,
+    is_memory_persistence_intent, memory_inject_payload,
 };
 use super::telemetry::event_payload;
 
@@ -265,6 +266,10 @@ impl IotaEngine {
         let handoff_c = handoff.clone();
         let prompt_c = prompt.to_string();
         let cwd_c = cwd.clone();
+        let mcp_tools_available = !self
+            .effective_config
+            .context_mcp_servers(backend)
+            .is_empty();
         let effective_prompt = context_engine.compose_effective_prompt(ComposeInput {
             backend,
             cwd: &cwd_c,
@@ -275,6 +280,7 @@ impl IotaEngine {
             skills: Some(&skills_c),
             working_memory: &working_memory_c,
             handoff: handoff_c.as_deref(),
+            mcp_tools_available,
             workspace: Some(&workspace_str),
         });
 
@@ -322,6 +328,29 @@ impl IotaEngine {
                     .any(|event| matches!(event, RuntimeEvent::Output(_)));
                 for event in output.events.iter().cloned() {
                     self.record_runtime_event(&execution_id, backend, event);
+                }
+                if is_memory_persistence_intent(prompt)
+                    && !has_successful_memory_write(&output.events)
+                {
+                    let message = "memory persistence requested, but no successful iota_memory_write tool result was observed";
+                    self.record_runtime_event(
+                        &execution_id,
+                        backend,
+                        RuntimeEvent::Error(ErrorEvent {
+                            message: message.to_string(),
+                            code: None,
+                            data: None,
+                        }),
+                    );
+                    self.mark_execution_finished(&execution_id, ExecutionStatus::Failed);
+                    self.record_ledger_turn(
+                        backend,
+                        execution_id.as_deref(),
+                        &request_hash,
+                        message,
+                        ExecutionStatus::Failed.as_str(),
+                    );
+                    return Err(anyhow::anyhow!(message));
                 }
                 if !has_output_event {
                     // Some backends only return final text. Synthesize an Output event so

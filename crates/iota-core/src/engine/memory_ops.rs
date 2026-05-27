@@ -1,5 +1,6 @@
 use crate::acp::AcpBackend;
 use crate::memory::{MemoryInsert, MemoryScope, MemoryType, RecallBuckets};
+use crate::runtime_event::RuntimeEvent;
 use crate::utils::summarize;
 
 use super::IotaEngine;
@@ -175,6 +176,31 @@ impl IotaEngine {
 
 pub(super) fn is_explicit_memory_tool_prompt(prompt: &str) -> bool {
     prompt.contains("iota_memory_write")
+}
+
+pub(super) fn is_memory_persistence_intent(prompt: &str) -> bool {
+    let lower = prompt.to_lowercase();
+    let chinese_write_memory =
+        (prompt.contains("保存") || prompt.contains("写入") || prompt.contains("记录"))
+            && (prompt.contains("记忆") || prompt.contains("信息") || prompt.contains("这些"));
+    prompt.contains("记住")
+        || prompt.contains("持久化")
+        || chinese_write_memory
+        || lower.contains("remember")
+        || lower.contains("save to memory")
+        || lower.contains("persist")
+        || lower.contains("store this")
+}
+
+pub(super) fn has_successful_memory_write(events: &[RuntimeEvent]) -> bool {
+    events.iter().any(|event| match event {
+        RuntimeEvent::ToolResult(result) => {
+            result.ok
+                && (result.name == "iota_memory_write"
+                    || result.name.ends_with("__iota_memory_write"))
+        }
+        _ => false,
+    })
 }
 
 pub(super) fn deterministic_memory_answer(prompt: &str, buckets: &RecallBuckets) -> Option<String> {

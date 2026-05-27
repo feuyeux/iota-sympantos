@@ -1,4 +1,6 @@
-use super::*;
+use crate::memory::embedding::{
+    EmbeddingEngine, LOCAL_DIM, canonicalize, cosine, from_blob, local_trigram, to_blob,
+};
 
 #[test]
 fn local_trigram_produces_normalized_vector() {

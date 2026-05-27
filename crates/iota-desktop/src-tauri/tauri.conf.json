@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.feuyeux.iota.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:frontend",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
@@ -13,7 +13,7 @@
     "windows": [
       {
         "title": "Iota Sympantos",
-        "width": 1200,
+        "width": 1400,
         "height": 800
       }
     ],

@@ -17,6 +17,7 @@ fn disabled_context_returns_prompt_unchanged() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        mcp_tools_available: false,
         workspace: None,
     });
     assert_eq!(prompt, "ping");
@@ -39,6 +40,7 @@ fn enabled_context_wraps_prompt() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        mcp_tools_available: false,
         workspace: None,
     });
     assert!(prompt.contains("<iota-context>"));
@@ -119,6 +121,7 @@ fn context_with_model_includes_model_section() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        mcp_tools_available: false,
         workspace: None,
     });
     assert!(prompt.contains("gpt-4o"));
@@ -141,6 +144,7 @@ fn context_with_handoff_includes_handoff_section() {
         skills: None,
         working_memory: &working_memory,
         handoff: Some("Previous session: implemented auth module"),
+        mcp_tools_available: false,
         workspace: None,
     });
     assert!(prompt.contains("<handoff>"));
@@ -164,12 +168,39 @@ fn memory_tools_points_model_to_core_memory_taxonomy_skill() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        mcp_tools_available: true,
         workspace: None,
     });
 
     assert!(prompt.contains("iota-memory-taxonomy"));
     assert!(prompt.contains("iota_skill_load"));
     assert!(prompt.contains("iota_memory_write"));
+}
+
+#[test]
+fn memory_tools_do_not_advertise_missing_mcp_tools() {
+    let engine = ContextEngine {
+        enabled: true,
+        budgets: ContextBudgets::default(),
+    };
+    let working_memory = WorkingMemoryBuffer::new(2);
+    let prompt = engine.compose_effective_prompt(ComposeInput {
+        backend: AcpBackend::Codex,
+        cwd: Path::new("."),
+        session_id: "s",
+        model: Some("m"),
+        prompt: "remember durable memory",
+        memory: None,
+        skills: None,
+        working_memory: &working_memory,
+        handoff: None,
+        mcp_tools_available: false,
+        workspace: None,
+    });
+
+    assert!(prompt.contains("Persistent memory MCP tools are not available"));
+    assert!(!prompt.contains("iota_memory_write"));
+    assert!(!prompt.contains("iota_skill_load"));
 }
 
 #[test]
@@ -189,6 +220,7 @@ fn minimal_context_still_includes_memory_write_contract() {
         skills: None,
         working_memory: &working_memory,
         handoff: None,
+        mcp_tools_available: true,
         workspace: None,
     });
 

@@ -16,13 +16,29 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 ## 快速开始
 
 ```bash
-cargo build --release
-cargo install --path .
+rustup install 1.95.0
+rustup default 1.95.0 && rustup toolchain uninstall stable
+cargo build -p iota-cli -p iota-core -p iota-kanban
 
 iota                                    # 交互式 TUI
 iota run codex "ping"                   # 单次 prompt
 iota run --backend claude "解释递归"    # 指定后端
 iota check                              # 检查后端配置
+```
+
+## 开发
+
+```bash
+cargo test               # 运行全部测试
+cargo check --offline
+RUST_LOG=debug cargo run -p iota-cli --quiet
+cargo run -p iota-cli --quiet -- run codex "ping" --timing
+
+# 启动桌面端开发模式 (Tauri) 
+# npm install -D @tauri-apps/cli@latest
+## ubuntu
+# sudo apt-get update && sudo apt-get install -y libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
+cd crates/iota-desktop && npm run tauri dev
 ```
 
 ### 配置文件
@@ -37,7 +53,7 @@ codex:
     args: ["-y", "@zed-industries/codex-acp@0.12.0"]
   model:
     provider: ninerouter
-    name: gh/gpt-5.5
+    name: gh/gpt-5.4
     base_url: http://localhost:20128/v1
     api_key: "<router-api-key>"
 ```
@@ -49,35 +65,7 @@ codex:
 ```bash
 pip install 'hermes-agent[acp]'
 ```
-
-## TUI 快捷键
-
-| 快捷键 | 作用 |
-| :--------| :------|
-| `Enter` | 发送 prompt |
-| `Shift+Enter` | 插入换行 |
-| `Tab` | 运行中排队下一条 prompt |
-| `↑ / ↓` | 历史记录导航 |
-| `Ctrl+R` | 搜索历史 |
-| `Ctrl+B` | 切换后端 |
-| `Ctrl+E` | 导出对话记录 |
-| `Esc` | 中断当前请求 |
-| `?` | 显示帮助 |
-| `Ctrl+C` ×2 | 退出 |
-
-### Slash 命令
-
-```
-/backend [name]       查看或切换后端
-/claude /codex /gemini /hermes /opencode  直接切换
-/model                显示当前模型
-/goal [text]          查看或设置当前目标
-/status               显示会话状态
-/clear                清空对话视图
-/export               导出对话记录
-/quit                 退出确认
-```
-
+  
 ## 文档
 
 | 文档 | 说明 |
@@ -86,22 +74,6 @@ pip install 'hermes-agent[acp]'
 | [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
 | [`docs/observability.md`](docs/observability.md) | logs / trace / metrics |
 | [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
-
-## 开发
-
-```bash
-cargo test               # 运行全部测试
-cargo check --offline
-RUST_LOG=debug cargo run -p iota-cli --quiet
-cargo run -p iota-cli --quiet -- run codex "ping" --timing
-
-# 启动桌面端开发模式 (Tauri)
-cd crates/iota-desktop && npm run tauri dev
-```
-
-**UT 规范：** 所有测试必须写入独立 `*_tests.rs` 文件，禁止内联在源文件中。详见 [`AGENTS.md`](AGENTS.md#单元测试规范)。
-
-**Rust 1.95+，依赖：** tokio · ratatui · rusqlite · reqwest · axum · tracing · opentelemetry · serde
 
 ---
 

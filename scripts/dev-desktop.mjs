@@ -99,13 +99,9 @@ function findPortPids(ports) {
     return uniquePids(output);
   }
 
-  const lsofOutput = commandOutput("lsof", [
-    "-nP",
-    "-iTCP",
-    "-sTCP:LISTEN",
-    "-Fp",
-    ...ports.map((port) => `-iTCP:${port}`),
-  ]);
+  const lsofOutput = ports
+    .map((port) => commandOutput("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"]))
+    .join("\n");
   return uniquePids(lsofOutput.replaceAll("p", ""));
 }
 

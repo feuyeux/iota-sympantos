@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::{ContextEngineConfig, NimiaConfig};
 use crate::memory::{MemoryFacet, MemoryRecord, MemoryScope, MemoryType};
+use crate::runtime_event::{RuntimeEvent, ToolResultEvent};
 use crate::store::cache::request_hash;
 
 fn unique_test_path(name: &str) -> std::path::PathBuf {
@@ -73,6 +74,30 @@ fn memory_inject_payload_empty_buckets_returns_zero_total() {
         budget.get("truncated").and_then(|v| v.as_bool()),
         Some(false)
     );
+}
+
+#[test]
+fn memory_persistence_intent_requires_successful_memory_write_result() {
+    assert!(memory_ops::is_memory_persistence_intent(
+        "请把这些信息写入持久化记忆"
+    ));
+    assert!(!memory_ops::has_successful_memory_write(&[]));
+    assert!(memory_ops::has_successful_memory_write(&[
+        RuntimeEvent::ToolResult(ToolResultEvent {
+            id: "tool-1".to_string(),
+            name: "mcp__iota-context__iota_memory_write".to_string(),
+            ok: true,
+            result: serde_json::json!({"id": "memory-1"}),
+        })
+    ]));
+    assert!(!memory_ops::has_successful_memory_write(&[
+        RuntimeEvent::ToolResult(ToolResultEvent {
+            id: "tool-1".to_string(),
+            name: "mcp__iota-context__iota_memory_write".to_string(),
+            ok: false,
+            result: serde_json::json!({"error": "invalid taxonomy"}),
+        })
+    ]));
 }
 
 #[tokio::test]

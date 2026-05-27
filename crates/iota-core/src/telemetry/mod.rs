@@ -18,14 +18,29 @@ pub struct TelemetryConfig {
 
 impl Default for TelemetryConfig {
     fn default() -> Self {
+        let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
+        let enabled = std::env::var("OTEL_ENABLED").ok();
+        Self::from_env_values(endpoint.as_deref(), enabled.as_deref())
+    }
+}
+
+impl TelemetryConfig {
+    fn from_env_values(endpoint: Option<&str>, enabled: Option<&str>) -> Self {
+        let endpoint = endpoint.filter(|value| !value.trim().is_empty());
         Self {
-            endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://localhost:4317".to_string()),
-            enabled: std::env::var("OTEL_ENABLED")
-                .map(|v| v != "false" && v != "0")
-                .unwrap_or(true),
+            endpoint: endpoint.unwrap_or("http://localhost:4317").to_string(),
+            enabled: enabled
+                .map(otel_enabled_value)
+                .unwrap_or_else(|| endpoint.is_some()),
         }
     }
+}
+
+fn otel_enabled_value(value: &str) -> bool {
+    !matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "false" | "0" | "no" | "off"
+    )
 }
 
 pub struct OtelGuard {
@@ -68,7 +83,7 @@ pub fn init(config: &TelemetryConfig) -> Result<OtelGuard> {
     if !config.enabled {
         let filter = logging_filter();
         tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_filter(filter))
+            .with(stderr::stderr_layer().with_filter(filter))
             .try_init()
             .ok();
         return Ok(OtelGuard {
@@ -141,3 +156,7 @@ fn logging_filter() -> EnvFilter {
         .unwrap_or_else(|_| "warn,iota_sympantos=info".to_string());
     EnvFilter::try_new(&env_val).unwrap_or_else(|_| EnvFilter::new("warn,iota_sympantos=info"))
 }
+
+#[cfg(test)]
+#[path = "telemetry_tests.rs"]
+mod tests;

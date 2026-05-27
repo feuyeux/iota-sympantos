@@ -47,6 +47,7 @@ pub struct ComposeInput<'a> {
     pub skills: Option<&'a SkillRegistry>,
     pub working_memory: &'a WorkingMemoryBuffer,
     pub handoff: Option<&'a str>,
+    pub mcp_tools_available: bool,
     /// Pre-computed workspace string (git status output). When `Some`, skips the
     /// blocking `git status` call inside compose. This allows callers to compute
     /// the workspace state concurrently with memory recall.
@@ -168,11 +169,14 @@ impl ContextEngine {
 
 fn push_memory_tools(capsule: &mut String, input: &ComposeInput<'_>) {
     capsule.push_str("<memory-tools>\n");
+    if !input.mcp_tools_available {
+        capsule.push_str("Persistent memory MCP tools are not available for this backend session. Do not claim durable memory was written unless a memory tool is present in the actual tool list.\n");
+        capsule.push_str("</memory-tools>\n\n");
+        return;
+    }
     capsule.push_str("MCP tool `iota_memory_write` persists information across sessions.\n");
-    capsule.push_str("When the user asks you to remember, save, store, or persist durable information, call `iota_memory_write` before claiming it is remembered.\n");
+    capsule.push_str("When the user asks you to remember, save, store, or persist durable information, load `iota-memory-taxonomy` with `iota_skill_load`, then call `iota_memory_write` before claiming it is remembered.\n");
     capsule.push_str("Do not say that information was remembered unless a memory write tool call completed successfully.\n");
-    capsule.push_str("For memory classification and split guidance, load core skill `iota-memory-taxonomy` with `iota_skill_load`.\n");
-    capsule.push_str("Use one `iota_memory_write` call per atomic durable memory item; do not merge different taxonomy categories.\n");
     capsule.push_str(
         "Args: content, type(semantic|episodic|procedural), scope(user|project|session), ",
     );
@@ -182,7 +186,7 @@ fn push_memory_tools(capsule: &mut String, input: &ComposeInput<'_>) {
         input.session_id,
     ));
     capsule.push_str(
-        "Optional: facet(identity|preference|strategic|domain), merge_mode, confidence, ttl_days.\n",
+        "Optional: facet(identity|preference|strategic|domain), merge_mode, confidence, ttl_days. Classification rules live only in `iota-memory-taxonomy`.\n",
     );
     capsule.push_str("</memory-tools>\n\n");
 }

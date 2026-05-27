@@ -2,24 +2,49 @@ use super::*;
 use crate::acp::AcpBackend;
 
 #[test]
-fn mcp_servers_default_to_backend_capability() {
+fn mcp_servers_default_to_enabled_for_all_backends() {
     let config = NimiaConfig {
         context_engine: Some(ContextEngineConfig::default()),
         ..NimiaConfig::default()
     };
-    assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 0);
-    assert_eq!(context_mcp_servers(&config, AcpBackend::Gemini).len(), 2);
-    assert_eq!(context_mcp_servers(&config, AcpBackend::OpenCode).len(), 0);
+    for backend in [
+        AcpBackend::ClaudeCode,
+        AcpBackend::Codex,
+        AcpBackend::Gemini,
+        AcpBackend::Hermes,
+        AcpBackend::OpenCode,
+    ] {
+        assert_eq!(
+            context_mcp_servers(&config, backend).len(),
+            2,
+            "{backend} should enable MCP servers by default"
+        );
+    }
 }
 
 #[test]
-fn opencode_does_not_receive_stdio_mcp_servers() {
+fn all_backends_can_disable_mcp_servers() {
     let config = NimiaConfig {
         context_engine: Some(ContextEngineConfig::default()),
         context_engine_backend: Some(ContextEngineBackendConfig {
+            claude_code: Some(BackendContextConfig {
+                mcp_session_new: Some(false),
+                ..BackendContextConfig::default()
+            }),
+            codex: Some(BackendContextConfig {
+                mcp_session_new: Some(false),
+                ..BackendContextConfig::default()
+            }),
+            gemini: Some(BackendContextConfig {
+                mcp_session_new: Some(false),
+                ..BackendContextConfig::default()
+            }),
+            hermes: Some(BackendContextConfig {
+                mcp_session_new: Some(false),
+                ..BackendContextConfig::default()
+            }),
             opencode: Some(BackendContextConfig {
-                mcp_session_new: Some(serde_yaml::Value::Bool(true)),
-                always_send_empty_mcp_servers: true,
+                mcp_session_new: Some(false),
                 ..BackendContextConfig::default()
             }),
             ..ContextEngineBackendConfig::default()
@@ -27,7 +52,19 @@ fn opencode_does_not_receive_stdio_mcp_servers() {
         ..NimiaConfig::default()
     };
 
-    assert_eq!(context_mcp_servers(&config, AcpBackend::OpenCode).len(), 0);
+    for backend in [
+        AcpBackend::ClaudeCode,
+        AcpBackend::Codex,
+        AcpBackend::Gemini,
+        AcpBackend::Hermes,
+        AcpBackend::OpenCode,
+    ] {
+        assert_eq!(
+            context_mcp_servers(&config, backend).len(),
+            0,
+            "{backend} should allow MCP servers to be disabled"
+        );
+    }
 }
 
 #[test]
@@ -46,19 +83,33 @@ fn context_mcp_server_enables_memory_route_logging() {
 }
 
 #[test]
-fn mcp_try_enables_claude_and_codex() {
-    let config = NimiaConfig {
-        context_engine: Some(ContextEngineConfig::default()),
-        context_engine_backend: Some(ContextEngineBackendConfig {
-            codex: Some(BackendContextConfig {
-                mcp_session_new: Some(serde_yaml::Value::String("try".to_string())),
-                ..BackendContextConfig::default()
-            }),
-            ..ContextEngineBackendConfig::default()
-        }),
-        ..NimiaConfig::default()
-    };
-    assert_eq!(context_mcp_servers(&config, AcpBackend::Codex).len(), 2);
+fn iota_mcp_command_alias_uses_iota_cli_path() {
+    assert_eq!(
+        context::resolve_iota_command_with_env("iota", Some("/tmp/current-iota".to_string())),
+        "/tmp/current-iota"
+    );
+    assert_eq!(context::resolve_iota_command_with_env("iota", None), "iota");
+    assert_eq!(
+        context::resolve_iota_command_with_env(
+            "/usr/bin/custom-iota",
+            Some("/tmp/iota".to_string())
+        ),
+        "/usr/bin/custom-iota"
+    );
+}
+
+#[test]
+fn mcp_session_new_rejects_non_boolean_values() {
+    let err = serde_yaml::from_str::<NimiaConfig>(
+        r#"
+context_engine_backend:
+  codex:
+    mcp_session_new: try
+"#,
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("invalid type"));
 }
 
 #[test]

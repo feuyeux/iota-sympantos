@@ -153,7 +153,7 @@ impl McpTool for MemoryWriteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Persist a memory item to iota's unified memory store. Call proactively when you learn something worth remembering: user identity, preferences, project goals, domain facts, or step-by-step procedures. Persisted memories are injected into future sessions across all backends.\n\ntype+facet combinations:\n- semantic/identity  → who the user is (name, role)\n- semantic/preference → how the user likes things done\n- semantic/strategic → project goals, decisions\n- semantic/domain    → technical facts about the project\n- procedural        → step-by-step how-to (no facet)\n- episodic          → what happened in this session (no facet)\n\nscope_id is optional. Defaults match Engine recall: user → \"local-user\", project → current cwd path, session → source_session_id/session_id if provided."
+        "Persist one memory record to iota's unified memory store. Classification, split, scope, and confidence policy is defined by the core skill `iota-memory-taxonomy`; load that skill before choosing memory fields. This tool enforces only the storage protocol shape."
     }
 
     fn input_schema(&self) -> Value {

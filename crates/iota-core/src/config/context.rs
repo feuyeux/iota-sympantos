@@ -185,7 +185,7 @@ pub struct ContextEngineBackendConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct BackendContextConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_session_new: Option<serde_yaml::Value>,
+    pub mcp_session_new: Option<bool>,
     #[serde(default)]
     pub always_send_empty_mcp_servers: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -220,9 +220,6 @@ pub fn context_skill_roots(config: &NimiaConfig) -> Vec<PathBuf> {
 }
 
 pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<AcpMcpServer> {
-    if backend == AcpBackend::OpenCode {
-        return Vec::new();
-    }
     if !context_mcp_session_enabled(config, backend) {
         return Vec::new();
     }
@@ -251,13 +248,10 @@ pub fn context_mcp_servers(config: &NimiaConfig, backend: AcpBackend) -> Vec<Acp
 
 pub fn context_mcp_session_enabled(config: &NimiaConfig, backend: AcpBackend) -> bool {
     let backend_config = backend_context_config(config, backend);
-    if let Some(value) = backend_config.and_then(|cfg| cfg.mcp_session_new.as_ref()) {
-        return yaml_flag(
-            value,
-            matches!(backend, AcpBackend::ClaudeCode | AcpBackend::Codex),
-        );
+    if let Some(value) = backend_config.and_then(|cfg| cfg.mcp_session_new) {
+        return value;
     }
-    matches!(backend, AcpBackend::Gemini | AcpBackend::Hermes)
+    true
 }
 
 pub fn backend_context_config(
@@ -319,19 +313,6 @@ pub fn context_embedding_config(config: &NimiaConfig) -> Option<EmbeddingConfig>
         .and_then(|cfg| cfg.embedding.clone())
 }
 
-fn yaml_flag(value: &serde_yaml::Value, try_is_enabled: bool) -> bool {
-    match value {
-        serde_yaml::Value::Bool(value) => *value,
-        serde_yaml::Value::String(value) => match value.as_str() {
-            "true" | "yes" | "on" => true,
-            "false" | "no" | "off" => false,
-            "try" => try_is_enabled,
-            _ => false,
-        },
-        _ => false,
-    }
-}
-
 fn command_to_mcp_server(
     default_name: &str,
     command: Option<&CommandConfig>,
@@ -345,7 +326,9 @@ fn command_to_mcp_server(
                 .filter_map(|arg| expand_home_path(arg).ok())
                 .collect::<Vec<_>>();
             (
-                normalize_command(&expand_home_path(&command.command).ok()?),
+                normalize_command(&resolve_iota_command(
+                    &expand_home_path(&command.command).ok()?,
+                )),
                 args,
             )
         }
@@ -367,6 +350,25 @@ fn command_to_mcp_server(
         args,
         env: default_mcp_server_env(default_name),
     })
+}
+
+fn resolve_iota_command(command: &str) -> String {
+    resolve_iota_command_with_env(command, std::env::var("IOTA_CLI_PATH").ok())
+}
+
+pub(super) fn resolve_iota_command_with_env(
+    command: &str,
+    iota_cli_path: Option<String>,
+) -> String {
+    let trimmed = command.trim();
+    let is_iota = trimmed == "iota" || trimmed == "iota.exe";
+    if !is_iota {
+        return trimmed.to_string();
+    }
+
+    iota_cli_path
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| trimmed.to_string())
 }
 
 fn default_context_mcp_servers() -> Vec<AcpMcpServer> {

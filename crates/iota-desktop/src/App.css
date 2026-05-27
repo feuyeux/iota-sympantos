@@ -1,34 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-primary: hsl(325, 90%, 55%);
+  --color-primary: hsl(215, 75%, 55%);
+  --color-primary-hover: hsl(215, 80%, 60%);
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
 }
 
 body {
   margin: 0;
   background-color: #0b0f19;
-  color: #f3f4f6;
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  color: #e2e8f0;
+  font-family: var(--font-sans);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
 select,
-textarea {
-  font: inherit;
+textarea,
+input {
+  font-family: inherit;
 }
+
+/* Custom Premium Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.25);
+}
+
 
 /* --- Iota Logo Animations & Styles --- */
 @keyframes iota-pulse {
   0%, 100% {
     transform: scale(1);
     opacity: 0.95;
-    filter: drop-shadow(0 0 4px rgba(255, 0, 127, 0.4)) drop-shadow(0 0 1px rgba(189, 52, 254, 0.3));
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.4)) drop-shadow(0 0 1px rgba(20, 184, 166, 0.3));
   }
   50% {
     transform: scale(1.06);
     opacity: 1;
-    filter: drop-shadow(0 0 10px rgba(255, 0, 127, 0.7)) drop-shadow(0 0 4px rgba(189, 52, 254, 0.5));
+    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 4px rgba(20, 184, 166, 0.5));
   }
 }
 
