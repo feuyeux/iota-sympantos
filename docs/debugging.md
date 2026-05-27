@@ -1,139 +1,110 @@
-# iota-sympantos 断点调试指南
+# iota-sympantos 调试指南
 
 ## 前置要求
 
-1. **VS Code 扩展**：安装 [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb)（扩展 ID：`vadimcn.vscode-lldb`）
-2. **Rust 工具链**：确保 `rustc`、`cargo` 已安装且版本 ≥ 1.95.0
-3. **配置文件**：确保 `~/.i6/nimia.yaml` 已正确配置（含后端凭据）
+- Rust toolchain 和 Cargo 可用。
+- `~/.i6/nimia.yaml` 已配置，且不要把 API key、token、密码写入日志、截图或提交。
+- 调试 Rust 代码建议安装 VS Code CodeLLDB。
+- 调试桌面端需在 `crates/iota-desktop` 执行 `npm install`。
 
-## 调试配置一览
+## 常用命令
 
-| 配置名称 | 说明 | 启动参数 |
-| :----------| :------| :----------|
-| Debug TUI (默认模式) | 交互式 TUI 模式 | 无参数 |
-| Debug Run (单次执行) | 单次 prompt 执行 | `run <backend> <prompt>` |
-| Debug Run with Daemon | 经 daemon 路由执行 | `run --daemon <backend> <prompt>` |
-| Debug Check | 输出后端 JSON 信息 | `check` |
-| Debug Context MCP Sidecar | 启动 iota-context MCP | `context-mcp` |
-| Debug Fun MCP Server | 启动 iota-fun MCP | `fun-mcp` |
-| Debug Bench Cold | 冷启动基准测试 | `bench-cold 3` |
-| Debug Daemon (内部) | 启动内部 daemon 进程 | `__daemon` |
-
-## 使用方法
-
-### 1. 设置断点
-
-在 VS Code 编辑器中点击行号左侧设置断点（红色圆点），常见调试入口：
-
-- `src/main.rs:16` — 程序入口
-- `src/cli/mod.rs` — 命令分发
-- `src/engine.rs` — ACP 运行时编排
-- `src/acp/mod.rs` — ACP 协议交互
-- `src/mcp/server.rs` — iota-context MCP sidecar
-- `src/tui/mod.rs` — TUI 主循环入口
-- `src/tui/loop.rs` — Tokio event loop（turn dispatch、stream、approval）
-- `src/tui/input.rs` — 多行输入编辑器
-- `src/tui/render.rs` — 主渲染器
-- `src/tui/status_bar.rs` — 状态栏
-
-### 2. 启动调试
-
-- 按 `F5` 或点击 Run and Debug 面板中的绿色三角
-- 从下拉列表选择对应配置
-- "Debug Run" 配置会弹出输入框让你选择后端和输入 prompt
-
-### 3. 调试控制
-
-| 快捷键 | 操作 |
-| :--------| :------|
-| `F5` | 继续 / 启动调试 |
-| `F10` | 单步跳过 (Step Over) |
-| `F11` | 单步进入 (Step Into) |
-| `Shift+F11` | 单步跳出 (Step Out) |
-| `Shift+F5` | 停止调试 |
-| `Cmd+Shift+F5` | 重启调试 |
-
-### 4. 查看变量
-
-调试暂停时可在以下面板查看状态：
-
-- **Variables** — 当前作用域的局部变量
-- **Watch** — 自定义监视表达式
-- **Call Stack** — 调用栈
-- **Debug Console** — 执行 LLDB 表达式（如 `p variable_name`）
-
-## 环境变量
-
-调试配置默认设置：
-
-```
-RUST_LOG=debug        # 启用 logging debug 级别日志，并同时输出到 stderr
-RUST_BACKTRACE=1      # 启用完整调用栈
+```bash
+cargo fmt --all --check
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -p iota-cli -- check
+cargo run -p iota-cli -- run hermes "ping"
+cargo run -p iota-cli -- run --daemon hermes "ping"
+cd crates/iota-desktop && npm test && npm run build
 ```
 
-工程日志默认写入 `~/.i6/logs/`，不依赖本地 SQLite store。可用 `IOTA_LOG_DIR` 覆盖目录，用 `IOTA_LOG` 覆盖文件日志过滤规则。
+## 断点入口
 
-如需过滤特定模块日志，修改 `RUST_LOG`：
+| 场景 | 文件 |
+| :--- | :--- |
+| CLI 命令分发 | `crates/iota-cli/src/cli/mod.rs` |
+| 单次执行 | `crates/iota-cli/src/cli/run_cmd.rs` |
+| daemon client | `crates/iota-cli/src/cli/daemon_cmd.rs` |
+| TUI event loop | `crates/iota-cli/src/tui/loop.rs` |
+| TUI 输入组件 | `crates/iota-cli/src/tui/input.rs` |
+| TUI 终端生命周期 | `crates/iota-cli/src/tui/terminal_lifecycle.rs` |
+| Engine 编排 | `crates/iota-core/src/engine/mod.rs` |
+| Engine prompt path | `crates/iota-core/src/engine/prompt.rs` |
+| ACP client | `crates/iota-core/src/acp/client.rs` |
+| ACP wire | `crates/iota-core/src/acp/wire.rs` |
+| ACP session params | `crates/iota-core/src/acp/session.rs` |
+| Permission | `crates/iota-core/src/acp/permission.rs` |
+| Daemon server | `crates/iota-core/src/daemon/mod.rs` |
+| Desktop daemon protocol | `crates/iota-core/src/daemon/desktop.rs` |
+| Desktop Tauri commands | `crates/iota-desktop/src-tauri/src/lib.rs` |
+| Desktop daemon client | `crates/iota-desktop/src-tauri/src/daemon_client.rs` |
+| Kanban store | `crates/iota-kanban/src/sqlite_store.rs` |
 
-```
-RUST_LOG=iota_sympantos::acp=debug,iota_sympantos::engine=debug
+## 日志和环境变量
+
+```bash
+RUST_LOG=debug
+RUST_BACKTRACE=1
+IOTA_LOG=iota_core::acp=debug,iota_core::engine=debug
+IOTA_LOG_DIR=/tmp/iota-logs
+IOTA_DAEMON_ADDR=127.0.0.1:47661
+IOTA_DESKTOP_DAEMON_ADDR=127.0.0.1:47662
+IOTA_CLI_PATH=/absolute/path/to/iota
 ```
 
-只调整文件日志、不打开 stderr 输出时，可使用：
+说明：
 
-```
-IOTA_LOG=iota_sympantos::acp=debug,iota_sympantos::engine=debug
-```
+- `RUST_LOG` 控制 stderr tracing。
+- `IOTA_LOG` 控制文件日志过滤规则。
+- 工程日志默认写入 `~/.i6/logs/`。
+- desktop 会先尝试 `IOTA_DAEMON_ADDR` 或默认 daemon 地址，再尝试 `IOTA_DESKTOP_DAEMON_ADDR` 或 `127.0.0.1:47662` fallback。
+- desktop autostart 需要 `IOTA_CLI_PATH` 指向 `iota` binary，或 `iota` 位于 `PATH`。
 
 ## TUI 调试注意事项
 
-TUI 模式使用 `crossterm` 占据终端，断点暂停时终端可能处于 raw mode。建议：
+TUI 使用 crossterm raw mode、mouse capture 和 terminal guard。断点暂停时终端可能停留在 raw mode。
 
-1. 优先在 TUI 初始化前（`cli/mod.rs` 命令分发阶段）设置断点
-2. 调试 TUI 内部逻辑时，在事件处理函数中设置条件断点
-3. 如果终端状态异常，调试停止后在终端执行 `reset` 恢复
+建议：
 
-## 条件断点
+- 优先在进入 TUI 之前的命令分发阶段设置断点。
+- 调试 key handling 时设置条件断点，避免每帧暂停。
+- 终端异常时执行 `reset`。
+- stdout 不是 terminal 时，TUI 会拒绝启动。
 
-右键断点 → Edit Breakpoint，添加条件表达式：
+## ACP 子进程调试
 
-```rust
-// 仅在特定后端时断住
-backend == AcpBackend::Claude
+ACP 后端由 `npx` 或 `hermes acp` 启动，是外部进程。Rust 侧通常在以下位置断点：
 
-// 仅在包含特定文本时断住
-prompt.contains("test")
+- `AcpClient::start()`：子进程启动、stdin/stdout/stderr 管道。
+- `wire::read_next_line()`：读取 backend stdout。
+- `wire::parse_message_line()`：JSON-RPC parse。
+- `runtime_event::map_acp_events()`：事件归一化。
+- `permission::answer_permission_request()`：工具授权。
+
+`--show-native` 会暴露原始协议内容，可能包含敏感信息，只用于本地调试。
+
+## Desktop 调试
+
+```bash
+cd crates/iota-desktop
+npm run dev
 ```
 
-## 日志断点 (Logpoint)
+常见检查：
 
-右键行号 → Add Logpoint，输入日志模板（不暂停执行）：
-
-```
-Received event: {event:?}
-```
+- `npm test` 覆盖 reducer、layout 和 memory/context workspace。
+- `npm run build` 覆盖 TypeScript 和 Vite build。
+- Tauri command 通过 daemon JSON-line protocol 与 core 交互。
+- 前端监听 `daemon-message` 和 `daemon-client-error` window events。
 
 ## 常见问题
 
-### CodeLLDB 无法启动
-
-确认已安装 CodeLLDB 扩展，且 macOS 上已授予调试权限（System Preferences → Privacy & Security → Developer Tools）。
-
-### 断点不命中
-
-1. 确认编译使用 debug profile（launch.json 中的 `cargo build` 无 `--release`）
-2. 检查代码是否被优化内联（debug 模式默认 `opt-level = 0`）
-3. async 函数内部断点可能需要在 `.await` 后的行设置
-
-### 终端被 TUI 占用
-
-调试 TUI 时使用 "integrated" terminal。如果需要同时查看 stdout 输出，考虑使用 "Debug Check" 或 "Debug Run" 配置。
-
-### ACP 子进程调试
-
-ACP 后端是外部进程（npx 启动），无法直接断点。调试 ACP 交互请在以下位置设置断点：
-
-- `src/acp/wire.rs` — 读取/解析 JSON-RPC 消息
-- `src/acp/stream_reader.rs` — 流式事件读取
-- `src/acp/client.rs` — 发送请求和处理响应
-- `src/acp/session.rs` — session 参数构建
+| 问题 | 排查 |
+| :--- | :--- |
+| 断点不命中 | 确认 debug profile、无 `--release`，async 断点放在 `.await` 后也试一次 |
+| `iota run --daemon` 连接失败 | 检查 `IOTA_DAEMON_ADDR`，手动运行 `cargo run -p iota-cli -- __daemon` |
+| Desktop 无法启动 daemon | 设置 `IOTA_CLI_PATH` 或把 `iota` 放进 `PATH` |
+| 后端不可用 | 运行 `iota check`，确认 `nimia.yaml`、adapter command、API key 和 model |
+| Hermes 配置异常 | 不要覆盖 `HERMES_HOME`，只通过 provider 原生环境变量和 `HERMES_MODEL`/`HERMES_INFERENCE_PROVIDER` 配置 |
+| SQLite 文件不可写 | 检查 `~/.i6/context`、`~/.i6/kanban` 权限 |

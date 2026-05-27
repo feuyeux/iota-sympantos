@@ -1,18 +1,18 @@
 # iota-desktop MVP Acceptance Runbook
 
-This runbook verifies the Chat-first daemon desktop baseline. Do not paste API keys, tokens, or raw secret-bearing config into logs or screenshots.
+This runbook verifies the daemon-first desktop baseline. Do not paste API keys, tokens, raw `nimia.yaml`, or secret-bearing protocol payloads into logs or screenshots.
 
 ## Prerequisites
 
 - `~/.i6/nimia.yaml` exists and is the only config source.
-- At least one backend is configured with a valid API key and model.
-- `iota` is available in `PATH`, or `IOTA_CLI_PATH` points to the iota CLI binary for daemon autostart.
+- At least one backend is enabled and configured with a valid model and API key.
+- `iota` is available in `PATH`, or `IOTA_CLI_PATH` points to the CLI binary for desktop daemon autostart.
 - Desktop dependencies are installed with `npm install` in `crates/iota-desktop`.
-- Existing daemon processes are acceptable; the desktop app should connect to them or autostart one.
+- Existing daemon processes are acceptable. The desktop app should connect to the configured daemon or autostart a fallback daemon.
 
 ## Automated Gates
 
-Run from the repository root unless a command says otherwise:
+Run from the repository root unless noted:
 
 ```bash
 cargo fmt --all --check
@@ -25,156 +25,185 @@ cd crates/iota-desktop && npm test && npm run build
 Expected:
 
 - All commands exit successfully.
-- `iota-cli -- check` does not print API keys or tokens.
-- Frontend tests include reducer coverage for streaming text, runtime events, approvals, cancellation, failure, and daemon client errors.
+- `iota check` does not print API keys or tokens.
+- Desktop tests cover turn reducer behavior, layout structure, config/observability boundaries, and memory/context workspace rendering.
 
-## Manual Desktop Scenarios
+## Manual Scenarios
 
-### 1. Launch And Daemon Status
-
-Run:
+### 1. Launch And Daemon Connection
 
 ```bash
 cd crates/iota-desktop
-npm run tauri dev
+npm run dev
 ```
 
 Expected:
 
-- The app opens to the Chat-first workbench.
-- The daemon status changes to connected after config loads.
-- If the daemon is not already running, the Tauri backend autostarts it through the configured CLI path.
-- No secret values are shown in the header or logs.
+- The app opens to the chat workbench.
+- The daemon status becomes connected after config loads.
+- The desktop backend first tries the normal daemon address, then the desktop fallback address.
+- If no daemon is running, it autostarts `iota __daemon` via `IOTA_CLI_PATH`, sibling binary, or `PATH`.
+- No secret values are shown in the UI or terminal logs.
 
 ### 2. Backend Readiness
 
 Steps:
 
-- Open the backend selector.
-- Select one configured backend and one intentionally unavailable or unconfigured backend if available.
+1. Open the backend selector.
+2. Select a configured backend.
+3. Select an intentionally unavailable backend if one exists.
 
 Expected:
 
-- Configured backend is marked ready and allows prompt submission.
-- Unavailable backend is marked with a clear reason such as missing API key, missing ACP command, disabled backend, or missing config section.
-- Send button stays disabled for the unavailable backend.
+- Ready backend allows prompt submission.
+- Unavailable backend shows a clear reason such as missing API key, missing adapter command, disabled backend, or invalid config.
+- Send stays disabled for unavailable backends.
 
 ### 3. Config Panel
 
 Steps:
 
-- Open the Config view.
-- Confirm model/provider/base URL values are visible.
-- Confirm API keys are masked as configured/missing, not displayed literally.
-- Save a harmless model field change or re-save an existing value.
+1. Open the Config view.
+2. Review provider, model name, base URL, and API key state.
+3. Save a harmless model field change or re-save an existing value.
 
 Expected:
 
-- Config is loaded from daemon APIs.
-- Save goes through daemon APIs and writes `~/.i6/nimia.yaml` semantics.
-- Backend readiness refreshes after save.
-- Hermes behavior remains unchanged; the desktop app does not set or override `HERMES_HOME`.
+- Config is loaded through daemon `GetConfig`.
+- API keys are masked as configured/missing and are never displayed literally.
+- Save uses daemon `SaveBackendModel` and preserves `~/.i6/nimia.yaml` semantics.
+- Backend checks refresh after save.
+- Hermes behavior remains unchanged; desktop does not set or override `HERMES_HOME`.
 
 ### 4. Successful Prompt Streaming
 
 Steps:
 
-- Select a configured backend.
-- Submit a small prompt such as `Say hello in one short sentence.`
+1. Select a ready backend.
+2. Submit `Say hello in one short sentence.`
 
 Expected:
 
-- A turn appears in the transcript immediately.
-- Assistant text streams into the transcript or appears at completion if the backend only sends final text.
-- The right inspector shows running status, then completed status.
-- Prompt submission is disabled while the active turn is running and enabled after completion.
+- A turn appears immediately.
+- Assistant text streams through `TextChunk`, or appears on `TurnCompleted` if the backend only sends final text.
+- Runtime events appear in the right inspector.
+- Prompt submission is disabled while the active turn is running and re-enabled after completion.
 
 ### 5. Inspector Details
 
 Steps:
 
-- Select the completed turn.
-- Review the right inspector.
+1. Select a completed turn.
+2. Review the right inspector.
 
 Expected:
 
-- Timing summary is shown when available.
-- Token usage is shown when the backend reports usage.
-- Runtime events are retained for the turn.
-- Tool calls and tool results appear when the backend emits them.
-- Long JSON payloads remain scrollable and do not break layout.
+- Timing summary appears when available.
+- Token usage appears when the backend reports usage.
+- Tool calls and tool results appear when emitted.
+- Runtime events remain visible and scrollable.
+- Large JSON payloads do not break layout.
 
 ### 6. Approval Approve And Deny
 
 Steps:
 
-- Use a prompt/backend/tool combination known to request permission.
-- When approval appears, approve it once.
-- Run a second permission-triggering prompt and deny it.
+1. Use a prompt/backend/tool combination known to request permission.
+2. Approve one request.
+3. Run another permission-triggering prompt and deny it.
 
 Expected:
 
-- Approval is shown in the right inspector with tool name and params.
-- Approve sends the decision through daemon approval APIs.
-- Deny sends the decision through daemon approval APIs.
+- Approval request shows tool name and params.
+- Approve sends daemon `RespondApproval { approved: true }`.
+- Deny sends daemon `RespondApproval { approved: false }`.
 - Lost or closed approval streams fail closed and do not auto-approve.
-- Turn state leaves waiting approval after a terminal result/failure/cancellation.
+- Turn state leaves waiting approval after terminal completion, failure, or cancellation.
 
 ### 7. Cancellation
 
 Steps:
 
-- Start a longer running prompt.
-- Click Interrupt Execution.
+1. Start a longer prompt.
+2. Click Interrupt Execution.
 
 Expected:
 
-- The daemon receives `CancelTurn`.
-- The turn is marked cancelled in the transcript and inspector.
+- Desktop sends daemon `CancelTurn`.
+- Turn is marked cancelled in transcript and inspector.
 - Partial text and events remain visible.
 - Prompt submission unlocks after cancellation.
 
-### 8. Stream Interruption Or Daemon Disconnect
+### 8. Daemon Disconnect
 
 Steps:
 
-- Start a running prompt.
-- Stop the daemon process or otherwise interrupt the stream.
+1. Start a running prompt.
+2. Stop the daemon process or interrupt the stream.
 
 Expected:
 
-- The frontend receives a daemon client error.
-- The active turn is marked failed while preserving partial text/events.
+- Frontend receives `daemon-client-error`.
+- Active turn is marked failed while preserving partial text/events.
 - Daemon status shows error.
-- The app remains usable after restarting/reconnecting where possible.
+- App remains usable after restart/reconnect where possible.
 
-### 9. CLI Daemon Compatibility
+### 9. Memory And Context Workspace
+
+Steps:
+
+1. Open the memory/context workspace view.
+2. Toggle workspace/all scope mode.
+3. Inspect memory buckets and context preview.
+
+Expected:
+
+- Desktop sends daemon `GetMemoryContextSnapshot`.
+- Six memory buckets are shown: identity, preference, strategic, domain, procedural, episodic.
+- Runtime context preview shows section names, character counts, budgets, and capsule text when available.
+- Snapshot errors are visible without crashing the app.
+
+### 10. Kanban Desktop Commands
+
+Steps:
+
+1. Create or list tasks from the desktop Kanban UI if exposed in the build.
+2. Transition a task to a legal status.
+3. Add a comment.
+
+Expected:
+
+- Tauri commands use `SqliteKanbanStore` under `~/.i6/kanban/iota.db`.
+- State transitions obey the Kanban state machine.
+- UI refreshes after create/transition/comment operations.
+
+### 11. CLI Compatibility
 
 Run after desktop use:
 
 ```bash
 cargo run -p iota-cli -- check --daemon
-cargo run -p iota-cli -- run --daemon gemini "ping"
+cargo run -p iota-cli -- run --daemon hermes "ping"
 ```
 
 Expected:
 
-- CLI daemon request/response still works.
-- The desktop streaming protocol did not break the legacy CLI path.
+- Legacy daemon request/response still works.
+- Desktop protocol version 2 did not break CLI prompt and warm paths.
 - Output does not expose secrets.
 
 ## Acceptance Result
 
-Record the date, OS, backend used, and result here when executing the runbook.
+Record the date, OS, backend used, and result when executing the runbook.
 
 | Date | OS | Backend | Result | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| 2026-05-24 | macOS | Gemini | partial pass | Launch and daemon connection verified. Existing old daemon on `127.0.0.1:47661` caused an EOF/daemon error; fixed by desktop fallback autostart on `127.0.0.1:47662` using the current workspace CLI. Full prompt, approval, cancellation, and config-save scenarios still need interactive execution. |
+| 2026-05-24 | macOS | Gemini | partial pass | Launch and daemon connection verified. Existing old daemon on `127.0.0.1:47661` caused EOF; desktop fallback autostart on `127.0.0.1:47662` addressed this. Full prompt, approval, cancellation, config-save, memory/context, and Kanban walkthroughs still need interactive execution. |
 
 ## Non-Blocking Follow-Ups
 
-Use this section only for issues that do not invalidate the Chat-first daemon MVP baseline.
-
-| Item | Scope | Owner |
-| :--- | :--- | :--- |
-| Full manual prompt/approval/cancellation walkthrough | Desktop MVP acceptance | Developer |
+| Item | Scope |
+| :--- | :--- |
+| Full prompt/approval/cancellation walkthrough | Desktop MVP acceptance |
+| Cross-platform manual run on Windows/macOS/Linux | Desktop MVP acceptance |
+| Memory/context snapshot UX review with non-empty stores | Desktop memory/context |

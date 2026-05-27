@@ -1,117 +1,104 @@
-# iota-sympantos — slash commands
+# iota-sympantos 命令参考
 
-Type `/` at the start of a message in the iota composer to use a slash command.
-Commands must be on a single line. Text after the command name is treated as
-arguments.
+本文覆盖 CLI 命令和 TUI slash command。所有后端配置都从 `~/.i6/nimia.yaml` 读取，不读取项目级配置。
 
-All five backends are supported:
+## CLI 命令
 
-| Backend | Reference |
-| --- | --- |
-| Claude Code | <https://docs.anthropic.com/en/docs/claude-code/slash-commands> |
-| Codex | <https://openai.github.io/codex/reference/slash-commands> |
-| Gemini CLI | <https://google-gemini.github.io/gemini-cli/docs/cli/commands.html> |
-| Hermes Agent | <https://nousresearch.com/hermes-agent/docs/slash-commands> |
-| OpenCode | <https://opencode.ai/docs/slash-commands> |
+| 命令 | 作用 |
+| :--- | :--- |
+| `iota` | 进入交互式 TUI |
+| `iota check [--daemon|-d]` | 输出合并后的后端 JSON 信息；带 daemon 时先 warm 当前目录 |
+| `iota run [backend] [options] <prompt>` | 单次 prompt 执行；默认 backend 为 Codex |
+| `iota run --daemon [backend] <prompt>` | 通过本机 daemon 执行，必要时静默启动 `iota __daemon` |
+| `iota bench <cold|warm> [rounds] [--daemon|-d]` | 冷/热启动 benchmark |
+| `iota bench-cold [rounds] [--daemon|-d]` | 兼容命令，等价于 cold benchmark |
+| `iota bench-warm [rounds] [--daemon|-d]` | 兼容命令，等价于 warm benchmark |
+| `iota mcp <context|fun>` | 启动 MCP stdio server |
+| `iota context-mcp` | 兼容命令，启动 iota-context MCP |
+| `iota fun-mcp` | 兼容命令，启动 iota-fun MCP |
+| `iota skill pull <source> [name]` | 从本地路径或 HTTP(S) 拉取 skill 到 `~/.i6/skills` |
+| `iota observability <logging|tokens|metrics|logs|trace> ...` | 查询本地 token usage、Prometheus 文本指标、Loki 日志或 Jaeger trace |
+| `iota logs <execution_id>` | `iota observability logs` 的顶层别名 |
+| `iota trace <trace_id>` | `iota observability trace` 的顶层别名 |
+| `iota kanban <subcommand>` | Kanban board/task、dispatch、event sync |
+| `iota __daemon` | 内部 daemon 入口，不作为普通用户入口 |
 
-## Local commands
+`iota run` 常用选项：
 
-These commands are handled by iota. They work identically on all five backends.
+| 选项 | 作用 |
+| :--- | :--- |
+| `--backend <name>` | 指定后端，也可直接把 backend 放在 prompt 前 |
+| `--cwd <path>` | 指定执行工作目录 |
+| `--daemon` / `-d` | 经 daemon 路由 |
+| `--show-native` | 打印原生 ACP wire 内容；不能与 `--daemon` 同用 |
+| `--log-events` | 输出 normalized `RuntimeEvent` |
+| `--timing` | 输出 route、spawn、init、prompt、total timing JSON |
+| `--timeout-ms <ms>` | 覆盖 ACP prompt timeout |
 
-| Command | Aliases | What it does |
-| --- | --- | --- |
-| `/?` | — | Show iota TUI help. On Claude Code, Codex, and OpenCode, `/help` is treated the same as `/?`. |
-| `/backend` | `/backends` | List enabled backends. |
-| `/backend <name>` | — | Switch to a backend by name or alias. |
-| `/claude` | — | Switch to Claude Code. |
-| `/codex` | — | Switch to Codex. |
-| `/gemini` | — | Switch to Gemini. |
-| `/hermes` | — | Switch to Hermes. |
-| `/opencode` | — | Switch to OpenCode. |
-| `/clear` | `/new`, `/reset` | Clear the visible transcript. |
-| `/model` | `/models` | Show the model configured for the active backend. |
-| `/status` | `/stats`, `/usage`, `/about`, `/profile` | Show the active backend and model. |
-| `/export` | `/save` | Save the current transcript to a file. |
-| `/quit` | `/exit` | Open the quit confirmation prompt. |
-| `/q` | — | Quit confirmation (OpenCode session only). |
+## 后端别名
 
-Backend switching respects the enabled backends in `~/.i6/nimia.yaml`. If the
-target backend is disabled, iota shows a notice and stays on the current backend.
+| 后端 | 默认命令 | 别名 |
+| :--- | :--- | :--- |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@latest` | `claude`, `claude-code`, `claudecode` |
+| Codex | `npx -y @zed-industries/codex-acp@0.12.0` | `codex` |
+| Gemini CLI | `npx -y @google/gemini-cli@latest --acp` | `gemini`, `gemini-cli` |
+| Hermes | `hermes acp` | `hermes`, `hermes-agent` |
+| OpenCode | `npx -y opencode-ai@latest acp` | `opencode`, `open-code` |
 
-## Provider passthrough commands
+## Kanban 命令
 
-For commands that belong to a specific backend, iota sends the slash text
-directly to that backend via ACP. Aliases are resolved to their canonical name
-before forwarding — for example `/compress` is sent as `/compact` — so that the
-backend's own slash handler always receives the name it registers against.
+Kanban 数据默认写入 `~/.i6/kanban/iota.db`，shadow workspace 位于 `~/.i6/kanban/shadows`。
 
-**Only backends with confirmed ACP slash handling are listed.** Claude Code and
-Codex do **not** intercept slash commands from the ACP `session/prompt` text:
-Claude Code's ACP server passes the text to the LLM, which then explains the
-command as prose rather than executing it; Codex's ACP server shows the same
-behaviour in testing. Custom slash commands (e.g. `.claude/commands/*.md`) still
-reach those backends via the dynamic passthrough below.
+| 命令 | 作用 |
+| :--- | :--- |
+| `iota kanban create-board <slug> <name>` | 创建 board |
+| `iota kanban create-task <board-id> <title>` | 创建 task，初始状态为 `triage` |
+| `iota kanban move <id> <status>` | 通过状态机迁移 task |
+| `iota kanban dispatch <id> [--timeout <secs>]` | 用 Hermes worker 执行 task |
+| `iota kanban specify <id>` | 通过 AdvancedBridge 细化 task |
+| `iota kanban decompose <id>` | 将 task 拆分为子任务 |
+| `iota kanban export <path> [cursor]` | 导出 event bundle |
+| `iota kanban import <path>` | 导入 event bundle |
+| `iota kanban serve-sync [addr]` | 启动 event sync server，默认 `127.0.0.1:47662` |
+| `iota kanban pull <addr> [cursor]` | 从远端拉取并导入 events |
+| `iota kanban push <addr> [cursor]` | 推送 events 到远端 |
 
-| Command | Aliases | Supported backends |
-| --- | --- | --- |
-| `/help` | — | Hermes, Gemini |
-| `/init` | — | Gemini |
+合法状态：`triage`、`todo`、`ready`、`running`、`done`、`archived`、`blocked`。
+
+## TUI Slash Commands
+
+在 TUI 输入框行首输入 `/` 使用 slash command。iota 会优先处理本地命令；未识别的命令会作为普通 prompt 透传给当前后端。
+
+| Command | Aliases | 作用 |
+| :--- | :--- | :--- |
+| `/?` | `/help` | 显示 TUI 帮助浮层；Hermes/Gemini 的 native `/help` 由后端处理时除外 |
+| `/backend` | `/backends` | 列出可用后端 |
+| `/backend <name>` |  | 切换后端 |
+| `/claude` |  | 切换到 Claude Code |
+| `/codex` |  | 切换到 Codex |
+| `/gemini` |  | 切换到 Gemini |
+| `/hermes` |  | 切换到 Hermes |
+| `/opencode` |  | 切换到 OpenCode |
+| `/clear` | `/new`, `/reset` | 清空可见 transcript |
+| `/model` | `/models` | 显示当前后端模型 |
+| `/status` | `/stats`, `/usage`, `/about`, `/profile` | 显示当前状态 |
+| `/export` | `/save` | 导出当前 transcript |
+| `/quit` | `/exit` | 打开退出确认 |
+| `/q` |  | OpenCode session 下的退出确认 |
+| `/kanban ...` |  | 在 TUI 中执行 Kanban slash command |
+
+已验证可 native 处理的 provider command：
+
+| Command | Aliases | 后端 |
+| :--- | :--- | :--- |
+| `/help` |  | Hermes, Gemini |
+| `/init` |  | Gemini |
 | `/compact` | `/compress` | Hermes, OpenCode |
-| `/memory` | — | Gemini |
-| `/queue` | — | Hermes |
-| `/steer` | — | Hermes |
-| `/tools` | — | Hermes |
+| `/memory` |  | Gemini |
+| `/queue` |  | Hermes |
+| `/steer` |  | Hermes |
+| `/tools` |  | Hermes |
 | `/rollback` | `/restore` | Gemini |
-| `/extensions` | — | Gemini |
+| `/extensions` |  | Gemini |
 
-## Dynamic passthrough
-
-Any slash command that iota does not recognise — including commands not in the
-table above — is forwarded to the active backend as a plain prompt. The backend
-receives the text and handles it according to its own logic. This makes backend
-extension surfaces available without iota needing an explicit entry for each one:
-
-- Claude Code custom slash commands (from `.claude/commands/` or bundled skills)
-- Codex skills and inline commands
-- Hermes quick commands
-- Gemini file-based and MCP-backed custom commands
-- OpenCode project commands
-
-For example, `/my-command arg1 arg2` is recorded as a user message and submitted
-to the active backend as text.
-
-## Examples
-
-### `/help` — backend-native on Hermes and Gemini
-
-On **Hermes** and **Gemini**, `/help` is forwarded via ACP to the backend's own
-command handler, which returns its native help output.
-
-On **Claude Code**, **Codex**, and **OpenCode**, `/help` cannot be triggered
-through the ACP text prompt (it is a TUI-level command only). Instead, iota
-shows its own built-in help overlay — the same as `/?`.
-
-```
-/help
-```
-
-### `/compact` — passthrough command, Hermes and OpenCode
-
-`/compact` (alias `/compress`) compresses the context history of the active
-session. Confirmed ACP handling on Hermes and OpenCode.
-
-```
-/compact
-```
-
-With an optional instruction:
-
-```
-/compact focus on the last task only
-```
-
-iota resolves the alias to the canonical name before forwarding, so typing
-`/compress` sends `/compact` to the backend. On Claude Code and Codex the ACP
-layer does not intercept slash commands from text prompts — the LLM receives the
-text and explains the command instead of executing it. On Gemini, `/compact` has
-no registered ACP handler and is treated as plain text by the LLM.
+Claude Code 和 Codex 的 ACP text prompt 通常不会把 slash command 当作 native command 执行；自定义命令仍会以普通文本交给后端处理。

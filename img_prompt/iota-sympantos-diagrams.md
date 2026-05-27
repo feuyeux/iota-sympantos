@@ -42,8 +42,8 @@
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -96,15 +96,15 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
 Create a wide landscape technical architecture infographic titled "iota-sympantos Runtime Architecture / 运行时架构".
 Use a precise module map, color-coded flow arrows, compact bilingual labels, and thin ink vector lines.
 
-Canvas: 16:9 or 2:1 ratio, warm off-white paper background, rounded module columns, precise grid alignment.
+Canvas: wide landscape, 16:9 ratio, warm off-white paper background, rounded module columns, precise grid alignment.
 
 Top legend:
 - Pink: TUI / Presentation
@@ -229,13 +229,6 @@ Show store blocks:
 - OpenTelemetry: default endpoint http://localhost:4317, OTEL_ENABLED=false disables export, traces/logs/metrics
 - Docker observability stack: OTel Collector 4317/4318, Loki 3100, Jaeger 16686, Prometheus 9090, Grafana 3000
 
-Important corrections from old diagram:
-- Do not show src/store/events.rs. Current implementation uses src/store/cache.rs; events.sqlite is CacheStore replay/dedupe storage, not a durable RuntimeEvent audit stream.
-- Do not show a single ~/.i6/context.db. Current stores are split across events.sqlite, memory.sqlite, approvals.sqlite, and sessions.sqlite.
-- Do not show Promtail or old SQLite/EventStore metrics pipeline.
-- Do not show Docker mounting ~/.i6.
-- Do not show project-level config discovery. Configuration comes only from ~/.i6/nimia.yaml.
-
 Flow arrows:
 - Pink arrows from Entry/TUI to Engine
 - Orange arrows from CLI daemon path to Daemon and then Engine
@@ -251,7 +244,7 @@ Sequence markers (use circled markers):
 
 Visual style:
 - Follow the technical diagram rules and palette stated at the top of this prompt
-- Wide landscape infographic, 16:9 or 2:1 ratio
+- Wide landscape infographic, 16:9 ratio
 - Warm off-white paper background, thin rounded rectangles, precise grid alignment
 - Bilingual labels: Chinese first, English second, separated by /
 - Keep labels readable and concise
@@ -272,18 +265,18 @@ Unreadable tiny text, random fake file paths, obsolete modules, src/store/events
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" story poster style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical story-board style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
 Use a pen-and-ink technical story poster layout with a hand-drawn architectural cutaway, light cross-hatching, precise black ink, warm paper texture, and restrained iota magenta highlights.
 
-Create a vertical poster for the document "iota-sympantos architecture overview".
+Create a wide landscape story-board poster for the document "iota-sympantos architecture overview".
 
 Scene: a compact Rust CLI/TUI control tower named "iota-sympantos" sits in the center like a tiny railway signal station. From the tower, five labeled rail lines run outward to five AI backend stations: Claude Code, Codex, Gemini CLI, Hermes, and OpenCode. Below the tower is a transparent underground cutaway showing Context Fabric, SQLite stores, ACP JSON-RPC pipes, MCP sidecars, telemetry instruments, and Kanban dispatcher/worker workshops as connected rooms. Small human engineers in simple work clothes carry context capsules, memory ledgers, skill scrolls, task cards, and approval stamps between rooms. The story should feel like a busy but orderly miniature city where every subsystem has a job.
 
-Composition: portrait poster, 2:3 aspect ratio. Strong central vertical hierarchy: Entry at the top, Presentation below it, Service Orchestration in the middle, Context/Protocol/Store/Runtime Events as four connected chambers, External Boundaries at the bottom. Use arrows, pipes, labels, and little signs, but keep all text short and readable. Add the title "iota-sympantos Architecture" as hand-lettered text at the top.
+Composition: wide landscape poster, 16:9 ratio. Strong left-to-right hierarchy: Entry on the left, Presentation and Service Orchestration in the center, Context/Protocol/Store/Runtime Events as connected chambers, External Boundaries on the right. Use arrows, pipes, labels, and little signs, but keep all text short and readable. Add the title "iota-sympantos Architecture" as hand-lettered text at the top.
 
 Style: follow the story poster rules and palette stated at the top of this prompt. Keep the drawing precise, diagram-like, and legible; use subtle magenta only on the main tower beacon and active status rail. No photorealism, no 3D render, no glossy UI mockup, no gradient background.
 
@@ -304,8 +297,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -353,14 +346,14 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" story poster style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical story-board style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
 Use a pen-and-ink sequential flow poster with hand-lettered annotations, light cross-hatching, mechanical process details, warm paper texture, and restrained iota magenta highlights.
 
-Create a vertical poster for the document "iota-sympantos code call chains".
+Create a wide landscape story-board poster for the document "iota-sympantos code call chains".
 
 Scene: depict a journey of one prompt as a small sealed message capsule traveling through a mechanical dispatch system. It begins at crates/iota-cli/src/main.rs, enters cli::run(), passes command switches for run, tui, check, bench, logs, trace, observability, kanban, mcp, and __daemon, then splits into two illustrated paths: the direct ACP route and the daemon TCP route.
 
@@ -380,7 +373,7 @@ Daemon route shows:
 - Warm engine pooling (EnginePool keyed by cwd)
 - Response returning to the user
 
-Composition: portrait poster, 2:3 aspect ratio. 
+Composition: wide landscape poster, 16:9 ratio. 
 Arrange the call chain as a large board-game-like path with numbered stations and arrows. 
 Put "initialize -> session/new -> session/prompt -> session/update -> session/complete" as a clear ribbon across the middle. 
 Show external boundaries as illustrated gates: git subprocess, ACP child process, MCP stdio sidecar, SQLite files, and TCP socket. 
@@ -403,8 +396,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -451,8 +444,8 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -501,8 +494,8 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -573,18 +566,18 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" story poster style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical story-board style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
 Use a pen-and-ink observability story poster with a signal routing diagram, hand-drawn infrastructure map, light cross-hatching, warm paper texture, and restrained iota magenta highlights.
 
-Create a vertical poster for the document "iota observability".
+Create a wide landscape story-board poster for the document "iota observability".
 
 Scene: show iota as a small command desk sending three kinds of signals into an old-fashioned observatory: logs, traces, and metrics. The signals travel through brass-labeled tubes into an OpenTelemetry Collector at the center. From there, three paths branch to Loki as a log archive library, Jaeger as a trace telescope charting spans across the sky, and Prometheus as a metric gauge wall with moving needles. Grafana appears as a large wall screen that combines the three views. A separate lower-left corner shows local operation without Docker: stderr, daily files under ~/.i6/logs/, and SQLite stores under ~/.i6/context/.
 
-Composition: portrait poster, 2:3 aspect ratio. Central hub-and-spoke layout with the OTel Collector as the main switching lens. Put Docker observability stack on the right side and local fallback behavior on the left side. Include readable short labels: OTLP :4317, Loki :3100, Jaeger :16686, Prometheus :9090, Grafana :3000, OTEL_ENABLED=false, and iota logs / iota trace / iota metrics. Add the title "iota Observability" at the top.
+Composition: wide landscape poster, 16:9 ratio. Central hub-and-spoke layout with the OTel Collector as the main switching lens. Put Docker observability stack on the right side and local fallback behavior on the left side. Include readable short labels: OTLP :4317, Loki :3100, Jaeger :16686, Prometheus :9090, Grafana :3000, OTEL_ENABLED=false, and iota logs / iota trace / iota metrics. Add the title "iota Observability" at the top.
 
 Style: follow the story poster rules and palette stated at the top of this prompt. Keep precise arrows, readable infrastructure labels, and minimal magenta accents on live telemetry pulses. Avoid generic cloud architecture slide aesthetics.
 
@@ -604,18 +597,18 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" story poster style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical story-board style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Story poster rules: pen-and-ink technical story poster, warm paper texture, precise black linework, light cross-hatching, miniature engineering cutaway details, restrained iota magenta highlights, readable labels, and a diagram-like composition.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
 Use a pen-and-ink debugging workshop poster with a hand-drawn developer desk, annotated troubleshooting map, light cross-hatching, warm paper texture, and restrained iota magenta highlights.
 
-Create a vertical poster for the document "iota-sympantos debugging guide".
+Create a wide landscape story-board poster for the document "iota-sympantos debugging guide".
 
 Scene: an engineer sits at a VS Code workbench with CodeLLDB tools arranged like precision instruments. A large Rust CLI machine is open for inspection: main.rs, cli/mod.rs, engine.rs, acp/mod.rs, and tui.rs appear as labeled access panels. Breakpoints glow as tiny red pinheads on the machine. A side panel shows debug configurations as selectable brass tags: Debug TUI, Debug Run, Debug Run with Daemon, Debug Check, Debug Context MCP Sidecar, Debug Fun MCP Server, Debug Bench Cold, and Debug Daemon. At the bottom, a terminal recovery station shows RUST_LOG=debug, RUST_BACKTRACE=1, local log files, and a reset lever for raw terminal recovery.
 
-Composition: portrait poster, 2:3 aspect ratio. Make the story read from top to bottom: prerequisites, configurations, breakpoints, stepping controls, variable inspection, TUI debugging, ACP subprocess boundary. Include a small keyboard strip with F5, F10, F11, Shift+F11, and Shift+F5. Add the title "Debugging iota-sympantos" at the top.
+Composition: wide landscape poster, 16:9 ratio. Make the story read from left to right: prerequisites, configurations, breakpoints, stepping controls, variable inspection, TUI debugging, ACP subprocess boundary. Include a small keyboard strip with F5, F10, F11, Shift+F11, and Shift+F5. Add the title "Debugging iota-sympantos" at the top.
 
 Style: follow the story poster rules and palette stated at the top of this prompt. Keep crisp technical linework, readable labels, subtle magenta accents on breakpoint dots and the active debug path, and a practical repair-manual feeling without becoming cartoonish.
 
@@ -639,8 +632,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -748,8 +741,8 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -856,8 +849,8 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -987,8 +980,8 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -1095,8 +1088,8 @@ Style instructions:
 
 **Prompt**:
 ```
-Use the "Iota Technical Field Notebook" technical infographic style for this entire image.
-Use the "Iota Technical Field Notebook" visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering notebook texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
+Use a consistent technical infographic style for this entire wide landscape 16:9 image.
+Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
 Technical diagram rules: warm off-white paper, thin ink vector lines, rounded module rectangles, solid arrows, compact labels, clean sans-serif typography, disciplined spacing; keep labels short and readable; do not invent file paths, module names, database columns, commands, or backend names.
 Negative details: unreadable tiny text, fake modules, fake code, wrong file paths, obsolete modules, crowded arrows, messy layout, 3D render, neon cyberpunk, glossy corporate dashboard, stock cloud architecture icons, gradient blobs, random decorative symbols, Korean text, non-Chinese non-English labels.
@@ -1196,19 +1189,6 @@ Style instructions:
 
 ## 附录：图表使用指南
 
-### 生成建议
-
-1. **技术架构图** (1.1, 1.2, 3.1, 3.2, 5.1, 5.2, 6.1, 7.1, 8.1): 每个 Prompt 已内置 `Iota Technical Field Notebook` 技术图规则，强调清晰模块、准确标签和紧凑信息层级
-2. **故事化海报** (1.3, 2.2, 4.1, 4.2): 每个 Prompt 已内置 `Iota Technical Field Notebook` 故事海报规则，强调钢笔线稿、工程剖面和可读叙事标签
-
-### 风格一致性
-
-所有图表遵循统一的视觉语言：
-- **统一风格名**: `Iota Technical Field Notebook / iota 技术野外笔记图册`
-- **技术图**: 暖白纸底、细线工程图、圆角模块、清晰无衬线字体、克制色板和实体箭头
-- **海报图**: 钢笔墨水插画、轻量交叉阴影、工程剖面叙事、可读标签和少量 iota 洋红高亮
-- **共同约束**: 不生成 3D、霓虹、企业云图标、装饰渐变块、虚构模块、错误路径或不可读小字
-
 ### 图表索引
 
 | 编号 | 标题 | 类型 | 用途 |
@@ -1228,18 +1208,6 @@ Style instructions:
 | 6.1 | Desktop 应用架构与通信流 | 技术图 | 展示 Tauri 应用架构 |
 | 7.1 | 配置层次与后端环境变量映射 | 技术图 | 展示配置结构和环境变量映射 |
 | 8.1 | 技能加载、匹配与执行 | 技术图 | 展示技能系统完整生命周期 |
-
-### 更新维护
-
-当代码结构发生变化时，需要更新的图表：
-- 新增模块 → 更新 1.1, 1.2
-- 执行流程变化 → 更新 2.1, 2.3
-- 记忆系统变化 → 更新 3.1, 3.2
-- 观测性变化 → 更新 4.1
-- Kanban 系统变化 → 更新 5.1, 5.2
-- Desktop 应用变化 → 更新 6.1
-- 配置模型变化 → 更新 7.1
-- 技能系统变化 → 更新 8.1
 
 ### 使用场景
 
