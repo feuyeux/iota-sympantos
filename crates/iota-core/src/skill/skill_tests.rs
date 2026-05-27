@@ -71,10 +71,7 @@ fn core_memory_taxonomy_skill_is_available_without_workspace_files() {
         .get("iota-memory-taxonomy")
         .expect("core memory taxonomy skill should be built in");
 
-    assert_eq!(
-        skill.path,
-        PathBuf::from("<iota-core>/iota-memory-taxonomy")
-    );
+    assert!(skill.path.ends_with("src/skill/core/iota-memory-taxonomy/SKILL.md"));
     assert!(skill.body.contains("identity"));
     assert!(skill.body.contains("preference"));
     assert!(skill.body.contains("strategic"));

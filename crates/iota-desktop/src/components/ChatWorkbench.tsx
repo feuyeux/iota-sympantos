@@ -334,17 +334,17 @@ export function ChatWorkbench() {
                   </filter>
                   {/* Vibrant Gradients */}
                   <linearGradient id="gradient-outer" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="50%" stopColor="#14b8a6" />
-                    <stop offset="100%" stopColor="#10b981" />
+                    <stop offset="0%" stopColor="#FF6C37" />
+                    <stop offset="50%" stopColor="#f97316" />
+                    <stop offset="100%" stopColor="#f59e0b" />
                   </linearGradient>
                   <linearGradient id="gradient-inner" x1="100%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#10b981" />
-                    <stop offset="100%" stopColor="#3b82f6" />
+                    <stop offset="0%" stopColor="#f59e0b" />
+                    <stop offset="100%" stopColor="#FF6C37" />
                   </linearGradient>
                   <linearGradient id="gradient-core" x1="0%" y1="50%" x2="100%" y2="50%">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#6366f1" />
+                    <stop offset="0%" stopColor="#FF6C37" />
+                    <stop offset="100%" stopColor="#ef4444" />
                   </linearGradient>
                 </defs>
 
@@ -375,7 +375,7 @@ export function ChatWorkbench() {
                   cx="50"
                   cy="10"
                   r="3"
-                  fill="#00f2fe"
+                  fill="#ffdd57"
                   className="iota-logo-ring-outer"
                   filter="url(#iota-glow)"
                 />
@@ -383,7 +383,7 @@ export function ChatWorkbench() {
                   cx="50"
                   cy="90"
                   r="3"
-                  fill="#ff007f"
+                  fill="#f43f5e"
                   className="iota-logo-ring-outer"
                   filter="url(#iota-glow)"
                 />

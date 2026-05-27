@@ -2,8 +2,8 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: hsl(215, 75%, 55%);
-  --color-primary-hover: hsl(215, 80%, 60%);
+  --color-primary: hsl(16, 100%, 61%);
+  --color-primary-hover: hsl(16, 100%, 53%);
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
 }
@@ -50,12 +50,12 @@ input {
   0%, 100% {
     transform: scale(1);
     opacity: 0.95;
-    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.4)) drop-shadow(0 0 1px rgba(20, 184, 166, 0.3));
+    filter: drop-shadow(0 0 4px rgba(255, 108, 55, 0.4)) drop-shadow(0 0 1px rgba(245, 158, 11, 0.3));
   }
   50% {
     transform: scale(1.06);
     opacity: 1;
-    filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.7)) drop-shadow(0 0 4px rgba(20, 184, 166, 0.5));
+    filter: drop-shadow(0 0 10px rgba(255, 108, 55, 0.7)) drop-shadow(0 0 4px rgba(245, 158, 11, 0.5));
   }
 }
 

@@ -177,17 +177,12 @@ fn push_memory_tools(capsule: &mut String, input: &ComposeInput<'_>) {
     capsule.push_str("MCP tool `iota_memory_write` persists information across sessions.\n");
     capsule.push_str("When the user asks you to remember, save, store, or persist durable information, load `iota-memory-taxonomy` with `iota_skill_load`, then call `iota_memory_write` before claiming it is remembered.\n");
     capsule.push_str("Do not say that information was remembered unless a memory write tool call completed successfully.\n");
-    capsule.push_str(
-        "Args: content, type(semantic|episodic|procedural), scope(user|project|session), ",
-    );
     capsule.push_str(&format!(
-        "scope_id(default: user=\"local-user\", project=\"{}\", session=\"{}\").\n",
+        "When the skill says to omit scope_id, tool defaults are user=\"local-user\", project=\"{}\", session=\"{}\".\n",
         input.cwd.display(),
         input.session_id,
     ));
-    capsule.push_str(
-        "Optional: facet(identity|preference|strategic|domain), merge_mode, confidence, ttl_days. Classification rules live only in `iota-memory-taxonomy`.\n",
-    );
+    capsule.push_str("Use the tool schema for required fields and valid values. Classification rules live only in `iota-memory-taxonomy`.\n");
     capsule.push_str("</memory-tools>\n\n");
 }
 

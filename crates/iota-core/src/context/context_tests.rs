@@ -175,6 +175,7 @@ fn memory_tools_points_model_to_core_memory_taxonomy_skill() {
     assert!(prompt.contains("iota-memory-taxonomy"));
     assert!(prompt.contains("iota_skill_load"));
     assert!(prompt.contains("iota_memory_write"));
+    assert!(prompt.contains("Classification rules live only in `iota-memory-taxonomy`"));
 }
 
 #[test]
