@@ -4,6 +4,7 @@ iota-sympantos 是一个 Rust workspace，包含 CLI/TUI、核心运行时、Kan
 
 | 文档 | 说明 |
 | :--- | :--- |
+| [iota_book.md](iota_book.md) | **《iota 技术指南》** —— 面向程序员与 AI 从业者的系统化核心设计与实现指南 |
 | [architecture.md](architecture.md) | 分层架构、crate 职责、后端、配置、扩展点 |
 | [code-call-chains.md](code-call-chains.md) | CLI、TUI、daemon、desktop、ACP、MCP、memory、kanban 调用链 |
 | [command.md](command.md) | CLI 命令和 TUI slash command |
