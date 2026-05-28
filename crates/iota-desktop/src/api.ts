@@ -5,6 +5,11 @@ import type {
   DaemonClientError,
   DaemonServerMessage,
   DesktopConfigSnapshot,
+  KanbanBoard,
+  KanbanDispatchReport,
+  KanbanTask,
+  KanbanTaskDetail,
+  KanbanTaskFilter,
   DesktopModelConfig,
   ObservabilitySummary,
   DesktopMemoryContextSnapshot,
@@ -56,4 +61,24 @@ export function listenDaemonClientErrors(callback: (error: DaemonClientError) =>
 
 export function getMemoryContextSnapshot(scopeMode: "workspace" | "all"): Promise<DesktopMemoryContextSnapshot> {
   return invoke<DesktopMemoryContextSnapshot>("get_memory_context_snapshot", { scopeMode });
+}
+
+export function listKanbanBoards(): Promise<KanbanBoard[]> {
+  return invoke<KanbanBoard[]>("list_boards");
+}
+
+export function listKanbanTasks(filter: KanbanTaskFilter = {}): Promise<KanbanTask[]> {
+  return invoke<KanbanTask[]>("list_tasks", { filter });
+}
+
+export function dispatchKanban(): Promise<KanbanDispatchReport> {
+  return invoke<KanbanDispatchReport>("dispatch_kanban");
+}
+
+export function getKanbanTaskDetail(taskId: number): Promise<KanbanTaskDetail> {
+  return invoke<KanbanTaskDetail>("get_kanban_task_detail", { taskId });
+}
+
+export function listenKanbanUpdates(callback: (report: KanbanDispatchReport) => void): Promise<() => void> {
+  return listen<KanbanDispatchReport>("kanban-updated", (event) => callback(event.payload));
 }

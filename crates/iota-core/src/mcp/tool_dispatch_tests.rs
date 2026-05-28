@@ -1,4 +1,5 @@
 use super::*;
+use iota_kanban::{KanbanStore, SqliteKanbanStore, Status};
 use serde_json::json;
 
 #[test]
@@ -77,6 +78,40 @@ fn is_known_tool_recognizes_iota_tools() {
     assert!(is_known_tool("iota_session_summary"));
     assert!(is_known_tool("iota_handoff_publish"));
     assert!(is_known_tool("iota_handoff_read"));
+    assert!(is_known_tool("iota_kanban_create_task"));
+    assert!(is_known_tool("iota_kanban_list_tasks"));
+    assert!(is_known_tool("iota_kanban_ready_task"));
     assert!(!is_known_tool("external_tool"));
     assert!(!is_known_tool("iota_unknown"));
+}
+
+#[test]
+fn kanban_create_task_defaults_to_ready() {
+    let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
+    let workspace = std::path::Path::new("/tmp/iota-project");
+    let skills = crate::skill::SkillRegistry::load(workspace, &[]);
+    let ctx = ToolContext {
+        memory: None,
+        ledger: None,
+        kanban: Some(&store),
+        skills: &skills,
+        workspace,
+    };
+
+    let result = dispatch_tool(
+        &ctx,
+        "iota_kanban_create_task",
+        &json!({
+            "title": "Research Agent - TinyFish trending to Supabase",
+            "assignee": "research-agent",
+            "tags": ["research", "supabase"]
+        }),
+    )
+    .unwrap();
+
+    let task_id = result["task_id"].as_u64().unwrap();
+    let task = store.get_task(task_id).unwrap();
+    assert_eq!(task.status, Status::Ready);
+    assert_eq!(task.assignee.as_deref(), Some("research-agent"));
+    assert_eq!(result["auto_dispatch"], true);
 }

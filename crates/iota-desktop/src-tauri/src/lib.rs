@@ -3,13 +3,91 @@ mod daemon_client;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Emitter;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
-use iota_kanban::{KanbanStore, SqliteKanbanStore, types::*};
+use iota_core::acp::AcpBackend;
+use iota_core::config::{self, backend_config, backend_process_env_with_context};
+use iota_kanban::{Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore, types::*};
 
 pub struct AppState {
     pub kanban_store: Arc<Mutex<SqliteKanbanStore>>,
+    pub kanban_dispatcher: Arc<Mutex<Dispatcher>>,
     pub shadows_dir: PathBuf,
+}
+
+#[derive(Debug, serde::Serialize, Clone)]
+struct DesktopKanbanDispatchReport {
+    spawned: usize,
+    completed: usize,
+    timed_out: usize,
+    spawn_failures: usize,
+    reclaimed: usize,
+    active_workers: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DesktopKanbanTaskDetail {
+    task: Task,
+    board: Option<Board>,
+    comments: Vec<Comment>,
+    runs: Vec<Run>,
+    links: Vec<Link>,
+    events: Vec<KanbanEvent>,
+}
+
+async fn tick_kanban_dispatcher(state: &AppState) -> Result<DesktopKanbanDispatchReport, String> {
+    let store = state.kanban_store.clone();
+    let dispatcher = state.kanban_dispatcher.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = store.blocking_lock();
+        let mut dispatcher = dispatcher.blocking_lock();
+        let report = dispatcher.tick(&*store).map_err(|e| e.to_string())?;
+        Ok(DesktopKanbanDispatchReport {
+            spawned: report.spawned,
+            completed: report.completed,
+            timed_out: report.timed_out,
+            spawn_failures: report.spawn_failures,
+            reclaimed: report.reclaimed,
+            active_workers: dispatcher.active_worker_count(),
+        })
+    })
+    .await
+    .map_err(|e| format!("kanban dispatcher task failed: {e}"))?
+}
+
+fn hermes_worker_env() -> std::collections::BTreeMap<String, String> {
+    config::read_config()
+        .ok()
+        .map(|cfg| {
+            let default_section = iota_core::config::BackendConfig::default();
+            let section = backend_config(&cfg, AcpBackend::Hermes);
+            let section_ref = section.unwrap_or(&default_section);
+            backend_process_env_with_context(AcpBackend::Hermes, section_ref, None)
+        })
+        .unwrap_or_default()
+}
+
+fn event_mentions_task(event: &KanbanEvent, task_id: TaskId) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&event.payload) else {
+        return false;
+    };
+    value_mentions_task(&value, task_id)
+}
+
+fn value_mentions_task(value: &serde_json::Value, task_id: TaskId) -> bool {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64() == Some(task_id),
+        serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
+            matches!(key.as_str(), "task_id" | "from_id" | "to_id" | "id")
+                && value.as_u64() == Some(task_id)
+                || value_mentions_task(value, task_id)
+        }),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|value| value_mentions_task(value, task_id)),
+        _ => false,
+    }
 }
 
 #[tauri::command]
@@ -205,8 +283,12 @@ async fn create_task(
     req: CreateTaskRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<TaskId, String> {
-    let store = state.kanban_store.lock().await;
-    store.create_task(req).map_err(|e| e.to_string())
+    let task_id = {
+        let store = state.kanban_store.lock().await;
+        store.create_task(req).map_err(|e| e.to_string())?
+    };
+    let _ = tick_kanban_dispatcher(state.inner()).await;
+    Ok(task_id)
 }
 
 #[tauri::command]
@@ -215,10 +297,57 @@ async fn transition_task(
     to_status: Status,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    {
+        let store = state.kanban_store.lock().await;
+        store
+            .transition(task_id, to_status)
+            .map_err(|e| e.to_string())?;
+    }
+    let _ = tick_kanban_dispatcher(state.inner()).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn dispatch_kanban(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+) -> Result<DesktopKanbanDispatchReport, String> {
+    let report = tick_kanban_dispatcher(state.inner()).await?;
+    let _ = window.emit("kanban-updated", report.clone());
+    Ok(report)
+}
+
+#[tauri::command]
+async fn get_kanban_task_detail(
+    task_id: TaskId,
+    state: tauri::State<'_, AppState>,
+) -> Result<DesktopKanbanTaskDetail, String> {
     let store = state.kanban_store.lock().await;
-    store
-        .transition(task_id, to_status)
-        .map_err(|e| e.to_string())
+    let task = store.get_task(task_id).map_err(|e| e.to_string())?;
+    let board = store
+        .list_boards()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|board| board.id == task.board_id);
+    let comments = store.list_comments(task_id).map_err(|e| e.to_string())?;
+    let runs = store.get_runs(task_id).map_err(|e| e.to_string())?;
+    let links = store.get_links(task_id).map_err(|e| e.to_string())?;
+    let mut events: Vec<KanbanEvent> = store
+        .events_since(0)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|event| event_mentions_task(event, task_id))
+        .collect();
+    events.sort_by(|left, right| right.id.cmp(&left.id));
+    events.truncate(30);
+    Ok(DesktopKanbanTaskDetail {
+        task,
+        board,
+        comments,
+        runs,
+        links,
+        events,
+    })
 }
 
 #[tauri::command]
@@ -255,6 +384,11 @@ pub fn run() {
     std::fs::create_dir_all(&shadows_dir).expect("failed to create shadows directory");
 
     let store = SqliteKanbanStore::open(&store_path).expect("failed to open sqlite store");
+    let dispatcher = Dispatcher::new(DispatcherConfig {
+        shadows_dir: shadows_dir.clone(),
+        extra_env: hermes_worker_env(),
+        ..Default::default()
+    });
 
     // Seed initial board and tasks if database is empty
     if let Ok(true) = store.list_boards().map(|b| b.is_empty()) {
@@ -317,7 +451,50 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             kanban_store: Arc::new(Mutex::new(store)),
+            kanban_dispatcher: Arc::new(Mutex::new(dispatcher)),
             shadows_dir,
+        })
+        .setup(|app| {
+            let store = app.state::<AppState>().kanban_store.clone();
+            let dispatcher = app.state::<AppState>().kanban_dispatcher.clone();
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+                loop {
+                    interval.tick().await;
+                    let store = store.clone();
+                    let dispatcher = dispatcher.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let store = store.blocking_lock();
+                        let mut dispatcher = dispatcher.blocking_lock();
+                        let report = dispatcher.tick(&*store)?;
+                        Ok::<_, anyhow::Error>((report, dispatcher.active_worker_count()))
+                    })
+                    .await;
+                    if let Ok(Ok((report, active_workers))) = result {
+                        if report.spawned > 0
+                            || report.completed > 0
+                            || report.timed_out > 0
+                            || report.spawn_failures > 0
+                            || report.reclaimed > 0
+                            || active_workers > 0
+                        {
+                            let _ = app_handle.emit(
+                                "kanban-updated",
+                                DesktopKanbanDispatchReport {
+                                    spawned: report.spawned,
+                                    completed: report.completed,
+                                    timed_out: report.timed_out,
+                                    spawn_failures: report.spawn_failures,
+                                    reclaimed: report.reclaimed,
+                                    active_workers,
+                                },
+                            );
+                        }
+                    }
+                }
+            });
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
@@ -333,6 +510,8 @@ pub fn run() {
             list_tasks,
             create_task,
             transition_task,
+            dispatch_kanban,
+            get_kanban_task_detail,
             list_comments,
             add_comment
         ])

@@ -10,7 +10,7 @@ import {
   submitPrompt,
 } from "../api";
 import { initialTurnsState, turnsReducer } from "../turnReducer";
-import { RightInspector } from "./RightInspector";
+import { RightInspector, type InspectorTab } from "./RightInspector";
 import { ConfigPanel } from "./ConfigPanel";
 import type { BackendCheckResult, DesktopConfigSnapshot, ObservabilitySummary } from "../types";
 
@@ -83,6 +83,11 @@ function backendCheckErrorDetails(err: unknown) {
   return message;
 }
 
+function shouldOpenKanbanForPrompt(prompt: string) {
+  const text = prompt.toLowerCase();
+  return text.includes("/kanban") || text.includes("kanban") || /看板|创建.*任务|任务.*创建/.test(prompt);
+}
+
 export function ChatWorkbench() {
   const [state, dispatch] = useReducer(turnsReducer, initialTurnsState);
   const [backend, setBackend] = useState("hermes");
@@ -91,6 +96,7 @@ export function ChatWorkbench() {
   const [config, setConfig] = useState<DesktopConfigSnapshot | null>(null);
   const [backendChecks, setBackendChecks] = useState<Record<string, BackendCheckResult>>({});
   const [observability, setObservability] = useState<ObservabilitySummary | null>(null);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("observability");
   const [workspace, setWorkspace] = useState("");
   const [daemonStatus, setDaemonStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
@@ -226,6 +232,9 @@ export function ChatWorkbench() {
     const prompt = input.trim();
     if (!prompt || activeTurnBusy || !canSubmit) return;
     setInput("");
+    if (backend === "hermes" && shouldOpenKanbanForPrompt(prompt)) {
+      setInspectorTab("kanban");
+    }
     const turnId = crypto.randomUUID();
     dispatch({
       type: "turn_started",
@@ -660,6 +669,8 @@ export function ChatWorkbench() {
         turn={activeTurn}
         observability={observability}
         width={inspectorWidth}
+        activeTab={inspectorTab}
+        onActiveTabChange={setInspectorTab}
         onApprovalDecision={(approvalId, approved) =>
           dispatch({ type: "approval_decision", approvalId, approved })
         }

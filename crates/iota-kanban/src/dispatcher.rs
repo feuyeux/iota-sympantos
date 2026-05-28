@@ -29,6 +29,8 @@ pub struct DispatcherConfig {
     pub extra_env: std::collections::BTreeMap<String, String>,
     /// When set, only spawn workers for this task ID (used by `iota kanban dispatch <id>`).
     pub task_id_filter: Option<TaskId>,
+    /// Move a task to Blocked after this many failed/timed-out runs.
+    pub max_failures: usize,
 }
 
 impl Default for DispatcherConfig {
@@ -44,6 +46,7 @@ impl Default for DispatcherConfig {
                 .join(".i6/kanban/shadows"),
             extra_env: std::collections::BTreeMap::new(),
             task_id_filter: None,
+            max_failures: 3,
         }
     }
 }
@@ -218,9 +221,7 @@ impl Dispatcher {
                 if let Err(e) = store.complete_run(&run_id, RunStatus::TimedOut, None) {
                     tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete expired run in store");
                 }
-                if let Err(e) = store.transition(task_id, Status::Ready) {
-                    tracing::error!(task_id, error = %e, "Failed to transition task to Ready after claim TTL expiration");
-                }
+                self.transition_after_failure(store, task_id);
                 if let Err(e) = self.materializer.cleanup(task_id) {
                     tracing::warn!(task_id, error = %e, "Failed to cleanup shadow materializer after claim TTL expiration");
                 }
@@ -249,9 +250,7 @@ impl Dispatcher {
                 if let Err(e) = store.complete_run(&run_id, RunStatus::TimedOut, None) {
                     tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete heartbeat-timeout run in store");
                 }
-                if let Err(e) = store.transition(task_id, Status::Ready) {
-                    tracing::error!(task_id, error = %e, "Failed to transition task to Ready after heartbeat timeout");
-                }
+                self.transition_after_failure(store, task_id);
                 if let Err(e) = self.materializer.cleanup(task_id) {
                     tracing::warn!(task_id, error = %e, "Failed to cleanup shadow materializer after heartbeat timeout");
                 }
@@ -280,10 +279,7 @@ impl Dispatcher {
                     tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete run in store");
                 }
                 if failed {
-                    // Non-zero exit: transition task back to Ready for retry
-                    if let Err(e) = store.transition(task_id, Status::Ready) {
-                        tracing::error!(task_id, error = %e, "Failed to transition failed task to Ready");
-                    }
+                    self.transition_after_failure(store, task_id);
                 } else if let Some(status) = terminal_status.as_deref() {
                     match status {
                         "done" => {
@@ -463,7 +459,7 @@ impl Dispatcher {
             Ok(result) => result,
             Err(e) => {
                 let _ = store.complete_run(&run_id, RunStatus::Failed, None);
-                let _ = store.transition(task.id, Status::Ready);
+                self.transition_after_failure(store, task.id);
                 let _ = self.materializer.cleanup(task.id);
                 return Err(e);
             }
@@ -471,6 +467,25 @@ impl Dispatcher {
 
         self.workers.insert(task.id, (handle, watcher));
         Ok(())
+    }
+
+    fn transition_after_failure(&self, store: &dyn KanbanStore, task_id: TaskId) {
+        let failure_count = store
+            .get_runs(task_id)
+            .map(|runs| {
+                runs.into_iter()
+                    .filter(|run| matches!(run.status, RunStatus::Failed | RunStatus::TimedOut))
+                    .count()
+            })
+            .unwrap_or(0);
+        let next_status = if failure_count >= self.config.max_failures {
+            Status::Blocked
+        } else {
+            Status::Ready
+        };
+        if let Err(e) = store.transition(task_id, next_status) {
+            tracing::error!(task_id, status = %next_status, error = %e, "Failed to transition task after worker failure");
+        }
     }
 }
 

@@ -11,23 +11,25 @@ import {
   CheckCircle2,
   Database,
 } from "lucide-react";
+import * as React from "react";
 import type { DesktopTurn, ObservabilitySummary } from "../types";
 import { handleApproval, cancelTurn } from "../api";
-import { useState } from "react";
 import { MemoryContextWorkspace } from "./MemoryContextWorkspace";
+import { KanbanWorkspace } from "./KanbanWorkspace";
 
 type Props = {
   turn?: DesktopTurn;
   observability?: ObservabilitySummary | null;
   onApprovalDecision: (approvalId: string, approved: boolean) => void;
   width?: number;
+  activeTab: InspectorTab;
+  onActiveTabChange: (tab: InspectorTab) => void;
 };
 
-type InspectorTab = "observability" | "memory" | "context";
+export type InspectorTab = "observability" | "kanban" | "memory" | "context";
 
-export function RightInspector({ turn, observability, onApprovalDecision, width = 640 }: Props) {
-  const [cancelling, setCancelling] = useState(false);
-  const [activeTab, setActiveTab] = useState<InspectorTab>("observability");
+export function RightInspector({ turn, observability, onApprovalDecision, width = 640, activeTab, onActiveTabChange }: Props) {
+  const [cancelling, setCancelling] = React.useState(false);
 
   const formatMs = (ms?: number) => {
     if (ms === undefined) return "N/A";
@@ -180,7 +182,7 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
           </div>
           <div className="mt-3">
             <button
-              onClick={() => setActiveTab("memory")}
+              onClick={() => onActiveTabChange("memory")}
               className="w-full flex items-center justify-center gap-2 rounded-lg border border-slate-800 bg-slate-950/20 hover:bg-slate-950/40 text-slate-300 py-2 text-xs font-semibold transition-all cursor-pointer"
             >
               <Cpu className="h-3.5 w-3.5 text-primary" />
@@ -384,21 +386,30 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
       style={{ width }}
     >
       <div className="border-b border-slate-800 bg-[#0d1220] p-3">
-        <nav className="grid grid-cols-3 rounded-lg border border-slate-800 bg-slate-950/40 p-0.5">
+        <nav className="grid grid-cols-4 rounded-lg border border-slate-800 bg-slate-950/40 p-0.5">
           <button
             className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
               activeTab === "observability" ? "bg-primary text-white shadow-sm shadow-primary/20 border border-primary/10" : "text-slate-400 hover:text-slate-200 border border-transparent"
             }`}
-            onClick={() => setActiveTab("observability")}
+            onClick={() => onActiveTabChange("observability")}
           >
             <Activity className="h-3.5 w-3.5" />
             Observability
           </button>
           <button
             className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === "kanban" ? "bg-primary text-white shadow-sm shadow-primary/20 border border-primary/10" : "text-slate-400 hover:text-slate-200 border border-transparent"
+            }`}
+            onClick={() => onActiveTabChange("kanban")}
+          >
+            <Database className="h-3.5 w-3.5" />
+            Kanban
+          </button>
+          <button
+            className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
               activeTab === "memory" ? "bg-primary text-white shadow-sm shadow-primary/20 border border-primary/10" : "text-slate-400 hover:text-slate-200 border border-transparent"
             }`}
-            onClick={() => setActiveTab("memory")}
+            onClick={() => onActiveTabChange("memory")}
           >
             <Database className="h-3.5 w-3.5" />
             Memory
@@ -407,7 +418,7 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
             className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
               activeTab === "context" ? "bg-primary text-white shadow-sm shadow-primary/20 border border-primary/10" : "text-slate-400 hover:text-slate-200 border border-transparent"
             }`}
-            onClick={() => setActiveTab("context")}
+            onClick={() => onActiveTabChange("context")}
           >
             <Cpu className="h-3.5 w-3.5" />
             Context
@@ -418,6 +429,10 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
         <div className="flex flex-col gap-6 overflow-y-auto p-5">
           {renderTurnInspector()}
           {renderObservabilitySection()}
+        </div>
+      ) : activeTab === "kanban" ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <KanbanWorkspace />
         </div>
       ) : activeTab === "memory" ? (
         <div className="min-h-0 flex-1 overflow-hidden">

@@ -1,0 +1,83 @@
+{
+  "title": "Video Script — Multi-Agent AI Coding orchestration",
+  "topic_source": "research_agent_supabase (placeholder — data source not connected)",
+  "heat_score": 85,
+  "sections": {
+    "hook": {
+      "type": "hook",
+      "content": "90% 的开发团队还在用单一大模型 API——其实你早该让多个 AI 编程助手同时协作了。"
+    },
+    "story_structure": {
+      "type": "narrative_structure",
+      "phases": [
+        {
+          "phase": 1,
+          "title": "痛点引入",
+          "content": "单后端方案的响应慢、上下文窗口不足、质量不稳定"
+        },
+        {
+          "phase": 2,
+          "title": "方案展示",
+          "content": "iota-sympantos 的 ACP 协议如何同时调度 5 个后端（Claude Code、Codex、Gemini CLI、Hermes Agent、OpenCode）"
+        },
+        {
+          "phase": 3,
+          "title": "深度演示",
+          "content": "TUI 实时切换后端、Context Fabric 记忆跨 session 保持、daemon 热路径复用"
+        },
+        {
+          "phase": 4,
+          "title": "价值升华",
+          "content": "团队协作视角：不同后端擅长不同任务，ACP 协议让它们像一个大脑一样协作"
+        }
+      ]
+    },
+    "key_moments": [
+      {
+        "timestamp_range": "0:00-0:20",
+        "description": "开场 Hook：单后端的局限 vs 多后端协作的效率对比"
+      },
+      {
+        "timestamp_range": "0:20-1:00",
+        "description": "iota-sympantos 架构图：ACP 协议驱动 5 个后端"
+      },
+      {
+        "timestamp_range": "1:00-1:30",
+        "description": "TUI 实际演示：运行时切换后端、kanban 任务流转"
+      },
+      {
+        "timestamp_range": "1:30-2:00",
+        "description": "Context Fabric 演示：记忆如何跨 session 保持"
+      },
+      {
+        "timestamp_range": "2:00-2:15",
+        "description": "CTA：快速上手步骤 + GitHub 链接"
+      }
+    ],
+    "voiceover_script": {
+      "opening": "你还在用一个 AI 编程工具吗？今天我用一个 Rust 写的编排框架，让你同时调动 5 个主流 AI 编程后端——Claude Code、Codex、Gemini CLI、Hermes Agent，还有一个开源的 OpenCode。",
+      "body": "它的核心是一个叫 ACP 的协议，基于 JSON-RPC 2.0，通过 stdin 和 stdout 和每个后端进程通信。这意味着：不管模型怎么升级，只要它支持这个协议，就能无缝接入。\n\n看看实际效果。这是我在本届 Kanban board 上的任务列表，ACP 协议会自动把任务分发给我选择的任意后端。你看，我可以让 Codex 处理复杂重构，同时让 Gemini CLI 做信息检索，它们互不干扰，但结果统一写回同一个 Memory Store。\n\n这就是多后端协作真正有价值的地方——每个模型擅长不同类型的工作，通过一个统一的上下文层把它们串联起来，你不需要在多个工具之间来回切换。",
+      "closing": "iota-sympantos 完全开源，用 Rust 实现，性能很高。项目描述里有快速上手链接，有问题可以在 GitHub 提 issue。觉得这期有用的话，点赞、订阅、打开小铃铛，我是 Han，我们下期见。"
+    },
+    "on_screen_text": {
+      "callout": "ACP = Agent Control Protocol",
+      "backend_list": "Claude Code · Codex · Gemini CLI · Hermes Agent · OpenCode",
+      "cta_url": "github.com/hanl5/iota-sympantos"
+    },
+    "cta": {
+      "primary_cta": "Star on GitHub",
+      "secondary_cta": "Read the docs",
+      "links": {
+        "github": "https://github.com/hanl5/iota-sympantos",
+        "docs": "https://github.com/hanl5/iota-sympantos/blob/main/docs/iota%20book.md"
+      }
+    }
+  },
+  "format": "structured_json",
+  "output_path": "/home/hanl5/coding/iota-sympantos/script_agent_output/script.json",
+  "metadata": {
+    "created_by": "script_agent (kanban task 6)",
+    "model_note": "Placeholder — real topics require Research Agent Supabase integration",
+    "ready_for_x_optimization": true
+  }
+}

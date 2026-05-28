@@ -81,6 +81,94 @@ export type BackendCheckResult = {
   details: string;
 };
 
+export type KanbanStatus = "triage" | "todo" | "ready" | "running" | "blocked" | "done" | "archived";
+
+export type KanbanBoard = {
+  id: number;
+  slug: string;
+  name: string;
+  created_at: number;
+};
+
+export type KanbanTask = {
+  id: number;
+  board_id: number;
+  title: string;
+  body?: string;
+  status: KanbanStatus;
+  assignee?: string;
+  priority: number;
+  tags: string[];
+  workspace_kind?: string;
+  workspace_path?: string;
+  created_at: number;
+  updated_at: number;
+  claimed_at?: number;
+  claim_ttl_secs: number;
+};
+
+export type KanbanComment = {
+  id: number;
+  task_id: number;
+  author: string;
+  body: string;
+  created_at: number;
+};
+
+export type KanbanRunStatus = "running" | "completed" | "failed" | "timed_out" | "cancelled";
+
+export type KanbanRun = {
+  id: string;
+  task_id: number;
+  profile: string;
+  status: KanbanRunStatus;
+  started_at: number;
+  finished_at?: number;
+  last_heartbeat: number;
+  exit_code?: number;
+  output_summary?: string;
+};
+
+export type KanbanLinkKind = "parent" | "blocks" | "related";
+
+export type KanbanLink = {
+  from_id: number;
+  to_id: number;
+  kind: KanbanLinkKind;
+};
+
+export type KanbanEvent = {
+  id: number;
+  event_type: string;
+  payload: string;
+  created_at: number;
+};
+
+export type KanbanTaskDetail = {
+  task: KanbanTask;
+  board?: KanbanBoard;
+  comments: KanbanComment[];
+  runs: KanbanRun[];
+  links: KanbanLink[];
+  events: KanbanEvent[];
+};
+
+export type KanbanTaskFilter = {
+  board_id?: number;
+  status?: KanbanStatus;
+  assignee?: string;
+  limit?: number;
+};
+
+export type KanbanDispatchReport = {
+  spawned: number;
+  completed: number;
+  timed_out: number;
+  spawn_failures: number;
+  reclaimed: number;
+  active_workers: number;
+};
+
 export type ObservabilitySummary = {
   cwd?: string;
   window_secs?: number;

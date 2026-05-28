@@ -2024,10 +2024,12 @@ name = "iota-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "dirs",
  "futures-util",
  "hex",
  "hostname",
+ "iota-kanban",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",

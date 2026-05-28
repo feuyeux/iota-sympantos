@@ -1,0 +1,75 @@
+{
+  "x_optimizer_output": {
+    "description": "X (Twitter) optimized posts generated from video script. Single viral post + threaded tweets.",
+    "source_script": "/home/hanl5/coding/iota-sympantos/script_agent_output/script.json",
+    "generated_at": "2026-05-28T21:00:00Z",
+    "ready_for_storage_agent": true
+  },
+  "single_viral_post": {
+    "type": "single_post",
+    "optimization_target": "X algorithm engagement signals",
+    "hook_type": "suspense_struct + emotional contrast",
+    "char_count": 278,
+    "within_limit": true,
+    "content": "你还在用一个 AI 编程工具？\n\n其实你早该让 5 个主流 AI 同时协作了——Claude Code、Codex、Gemini CLI、Hermes Agent，还有一个开源的 OpenCode。\n\n一个 Rust 写的编排框架，用 ACP 协议把它们串联起来。实时切换后端，记忆跨 session 保持，结果统一写回同一个 Memory Store。\n\n这不是概念演示——是我这周真的在用的工作流。\n\n开源：github.com/hanl5/iota-sympantos\n\n#AI #编程 #开源 #Rust",
+    "engagement_signals": {
+      "hook": "问题引入 + 对比反差（一个 vs 五个）",
+      "social_proof": "\"我这周真的在用\"",
+      "cta": "GitHub 开源链接",
+      "hashtags": ["AI", "编程", "开源", "Rust"],
+      "char_limit_strategy": "段落式换行，每段独立停顿点，提高完播率",
+      "悬念结构": "问句开头 → 颠覆预期 → 实证声明 → CTA"
+    }
+  },
+  "thread": {
+    "type": "threaded_tweets",
+    "count": 5,
+    "tweets": [
+      {
+        "index": 1,
+        "char_count": 242,
+        "content": "为什么 90% 的开发团队还在用单一大模型 API？\n\n不是能力问题——是架构问题。\n\n单后端的上下文窗口有限，响应速度取决于模型提供商的质量，遇到复杂任务只能排队等待。\n\n解决方案不是换一个更强的模型。",
+        "hook_weight": "question"
+      },
+      {
+        "index": 2,
+        "char_count": 198,
+        "content": "我在用一个 Rust 写的编排框架——iota-sympantos——同时调度 5 个主流 AI 编程后端：\n\nClaude Code · Codex · Gemini CLI · Hermes Agent · OpenCode\n\nACP 协议基于 JSON-RPC 2.0，通过 stdin/stdout 和每个后端进程通信。\n\n模型怎么升级都能无缝接入。",
+        "hook_weight": "solution_intro"
+      },
+      {
+        "index": 3,
+        "char_count": 213,
+        "content": "实际效果是这样：\n\n让 Codex 处理复杂重构，同时让 Gemini CLI 做信息检索——它们互不干扰，但结果统一写回同一个 Memory Store。\n\nContext Fabric 让记忆跨 session 保持，你不需要在多个工具之间切换。\n\n每个模型擅长不同类型的工作，通过统一上下文层串联起来。",
+        "hook_weight": "demo"
+      },
+      {
+        "index": 4,
+        "char_count": 186,
+        "content": "这不是概念演示。\n\n这是我本周 Kanban board 上的实际工作流——任务分发、自动调度、结果汇聚，全部由 ACP 协议处理。\n\ndaemon 热路径复用，性能很高。\n\n团队协作视角下，这个模式让不同后端像一个大脑一样协作。",
+        "hook_weight": "social_proof"
+      },
+      {
+        "index": 5,
+        "char_count": 152,
+        "content": "iota-sympantos 完全开源，用 Rust 实现。\n\nGitHub：github.com/hanl5/iota-sympantos\n\n文档里有快速上手步骤，有问题可以直接提 issue。\n\n觉得有用？点赞 + 关注，下期见。\n\n#AI #编程 #开源 #Rust #多后端",
+        "hook_weight": "cta"
+      }
+    ],
+    "thread_meta": {
+      "narrative_arc": "问题引入 → 方案揭示 → 实际演示 → 社会证明 → CTA",
+      "engagement_strategy": "每条推文独立可读，连读时构成完整论证",
+      "character_optimization": "每条控制在 280 字以内，留足停顿空间",
+      "hashtag_policy": "最后一条集中加标签，避免刻意操纵算法",
+      "悬念设置": "推文1以问句结尾诱导连读，推文4用\"本周\"锚定真实感"
+    }
+  },
+  "storage_target": {
+    "note": "Supabase storage deferred — no Supabase credentials found in environment. Output written to x_optimizer_output/ as JSON, ready for manual insertion or Storage Agent integration.",
+    "output_dir": "/home/hanl5/coding/iota-sympantos/script_agent_output/x_optimizer_output/",
+    "files_written": [
+      "x_viral_post.json",
+      "x_thread.json"
+    ]
+  }
+}

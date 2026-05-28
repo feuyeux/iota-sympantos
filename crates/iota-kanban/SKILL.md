@@ -55,7 +55,14 @@ triggers:
 
 ## Design: Shadow DB Hijack
 
-iota's DB is the single source of truth. hermes never touches it directly.
+iota's DB is the single source of truth exposed upward to CLI/TUI/desktop/MCP. Hermes-native Kanban DB writes must be hijacked at the API/tool boundary so Hermes creates and mutates tasks through iota's own Kanban API (`iota_kanban_*` MCP tools or equivalent iota commands), not by writing `~/.hermes/kanban.db` and importing it later.
+
+There are two related boundaries:
+
+- Runtime execution hijack: iota projects one task into a hermes-compatible shadow DB and runs Hermes with `HERMES_KANBAN_DB` pointing to that shadow.
+- Native Hermes entry hijack: if a Hermes ACP/session/CLI path can create or mutate Kanban tasks, route that request to iota's Kanban API. Do not scan or import `~/.hermes/kanban.db` as a reconciliation mechanism; that creates two sources of truth and breaks dispatcher state.
+
+Current iota and Hermes schemas are not byte-compatible: iota task ids are numeric, while Hermes native task ids are text such as `t_23f6f3fd`. Never point Hermes directly at `iota.db` unless the schema has first been made Hermes-compatible. The supported bridge is an API/tool bridge, not a DB import bridge.
 
 1. Materializer creates `shadows/{task_id}/kanban.db` with hermes-compatible schema
 2. Worker spawns `hermes -z` with `HERMES_KANBAN_DB` pointing to shadow

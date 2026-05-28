@@ -183,6 +183,7 @@ fn push_memory_tools(capsule: &mut String, input: &ComposeInput<'_>) {
         input.session_id,
     ));
     capsule.push_str("Use the tool schema for required fields and valid values. Classification rules live only in `iota-memory-taxonomy`.\n");
+    capsule.push_str("For Kanban task creation or mutation, use `iota_kanban_create_task`, `iota_kanban_ready_task`, and `iota_kanban_list_tasks`. Do not use Hermes native Kanban DB commands as the source of truth; iota owns the Kanban DB exposed to desktop and dispatch.\n");
     capsule.push_str("</memory-tools>\n\n");
 }
 

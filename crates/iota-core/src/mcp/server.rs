@@ -12,6 +12,8 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+use iota_kanban::SqliteKanbanStore;
+
 use crate::memory::MemoryStore;
 use crate::runtime_event::LogEvent;
 use crate::skill::SkillRegistry;
@@ -30,6 +32,7 @@ pub fn run_stdio() -> Result<()> {
     let ledger = SessionLedger::default_path()
         .ok()
         .and_then(|path| SessionLedger::open(&path).ok());
+    let kanban = default_kanban_store();
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -49,6 +52,7 @@ pub fn run_stdio() -> Result<()> {
             &request,
             memory.as_ref(),
             ledger.as_ref(),
+            kanban.as_ref(),
             &skills,
             &workspace,
         );
@@ -71,6 +75,7 @@ fn handle_request(
     request: &Value,
     memory: Option<&MemoryStore>,
     ledger: Option<&SessionLedger>,
+    kanban: Option<&SqliteKanbanStore>,
     skills: &SkillRegistry,
     workspace: &std::path::Path,
 ) -> Value {
@@ -88,6 +93,7 @@ fn handle_request(
             let ctx = ToolContext {
                 memory,
                 ledger,
+                kanban: kanban.map(|store| store as &dyn iota_kanban::KanbanStore),
                 skills,
                 workspace,
             };
@@ -123,6 +129,7 @@ fn handle_request(
             let ctx = ToolContext {
                 memory,
                 ledger,
+                kanban: kanban.map(|store| store as &dyn iota_kanban::KanbanStore),
                 skills,
                 workspace,
             };
@@ -167,6 +174,11 @@ fn emit_route_log(level: &str, event: &str, fields: Value) {
     if let Ok(line) = serde_json::to_string(&log) {
         eprintln!("[iota log] {}", line);
     }
+}
+
+fn default_kanban_store() -> Option<SqliteKanbanStore> {
+    let path = dirs::home_dir()?.join(".i6").join("kanban").join("iota.db");
+    SqliteKanbanStore::open(&path).ok()
 }
 
 fn read_resource(uri: &str, ctx: &ToolContext) -> Result<Value, String> {

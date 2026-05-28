@@ -131,6 +131,42 @@ fn spawn_failure_rolls_task_back_to_ready_and_fails_run() {
 }
 
 #[test]
+fn tick_blocks_task_after_failure_limit() {
+    let tmp = tmp_dir();
+    let store = SqliteKanbanStore::open(&tmp.join("store.db")).unwrap();
+    let board_id = store.create_board("test", "Test Board").unwrap();
+    let task_id = store
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Ready task".to_string(),
+            body: None,
+            status: Some(Status::Ready),
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+
+    let cfg = DispatcherConfig {
+        max_concurrent: 1,
+        max_failures: 1,
+        hermes_bin: PathBuf::from("/missing/hermes-for-iota-test"),
+        shadows_dir: tmp.join("shadows"),
+        ..Default::default()
+    };
+    let mut dispatcher = Dispatcher::new(cfg);
+    let report = dispatcher.tick(&store).unwrap();
+
+    assert_eq!(report.spawn_failures, 1);
+    assert_eq!(store.get_task(task_id).unwrap().status, Status::Blocked);
+    let runs = store.get_runs(task_id).unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, RunStatus::Failed);
+}
+
+#[test]
 fn tick_reclaims_expired_running_tasks_without_worker_handle() {
     let tmp = tmp_dir();
     let store = SqliteKanbanStore::open(&tmp.join("store.db")).unwrap();
