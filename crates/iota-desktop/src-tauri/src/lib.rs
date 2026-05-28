@@ -1,5 +1,6 @@
 mod daemon_client;
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Emitter;
@@ -34,6 +35,15 @@ struct DesktopKanbanTaskDetail {
     runs: Vec<Run>,
     links: Vec<Link>,
     events: Vec<KanbanEvent>,
+    logs: DesktopKanbanTaskLogs,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct DesktopKanbanTaskLogs {
+    stdout_path: String,
+    stderr_path: String,
+    stdout: String,
+    stderr: String,
 }
 
 async fn tick_kanban_dispatcher(state: &AppState) -> Result<DesktopKanbanDispatchReport, String> {
@@ -88,6 +98,40 @@ fn value_mentions_task(value: &serde_json::Value, task_id: TaskId) -> bool {
             .any(|value| value_mentions_task(value, task_id)),
         _ => false,
     }
+}
+
+fn read_tail(path: &std::path::Path, max_bytes: u64) -> Result<String, String> {
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(err) => return Err(format!("failed to open {}: {err}", path.display())),
+    };
+    let len = file
+        .metadata()
+        .map_err(|err| format!("failed to stat {}: {err}", path.display()))?
+        .len();
+    let start = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|err| format!("failed to seek {}: {err}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+fn task_logs(
+    task_id: TaskId,
+    shadows_dir: &std::path::Path,
+) -> Result<DesktopKanbanTaskLogs, String> {
+    let logs_dir = shadows_dir.parent().unwrap_or(shadows_dir);
+    let stdout_path = logs_dir.join(format!("{task_id}.stdout.log"));
+    let stderr_path = logs_dir.join(format!("{task_id}.stderr.log"));
+    Ok(DesktopKanbanTaskLogs {
+        stdout_path: stdout_path.display().to_string(),
+        stderr_path: stderr_path.display().to_string(),
+        stdout: read_tail(&stdout_path, 64 * 1024)?,
+        stderr: read_tail(&stderr_path, 64 * 1024)?,
+    })
 }
 
 #[tauri::command]
@@ -340,6 +384,7 @@ async fn get_kanban_task_detail(
         .collect();
     events.sort_by(|left, right| right.id.cmp(&left.id));
     events.truncate(30);
+    let logs = task_logs(task_id, &state.shadows_dir)?;
     Ok(DesktopKanbanTaskDetail {
         task,
         board,
@@ -347,6 +392,7 @@ async fn get_kanban_task_detail(
         runs,
         links,
         events,
+        logs,
     })
 }
 

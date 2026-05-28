@@ -144,6 +144,13 @@ export type KanbanEvent = {
   created_at: number;
 };
 
+export type KanbanTaskLogs = {
+  stdout_path: string;
+  stderr_path: string;
+  stdout: string;
+  stderr: string;
+};
+
 export type KanbanTaskDetail = {
   task: KanbanTask;
   board?: KanbanBoard;
@@ -151,6 +158,7 @@ export type KanbanTaskDetail = {
   runs: KanbanRun[];
   links: KanbanLink[];
   events: KanbanEvent[];
+  logs: KanbanTaskLogs;
 };
 
 export type KanbanTaskFilter = {

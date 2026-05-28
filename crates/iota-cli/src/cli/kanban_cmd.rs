@@ -257,6 +257,7 @@ fn execute_kanban_command(
                 hermes_bin: PathBuf::from("hermes"),
                 extra_env: hermes_env,
                 task_id_filter: Some(task_id),
+                max_failures: 3,
             });
 
             println!("Dispatching task #{task_id}: {} ...", task.title);

@@ -418,3 +418,6 @@ running → done                 ← hermes kanban_complete 写 shadow → watch
 | Kanban 面板键盘仅在 composer 为空时生效 | 只要 composer 有输入，所有按键回到 composer 模式 |
 | 面板不自动刷新 | 面板内容在每次 render 时从 store 读取，80ms tick 驱动，视觉上接近实时 |
 | `d` dispatch 为同步触发 | 执行 `/kanban dispatch #id` 后立即返回，hermes worker 在后台运行；进度通过 KanbanUiEvent 反馈 |
+
+
+创建看板任务:生成宠物

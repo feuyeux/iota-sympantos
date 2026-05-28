@@ -4,7 +4,7 @@
 //! operation, logging each attempt and the final error. Designed to be
 //! generic over any `T: std::error::Error + Send + Sync + 'static`.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::time::Duration;
 
 /// Retry a fallible operation up to `max_attempts` times with exponential back-off.

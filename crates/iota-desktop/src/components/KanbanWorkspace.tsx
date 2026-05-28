@@ -38,7 +38,7 @@ function formatDispatchReport(report?: KanbanDispatchReport | null) {
     report.timed_out ? `${report.timed_out} timed out` : undefined,
     report.spawn_failures ? `${report.spawn_failures} failed` : undefined,
   ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : `${report.active_workers} active workers`;
+  return parts.length > 0 ? parts.join(" · ") : `No ready tasks · ${report.active_workers} active workers`;
 }
 
 function formatUnixSeconds(value?: number) {
@@ -62,6 +62,7 @@ export function KanbanWorkspace() {
   const [refreshing, setRefreshing] = useState(false);
   const [dispatching, setDispatching] = useState(false);
   const [lastReport, setLastReport] = useState<KanbanDispatchReport | null>(null);
+  const [lastDispatchAt, setLastDispatchAt] = useState<Date | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [detail, setDetail] = useState<KanbanTaskDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -76,6 +77,7 @@ export function KanbanWorkspace() {
       setError(null);
       if (options.tick) {
         setLastReport(await dispatchKanban());
+        setLastDispatchAt(new Date());
       }
       const [nextBoards, nextTasks] = await Promise.all([listKanbanBoards(), listKanbanTasks({ limit: 200 })]);
       setBoards(nextBoards);
@@ -103,6 +105,7 @@ export function KanbanWorkspace() {
     listenKanbanUpdates((report) => {
       if (disposed) return;
       setLastReport(report);
+      setLastDispatchAt(new Date());
       refresh();
     })
       .then((unlisten) => {
@@ -148,14 +151,15 @@ export function KanbanWorkspace() {
   }, [tasks]);
 
   const visibleTasks = useMemo(() => {
-    if (selectedStatus === "all") return tasks;
-    return tasks.filter((task) => task.status === selectedStatus);
-  }, [selectedStatus, tasks]);
+    const filtered = selectedStatus === "all" ? tasks : tasks.filter((task) => task.status === selectedStatus);
+    return selectedTaskId === null ? filtered : filtered.filter((task) => task.id !== selectedTaskId);
+  }, [selectedStatus, selectedTaskId, tasks]);
 
   const runDispatch = async () => {
     setDispatching(true);
     try {
       setLastReport(await dispatchKanban());
+      setLastDispatchAt(new Date());
       await refresh({ showSpinner: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -174,6 +178,9 @@ export function KanbanWorkspace() {
               Hermes Kanban
             </div>
             <p className="mt-1 text-[11px] text-slate-500">{formatDispatchReport(lastReport)}</p>
+            {lastDispatchAt ? (
+              <p className="mt-0.5 text-[10px] text-slate-600">Last tick {lastDispatchAt.toLocaleTimeString()}</p>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -346,6 +353,38 @@ export function KanbanWorkspace() {
                           <pre className="max-h-32 overflow-auto border-t border-slate-800 p-2 font-mono text-[10px] text-slate-500">{formatEventPayload(event)}</pre>
                         </details>
                       ))}
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        <Activity className="h-3 w-3 text-primary/80" /> Worker Logs
+                      </div>
+                      {!detail.logs.stdout && !detail.logs.stderr ? (
+                        <div className="text-xs text-slate-500">No worker logs recorded yet</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {detail.logs.stdout ? (
+                            <details open className="rounded-lg border border-slate-800 bg-slate-950/25 text-[11px] text-slate-400">
+                              <summary className="cursor-pointer px-2 py-1.5 font-semibold text-slate-300">
+                                stdout · {detail.logs.stdout_path}
+                              </summary>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap border-t border-slate-800 p-2 font-mono text-[10px] leading-relaxed text-slate-400">
+                                {detail.logs.stdout}
+                              </pre>
+                            </details>
+                          ) : null}
+                          {detail.logs.stderr ? (
+                            <details open className="rounded-lg border border-slate-800 bg-slate-950/25 text-[11px] text-slate-400">
+                              <summary className="cursor-pointer px-2 py-1.5 font-semibold text-slate-300">
+                                stderr · {detail.logs.stderr_path}
+                              </summary>
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap border-t border-slate-800 p-2 font-mono text-[10px] leading-relaxed text-amber-100/80">
+                                {detail.logs.stderr}
+                              </pre>
+                            </details>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : detailLoading ? null : (

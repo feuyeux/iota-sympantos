@@ -17,3 +17,4 @@ nimia.yaml
 # Generated experiment logs
 gefsi/logs/
 .antigravitycli/
+.superpowers/
