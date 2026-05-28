@@ -5,7 +5,7 @@
 
 ## Overview
 
-`iota-fun/` contains example functions in multiple programming languages that demonstrate iota's multi-language execution capabilities. These functions are exposed by the Rust `iota fun-mcp` stdio server and can be called by engine-run skills through `skill_runner.rs` and `mcp_client.rs`.
+`iota-fun/` contains example functions in multiple programming languages that demonstrate iota's multi-language execution capabilities. These functions are exposed by the Rust `iota mcp fun` stdio server (`iota fun-mcp` is kept as a compatibility alias) and can be called by engine-run skills through `crates/iota-core/src/skill/runner.rs` and `crates/iota-core/src/mcp/client.rs`.
 
 ## Purpose
 
@@ -60,7 +60,7 @@ iota-fun/
 Start the MCP server from the Rust CLI:
 
 ```bash
-iota fun-mcp
+iota mcp fun
 ```
 
 The server speaks stdio JSON-RPC and exposes the tools used by `pet-generator`:
@@ -77,7 +77,7 @@ fun.cpp
 
 ### Engine-Run Skill
 
-When a prompt matches `skills/pet-generator/SKILL.md`, `IotaEngine` loads the skill, `skill_runner.rs` starts `iota fun-mcp`, and `mcp_client.rs` calls the declared tools. With `execution.parallel: true`, the seven tool calls are batched and the results are rendered into the skill output template.
+When a prompt matches `skills/pet-generator/SKILL.md`, `IotaEngine` loads the skill, `crates/iota-core/src/skill/runner.rs` starts the iota-fun MCP sidecar, and `crates/iota-core/src/mcp/client.rs` calls the declared tools. With `execution.parallel: true`, the seven tool calls are batched and the results are rendered into the skill output template.
 
 Example prompt:
 
@@ -203,8 +203,8 @@ To execute these functions, you need the following language runtimes installed:
 ### Execution Flow
 
 1. `SkillRegistry` loads `SKILL.md` and matches prompt triggers.
-2. `skill_runner.rs` reads `execution.tools` and starts the configured MCP server.
-3. `mcp_client.rs` sends stdio JSON-RPC `tools/call` requests such as `fun.python` or `fun.rust`.
+2. `crates/iota-core/src/skill/runner.rs` reads `execution.tools` and starts the configured MCP server.
+3. `crates/iota-core/src/mcp/client.rs` sends stdio JSON-RPC `tools/call` requests such as `fun.python` or `fun.rust`.
 4. `src/fun_mcp.rs` executes the supplied source with the requested language runtime or compiler.
 5. Tool results are recorded as `RuntimeEvent::ToolResult` and rendered into the skill template.
 
@@ -230,7 +230,7 @@ To add support for a new language, update `src/fun_mcp.rs`: add the tool name to
 
 ```bash
 cargo test fun_mcp --lib
-cargo run -- fun-mcp
+cargo run -- mcp fun
 ```
 
 ## Troubleshooting
@@ -281,7 +281,7 @@ cargo run -- fun-mcp
 
 - [Project architecture](../../../docs/architecture.md) - Engine, skill, and iota-fun architecture
 - [Code call chains](../../../docs/code-call-chains.md) - Runtime paths for engine-run skills and MCP tools
-- [iota-fun server implementation](../../../src/skill/fun_server.rs) - Current implementation
+- [iota-fun server implementation](../../../crates/iota-core/src/skill/fun.rs) - Current implementation
 - [Pet generator skill](../SKILL.md) - Skill spec for multi-language pet generation
 
 ## Contributing

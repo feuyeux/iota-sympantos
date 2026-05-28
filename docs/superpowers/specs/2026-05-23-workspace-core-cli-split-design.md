@@ -1,5 +1,7 @@
 # Workspace Core/CLI Split Design
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 ## Goal
 
 Split the current single package into a Cargo workspace with a reusable core crate and a CLI/TUI application crate.

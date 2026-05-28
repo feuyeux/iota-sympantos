@@ -1,5 +1,7 @@
 # iota-desktop MVP Hardening Implementation Plan
 
+> Archive note: this is a historical implementation plan. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for task-by-task execution. Keep checkboxes updated as work lands.
 
 **Goal:** Turn the daemon-first desktop implementation into a manually verifiable MVP baseline that is ready for the next product planning phase.
@@ -225,7 +227,7 @@ Expected: all automated gates pass. If `cargo run -p iota-cli -- check` depends 
 
 ```bash
 cd crates/iota-desktop
-npm run tauri dev
+npm run dev:clean
 ```
 
 - [ ] **Step 2: Execute runbook scenarios**

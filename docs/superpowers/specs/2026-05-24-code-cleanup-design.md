@@ -1,5 +1,7 @@
 # Code Cleanup Design
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 **Date:** 2026-05-24  
 **Objective:** Remove commented-out code and dead code paths from Rust and TypeScript source files
 

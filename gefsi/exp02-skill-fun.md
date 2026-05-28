@@ -1,5 +1,7 @@
 # iota-sympantos 实验2：Skill + iota-fun 多语言执行验证
 
+> Archive note: this is a dated experiment report. For current behavior and commands, see [../docs/iota book.md](../docs/iota%20book.md), [../docs/architecture.md](../docs/architecture.md), and [../docs/command.md](../docs/command.md).
+
 **实验代号：** exp02-skill-fun  
 **日期：** 2026-05-05  
 **参考规范：** iota-guides/09-skill-fun.md v2.1  
@@ -225,7 +227,7 @@ ls -lh ~/.iota/iota-fun/
 
 # 单独测试某个 fun 工具（debug 用）
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fun.python","arguments":{}}}' \
-  | iota fun-mcp
+  | iota mcp fun
 
 # 检查 SKILL.md 解析
 iota run --trace "generate pet" 2>&1 | head -30

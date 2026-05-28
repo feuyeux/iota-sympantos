@@ -26,7 +26,7 @@ Expected:
 
 - All commands exit successfully.
 - `iota check` does not print API keys or tokens.
-- Desktop tests cover turn reducer behavior, layout structure, config/observability boundaries, and memory/context workspace rendering.
+- Desktop tests cover turn reducer behavior, layout structure, and memory/context workspace mounting. Config and observability are still mainly covered through build/type checks and manual scenarios.
 
 ## Manual Scenarios
 
@@ -34,7 +34,7 @@ Expected:
 
 ```bash
 cd crates/iota-desktop
-npm run dev
+npm run dev:clean
 ```
 
 Expected:
@@ -152,9 +152,10 @@ Expected:
 
 Steps:
 
-1. Open the memory/context workspace view.
-2. Toggle workspace/all scope mode.
-3. Inspect memory buckets and context preview.
+1. Open the right inspector.
+2. Switch to the Memory tab, then the Context tab.
+3. Toggle workspace/all scope mode.
+4. Inspect memory buckets and context preview.
 
 Expected:
 
@@ -167,7 +168,7 @@ Expected:
 
 Steps:
 
-1. Create or list tasks from the desktop Kanban UI if exposed in the build.
+1. Call or exercise the Kanban Tauri commands if a local test harness or future UI exposes them.
 2. Transition a task to a legal status.
 3. Add a comment.
 
@@ -175,7 +176,7 @@ Expected:
 
 - Tauri commands use `SqliteKanbanStore` under `~/.i6/kanban/iota.db`.
 - State transitions obey the Kanban state machine.
-- UI refreshes after create/transition/comment operations.
+- The current React workbench does not yet mount a Kanban board; UI refresh expectations apply only after a Kanban frontend is added.
 
 ### 11. CLI Compatibility
 

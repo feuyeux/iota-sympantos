@@ -83,7 +83,7 @@ Stores and observability
 | `iota-cli` | 用户命令入口、TUI、daemon autostart、observability 查询、Kanban CLI |
 | `iota-core` | ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
 | `iota-kanban` | Kanban 领域模型、状态机、SQLite event sourcing、Hermes worker、shadow workspace、event sync |
-| `iota-desktop` | Tauri + React desktop，复用 daemon streaming protocol 和 Kanban store |
+| `iota-desktop` | Tauri + React desktop，复用 daemon streaming protocol；提供 chat/config/inspector/memory/context UI，并在 Rust commands 中接入 Kanban store |
 
 ## 核心模块
 
@@ -216,12 +216,15 @@ Hermes 使用自己的默认 home，配置和 desktop 都不应覆盖 `HERMES_HO
 
 ## Desktop
 
-Desktop 由 React + Tauri 组成：
+Desktop 由 React + Tauri 组成，当前界面是一个 daemon-first 的本地工作台：
 
-- Frontend：`ChatWorkbench`、`ConfigPanel`、`RightInspector`、`MemoryContextWorkspace`、`turnReducer`。
-- Tauri commands：config、prompt、approval、cancel、backend check、observability summary、memory/context snapshot、Kanban CRUD。
+- Frontend：`ChatWorkbench` 是主 shell，包含 Chat/Config 视图、后端选择器、daemon 状态、prompt form 和可调宽右侧 inspector。
+- Inspector：`RightInspector` 承载 `Observability`、`Memory`、`Context` 三个 tab；`MemoryContextWorkspace` 是只读 memory bucket 和 runtime context capsule 浏览器。
+- State：`turnReducer` 只处理 turn 状态，折叠 `TextChunk`、`TurnEvent`、approval、cancel、failure 和 late daemon error。
+- Tauri commands：config、prompt、approval、cancel、backend check、observability summary、memory/context snapshot、current workspace、Kanban CRUD。
 - Daemon protocol：`DESKTOP_PROTOCOL_VERSION = 2`，使用 `DaemonClientMessage` 和 `DaemonServerMessage` tagged enum。
 - Daemon autostart：优先连接默认 daemon；失败时尝试 desktop fallback address；再通过 `IOTA_CLI_PATH`、sibling binary 或 `PATH` 启动 `iota __daemon`。
+- Kanban：Rust commands 直接打开 `~/.i6/kanban/iota.db`；当前 React workbench 尚未暴露 Kanban board UI。
 
 ## 依赖规则
 

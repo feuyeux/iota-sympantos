@@ -1,5 +1,7 @@
 # iota-desktop MVP Hardening Design
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 ## Goal
 
 Move `iota-desktop` from a daemon-first implementation baseline to a manually verifiable MVP baseline that is stable enough for feature planning.

@@ -38,7 +38,7 @@ cargo run -p iota-cli --quiet -- run codex "ping" --timing
 # npm install -D @tauri-apps/cli@latest
 ## ubuntu
 # sudo apt-get update && sudo apt-get install -y libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
-cd crates/iota-desktop && npm run tauri dev
+cd crates/iota-desktop && npm run dev:clean
 ```
 
 ### 配置文件
@@ -70,7 +70,7 @@ pip install 'hermes-agent[acp]'
 
 | 文档 | 说明 |
 | :------| :------|
-| [`docs/iota_book.md`](docs/iota_book.md) | **《iota 技术指南》（iota book）** —— 面向程序员与 AI 从业者的系统化核心设计与实现指南 |
+| [`docs/iota book.md`](docs/iota%20book.md) | **《iota 技术指南》（iota book）** —— 面向程序员与 AI 从业者的系统化核心设计与实现指南 |
 | [`docs/architecture.md`](docs/architecture.md) | 系统架构设计 |
 | [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
 | [`docs/observability.md`](docs/observability.md) | logs / trace / metrics |

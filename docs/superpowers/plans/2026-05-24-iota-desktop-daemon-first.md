@@ -1,5 +1,7 @@
 # iota-desktop Daemon-first Implementation Plan
 
+> Archive note: this is a historical implementation plan. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `iota-desktop` a Chat-first Tauri workbench that talks to the reusable iota daemon instead of creating `IotaEngine` directly.
@@ -2136,7 +2138,7 @@ The desktop app is daemon-first:
 ```bash
 cd crates/iota-desktop
 npm install
-npm run tauri dev
+npm run dev:clean
 ```
 
 ## Verification
@@ -2206,7 +2208,7 @@ Run:
 
 ```bash
 cd crates/iota-desktop
-npm run tauri dev
+npm run dev:clean
 ```
 
 Expected: Tauri app opens to the Chat-first workbench. Send one prompt with a configured backend and verify text streams into chat and turn details appear in the right inspector.
@@ -2240,7 +2242,7 @@ Manual desktop verification:
 
 ```bash
 cd crates/iota-desktop
-npm run tauri dev
+npm run dev:clean
 ```
 
 Expected:

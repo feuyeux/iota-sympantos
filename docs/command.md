@@ -86,6 +86,7 @@ Kanban 数据默认写入 `~/.i6/kanban/iota.db`，shadow workspace 位于 `~/.i
 | `/quit` | `/exit` | 打开退出确认 |
 | `/q` |  | OpenCode session 下的退出确认 |
 | `/kanban ...` |  | 在 TUI 中执行 Kanban slash command |
+| `/memory` | `/mem` | 在 TUI 中执行本地 memory recall / hybrid search |
 
 已验证可 native 处理的 provider command：
 

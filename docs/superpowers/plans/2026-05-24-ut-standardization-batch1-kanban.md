@@ -1,5 +1,7 @@
 # UT Standardization: Inline Test Extraction
 
+> Archive note: this is a historical implementation plan. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extract inline test modules from source files into standalone `*_tests.rs` files, following the established `#[path = "..."] mod tests;` pattern.

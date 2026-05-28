@@ -1,5 +1,7 @@
 # iota-sympantos 实验 3：三条 ACP 调用链路耗时对比
 
+> Archive note: this is a dated experiment report. For current behavior and commands, see [../docs/iota book.md](../docs/iota%20book.md), [../docs/architecture.md](../docs/architecture.md), and [../docs/command.md](../docs/command.md).
+
 | 字段 | 值 |
 | :------| :-----|
 | 实验代号 | exp03-acp-runtime |

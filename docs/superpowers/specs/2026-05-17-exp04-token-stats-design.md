@@ -9,6 +9,8 @@ metadata:
 
 # iota-sympantos 实验4：Token Observability 链路设计
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 | 字段 | 值 |
 | :------| :-----|
 | 实验代号 | exp04-token-stats |

@@ -1,7 +1,7 @@
 # ==========================================
 # Phase 1: Build Phase
 # ==========================================
-FROM rust:1.81-slim-bookworm AS builder
+FROM rust:1.95-slim-bookworm AS builder
 
 # 安装构建依赖，包括 pkg-config 和 openssl，因为依赖库 reqwest 等可能需要它们
 RUN apt-get update && apt-get install -y --no-install-recommends \

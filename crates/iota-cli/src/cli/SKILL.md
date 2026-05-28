@@ -7,6 +7,7 @@ triggers:
   - iota check
   - bench-cold
   - bench-warm
+  - iota mcp
   - context-mcp
   - fun-mcp
 ---
@@ -22,12 +23,16 @@ Top-level CLI entry point. Parses arguments and routes to subcommand handlers.
 | (default) | `tui::run()` | Interactive TUI mode |
 | `run <backend> <prompt>` | `run_cmd` | Single-shot prompt execution |
 | `check [--daemon]` | `info_cmd` | Backend health/info JSON output |
-| `bench-cold [rounds]` | `daemon_cmd` | Cold-start latency benchmark |
-| `bench-warm [rounds]` | `daemon_cmd` | Warm-connection benchmark |
-| `context-mcp` | — | Spawn iota-context MCP sidecar (stdio) |
-| `fun-mcp` | — | Spawn iota-fun 7-language MCP server (stdio) |
+| `bench <cold|warm> [rounds]` | `daemon_cmd` | Cold/warm latency benchmark |
+| `bench-cold [rounds]` | `daemon_cmd` | Compatibility cold-start benchmark |
+| `bench-warm [rounds]` | `daemon_cmd` | Compatibility warm-connection benchmark |
+| `mcp <context|fun>` | — | Spawn iota-context or iota-fun MCP stdio server |
+| `context-mcp` | — | Compatibility alias for `iota mcp context` |
+| `fun-mcp` | — | Compatibility alias for `iota mcp fun` |
 | `skill pull <src>` | `skill_cmd` | Pull remote skill definition |
-| `logs/trace` | `observability_cmd` | Query telemetry data |
+| `observability ...` | `observability_cmd` | Query local token data, metrics, Loki logs, or Jaeger traces |
+| `logs/trace` | `observability_cmd` | Top-level observability aliases |
+| `kanban ...` | `kanban_cmd` | Kanban board/task/dispatch/sync commands |
 | `__daemon` | `daemon_cmd` | Internal daemon entry point |
 
 ## Sub-modules
@@ -39,3 +44,4 @@ Top-level CLI entry point. Parses arguments and routes to subcommand handlers.
 | `observability_cmd` | Logs and trace query commands |
 | `run_cmd` | Single-shot `run` command execution |
 | `skill_cmd` | Skill pull/cache management |
+| `kanban_cmd` | Kanban CLI command handling |

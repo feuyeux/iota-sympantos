@@ -1,5 +1,7 @@
 # iota-desktop Daemon-first Design
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 ## Goal
 
 Build `iota-desktop` as a cross-platform Tauri desktop app that exposes the current iota runtime as a personal local workbench.

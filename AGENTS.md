@@ -8,7 +8,7 @@
 
 ## 项目概述
 
-iota-sympantos 是一个轻量级 Rust CLI，通过 ACP（Agent Control Protocol）协议编排多个 AI 编程助手后端。支持单次执行和交互式 TUI 两种模式，支持 Claude Code、Codex、Gemini CLI、Hermes、OpenCode 五个后端。
+iota-sympantos 是一个轻量级 Rust workspace，通过 ACP（Agent Control Protocol）协议编排多个 AI 编程助手后端。支持单次执行、交互式 TUI、daemon 热路径和 Tauri desktop 工作台，支持 Claude Code、Codex、Gemini CLI、Hermes、OpenCode 五个后端。
 
 ---
 
@@ -114,10 +114,13 @@ iota-sympantos/
 │   │       ├── event_sync.rs     # 跨节点事件同步（export/import/serve/pull/push）
 │   │       └── utils.rs
 │   └── iota-desktop/
-│       └── src-tauri/            # Tauri 桌面端
+│       ├── src/                  # React 桌面端 UI
+│       └── src-tauri/            # Tauri commands + daemon client
 ├── docs/
+│   ├── iota book.md              # 面向程序员和 AI 从业者的系统化技术指南
 │   ├── architecture.md           # 分层架构和模块职责
 │   ├── code-call-chains.md       # 入口、IPC 和调用链
+│   ├── command.md                # CLI 与 TUI slash command
 │   ├── observability.md          # logs/trace、RuntimeEvent、metrics、CacheStore 边界
 │   └── debugging.md              # 调试指南
 ├── gefsi/
@@ -196,14 +199,17 @@ iota                        # 进入 TUI（默认）
 iota check [--daemon|-d]    # 输出合并的 JSON 后端信息
 iota run <backend> ...       # 单次执行
 iota run --daemon ...       # 经 daemon 路由，自动静默启动
-iota bench-cold [轮次] [--daemon]
-iota bench-warm [轮次] [--daemon]
-iota context-mcp            # 启动 iota-context MCP sidecar（stdio）
-iota fun-mcp               # 启动 iota-fun 7 语言 MCP server（stdio）
+iota bench <cold|warm> [轮次] [--daemon]
+iota bench-cold [轮次] [--daemon] # 兼容命令
+iota bench-warm [轮次] [--daemon] # 兼容命令
+iota mcp context            # 启动 iota-context MCP sidecar（stdio）
+iota mcp fun                # 启动 iota-fun 7 语言 MCP server（stdio）
+iota context-mcp            # 兼容命令
+iota fun-mcp                # 兼容命令
 iota skill pull <源> [名称]
 iota kanban <cmd>           # kanban 命令（list/add/update/sync 等）
-iota info                   # 显示后端、配置信息
-iota observability          # 可观测性状态
+iota check                  # 显示后端、配置信息
+iota observability <cmd>    # 可观测性查询
 iota __daemon               # 内部 daemon 入口
 ```
 

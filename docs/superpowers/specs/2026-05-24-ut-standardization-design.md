@@ -1,5 +1,7 @@
 # UT 标准化设计：内联测试模块分离
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 ## 目标
 
 将 iota-core 和 iota-cli 中所有内联测试模块 (`mod tests {}`) 提取到独立的 `*_tests.rs` 文件中。

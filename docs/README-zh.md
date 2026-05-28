@@ -4,7 +4,7 @@ iota-sympantos 是一个 Rust workspace，包含 CLI/TUI、核心运行时、Kan
 
 | 文档 | 说明 |
 | :--- | :--- |
-| [iota_book.md](iota_book.md) | **《iota 技术指南》** —— 面向程序员与 AI 从业者的系统化核心设计与实现指南 |
+| [iota book.md](iota%20book.md) | **《iota 技术指南》** —— 面向程序员与 AI 从业者的系统化核心设计与实现指南 |
 | [architecture.md](architecture.md) | 分层架构、crate 职责、后端、配置、扩展点 |
 | [code-call-chains.md](code-call-chains.md) | CLI、TUI、daemon、desktop、ACP、MCP、memory、kanban 调用链 |
 | [command.md](command.md) | CLI 命令和 TUI slash command |
@@ -12,6 +12,8 @@ iota-sympantos 是一个 Rust workspace，包含 CLI/TUI、核心运行时、Kan
 | [debugging.md](debugging.md) | 本地调试、日志、常见问题 |
 | [desktop-mvp-acceptance.md](desktop-mvp-acceptance.md) | 桌面端 MVP 验收清单 |
 | [docker.md](docker.md) | Docker daemon 和可观测性栈 |
+| [superpowers/README.md](superpowers/README.md) | 历史实现计划和设计规格索引 |
+| [../gefsi/README.md](../gefsi/README.md) | 历史实验报告索引 |
 
 ## 关键路径
 
@@ -35,5 +37,5 @@ iota bench <cold|warm> [rounds] [--daemon|-d]
 iota mcp <context|fun>
 iota kanban create-board <slug> <name>
 iota observability tokens recent --limit 20
-cd crates/iota-desktop && npm run dev
+cd crates/iota-desktop && npm run dev:clean
 ```

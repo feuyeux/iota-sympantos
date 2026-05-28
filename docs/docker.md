@@ -37,7 +37,7 @@ docker compose -f docker/docker-compose.yml down
 
 `docker/Dockerfile` 使用两阶段构建：
 
-- builder：`rust:1.81-slim-bookworm`，构建 `iota-cli` release binary。
+- builder：`rust:1.95-slim-bookworm`，构建 `iota-cli` release binary；该版本与 workspace 的 `rust-version = "1.95.0"` 对齐。
 - runtime：`debian:bookworm-slim`，安装 `git`、`curl`、`sqlite3`、`nodejs`、`npm`，以非 root 用户 `iota` 运行。
 
 运行时默认：

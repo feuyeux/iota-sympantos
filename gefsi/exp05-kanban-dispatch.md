@@ -1,5 +1,7 @@
 # iota-sympantos 实验 5：Kanban DB 劫持 — iota 投影 + hermes 无感执行 + 结果回收
 
+> Archive note: this is a dated experiment report. For current behavior and commands, see [../docs/iota book.md](../docs/iota%20book.md), [../docs/architecture.md](../docs/architecture.md), and [../docs/command.md](../docs/command.md).
+
 | 字段 | 值 |
 | :------| :-----|
 | 实验代号 | exp05-kanban-dispatch |

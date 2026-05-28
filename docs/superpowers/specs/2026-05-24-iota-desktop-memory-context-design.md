@@ -1,5 +1,7 @@
 # iota-desktop Memory / Context Viewer Design
 
+> Archive note: this is a historical design spec. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 ## Goal
 
 Add a daemon-first, read-only desktop view for persistent memory and non-persistent runtime context.
@@ -251,4 +253,3 @@ Manual verification:
 - All-scope memory views may become large. The first implementation should cap results per bucket or use conservative limits if the store is large.
 - Parsing capsule sections from XML-like text should be best-effort. The full capsule text remains the source of truth.
 - Workspace mode must follow existing recall semantics so desktop does not show a different memory universe than the engine injects.
-

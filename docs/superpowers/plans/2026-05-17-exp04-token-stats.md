@@ -1,5 +1,7 @@
 # exp04 Token Observability 实现计划
 
+> Archive note: this is a historical implementation plan. For current behavior and commands, see [../../iota book.md](../../iota%20book.md), [../../architecture.md](../../architecture.md), and [../../command.md](../../command.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 建立从 ACP usage 采集、token 字段归一化、本地 observability 持久化、`iota observability` 查询到 TUI 展示的完整链路，并用 5 个 backend × 3 轮 exp04 实验验证。

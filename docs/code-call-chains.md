@@ -276,6 +276,8 @@ ChatWorkbench
   -> getObservabilitySummary()
   -> listenDaemonMessages()
   -> listenDaemonClientErrors()
+  -> render Chat / Config central view
+  -> render RightInspector tabs: Observability / Memory / Context
 ```
 
 Prompt:
@@ -341,7 +343,8 @@ ConfigPanel save
 Memory/context:
 
 ```text
-MemoryContextWorkspace
+RightInspector tab Memory or Context
+  -> MemoryContextWorkspace(mode)
   -> get_memory_context_snapshot(scope_mode)
   -> DaemonClientMessage::GetMemoryContextSnapshot
   -> DesktopMemoryContextSnapshot
@@ -351,7 +354,7 @@ MemoryContextWorkspace
        -> snapshot errors
 ```
 
-Kanban desktop commands use Tauri commands in `src-tauri/src/lib.rs` and `SqliteKanbanStore` under `~/.i6/kanban/iota.db`.
+Kanban desktop commands use Tauri commands in `src-tauri/src/lib.rs` and `SqliteKanbanStore` under `~/.i6/kanban/iota.db`. The current React workbench does not mount a Kanban board yet.
 
 ## 链路 6：Context Fabric
 
