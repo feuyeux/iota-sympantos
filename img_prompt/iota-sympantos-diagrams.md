@@ -42,6 +42,8 @@
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -96,6 +98,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -265,6 +269,8 @@ Unreadable tiny text, random fake file paths, obsolete modules, src/store/events
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Poster Layout System (ID: poster-layout-system; category: Posters & Typography; example cases: case 345, case 5, case 10), with Infographic Engine constraints for structured technical labels.
+Use case: productivity-visual and infographic-diagram. Asset type: technical story-board poster for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical story-board style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -297,6 +303,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -346,6 +354,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Poster Layout System (ID: poster-layout-system; category: Posters & Typography; example cases: case 345, case 5, case 10), with Infographic Engine constraints for structured technical labels.
+Use case: productivity-visual and infographic-diagram. Asset type: technical story-board poster for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical story-board style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -396,6 +406,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -444,6 +456,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -494,6 +508,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -566,6 +582,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Poster Layout System (ID: poster-layout-system; category: Posters & Typography; example cases: case 345, case 5, case 10), with Infographic Engine constraints for structured technical labels.
+Use case: productivity-visual and infographic-diagram. Asset type: technical story-board poster for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical story-board style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -597,6 +615,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Poster Layout System (ID: poster-layout-system; category: Posters & Typography; example cases: case 345, case 5, case 10), with Infographic Engine constraints for structured technical labels.
+Use case: productivity-visual and infographic-diagram. Asset type: technical story-board poster for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical story-board style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -632,6 +652,8 @@ Negative prompt: unreadable tiny text, fake modules, fake code, wrong file paths
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -741,6 +763,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -849,6 +873,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -980,6 +1006,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
@@ -1088,6 +1116,8 @@ Style instructions:
 
 **Prompt**:
 ```
+Selected GPT-Image2 style-library template: Infographic Engine (ID: infographic-engine; category: Charts & Infographics; example cases: case 334, case 1, case 8).
+Use case: infographic-diagram. Asset type: technical architecture diagram for project documentation. Output settings: high outputQuality, wide landscape 16:9 PNG, readable labels, clean layout.
 Use a consistent technical infographic style for this entire wide landscape 16:9 image.
 Use the shared visual system: clean technical infographic, warm off-white paper background, precise thin ink lines, subtle hand-drawn engineering paper texture, restrained iota magenta accent, muted navy / forest green / terracotta / cyan / teal / gray module colors, readable labels, clear arrows, generous whitespace, no 3D, no neon, no stock cloud icons, no decorative blobs.
 Palette: iota magenta #C026D3; deep navy #1E3A5F; forest green #2F6B4F; terracotta orange #C46A3A; protocol cyan #0E7490; backend teal #0F766E; neutral gray #52525B; paper background #F8F5EE.
