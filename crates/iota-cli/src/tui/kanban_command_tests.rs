@@ -382,6 +382,49 @@ fn test_dispatch_with_task_id_readies_todo_task() {
 }
 
 #[test]
+fn test_dispatch_with_task_id_readies_triage_task() {
+    let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = concrete.create_board("dev", "Development").unwrap();
+    let task_id = concrete
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Triage task".to_string(),
+            body: None,
+            status: Some(Status::Triage),
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+    let store: Arc<dyn KanbanStore> = Arc::new(concrete);
+    let tmp = std::env::temp_dir().join(format!("iota-kb-cmd-{}", uuid::Uuid::new_v4()));
+    let dispatcher = Arc::new(Mutex::new(Dispatcher::new(DispatcherConfig {
+        max_concurrent: 1,
+        hermes_bin: Path::new("/missing/hermes-for-iota-test").to_path_buf(),
+        shadows_dir: tmp.clone(),
+        ..Default::default()
+    })));
+
+    let out = super::execute_with_dispatcher(
+        &format!("dispatch #{}", task_id),
+        &store,
+        None,
+        Some(&dispatcher),
+        None,
+    );
+
+    assert!(
+        out.iter().any(|line| line.contains("spawn failure")),
+        "expected spawn failure (hermes not found), got: {:?}",
+        out
+    );
+    assert_eq!(store.get_task(task_id).unwrap().status, Status::Ready);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn test_dispatch_rejects_invalid_status_task() {
     let concrete = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
     let board_id = concrete.create_board("dev", "Development").unwrap();

@@ -471,17 +471,8 @@ fn cmd_dispatch(
         if let Ok(id) = id_str.parse::<u64>() {
             match store.get_task(id) {
                 Ok(task) => {
-                    if task.status == Status::Ready {
-                        // Already ready, just trigger tick below
-                    } else if task.status == Status::Todo {
-                        if let Err(e) = store.transition(id, Status::Ready) {
-                            return vec![format!("Cannot ready task #{}: {}", id, e)];
-                        }
-                    } else {
-                        return vec![format!(
-                            "Task #{} is {} — must be 'todo' or 'ready' to dispatch",
-                            id, task.status
-                        )];
+                    if let Err(message) = ready_task_for_dispatch(store, id, task.status) {
+                        return vec![message];
                     }
                 }
                 Err(_) => return vec![format!("Task #{} not found", id)],
@@ -561,6 +552,31 @@ fn cmd_dispatch(
             out
         }
         Err(e) => vec![format!("Error listing tasks: {}", e)],
+    }
+}
+
+fn ready_task_for_dispatch(
+    store: &Arc<dyn KanbanStore>,
+    id: u64,
+    status: Status,
+) -> Result<(), String> {
+    match status {
+        Status::Ready => Ok(()),
+        Status::Triage => {
+            store
+                .transition(id, Status::Todo)
+                .map_err(|e| format!("Cannot ready task #{}: {}", id, e))?;
+            store
+                .transition(id, Status::Ready)
+                .map_err(|e| format!("Cannot ready task #{}: {}", id, e))
+        }
+        Status::Todo | Status::Running | Status::Blocked => store
+            .transition(id, Status::Ready)
+            .map_err(|e| format!("Cannot ready task #{}: {}", id, e)),
+        Status::Done | Status::Archived => Err(format!(
+            "Task #{} is {} — must be triage, todo, ready, running, or blocked to dispatch",
+            id, status
+        )),
     }
 }
 

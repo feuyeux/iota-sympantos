@@ -203,6 +203,12 @@ fn process_exists(pid: &str) -> bool {
             .map(|status| status.success())
             .unwrap_or(false)
     } else {
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            let state = stat.split_whitespace().nth(2);
+            if state == Some("Z") {
+                return false;
+            }
+        }
         std::process::Command::new("kill")
             .args(["-0", pid])
             .status()

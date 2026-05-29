@@ -326,7 +326,7 @@ impl McpTool for KanbanCreateTaskTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a task in iota's Kanban DB. Defaults status to triage for raw ideas. Use status=ready or iota_kanban_ready_task only when the task should be dispatcher-claimable."
+        "Create a task in iota's Kanban DB. Generated tasks auto-promote triage/todo to ready by default so the dispatcher can claim them. Set auto_ready=false to keep a raw idea in triage/todo."
     }
 
     fn input_schema(&self) -> Value {
@@ -340,6 +340,7 @@ impl McpTool for KanbanCreateTaskTool {
                 "assignee": {"type": "string", "description": "Hermes profile name, e.g. research-agent"},
                 "priority": {"type": "integer"},
                 "tags": {"type": "array", "items": {"type": "string"}},
+                "auto_ready": {"type": "boolean", "description": "Default true. When true, triage/todo tasks are legally promoted to ready after creation."},
                 "board_slug": {"type": "string"},
                 "board_name": {"type": "string"},
                 "workspace_kind": {"type": "string"},
@@ -581,6 +582,10 @@ fn dispatch_kanban_create_task(ctx: &ToolContext, args: &Value) -> Result<Value,
         .map(parse_kanban_status)
         .transpose()?
         .unwrap_or(Status::Triage);
+    let auto_ready = args
+        .get("auto_ready")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     let tags = args
         .get("tags")
         .and_then(Value::as_array)
@@ -621,12 +626,20 @@ fn dispatch_kanban_create_task(ctx: &ToolContext, args: &Value) -> Result<Value,
                 .map(std::path::PathBuf::from),
         })
         .map_err(|err| err.to_string())?;
+    let final_status = if auto_ready && matches!(status, Status::Triage | Status::Todo) {
+        ready_kanban_task(kanban, task_id)?;
+        Status::Ready
+    } else {
+        status
+    };
     Ok(json!({
         "ok": true,
         "task_id": task_id,
-        "status": status.as_str(),
+        "status": final_status.as_str(),
+        "created_status": status.as_str(),
         "board": board,
-        "auto_dispatch": status == Status::Ready
+        "auto_ready": auto_ready,
+        "auto_dispatch": final_status == Status::Ready
     }))
 }
 
@@ -664,10 +677,30 @@ fn dispatch_kanban_ready_task(ctx: &ToolContext, args: &Value) -> Result<Value, 
         .get("task_id")
         .and_then(Value::as_u64)
         .ok_or_else(|| "task_id is required".to_string())? as TaskId;
-    kanban
-        .transition(task_id, Status::Ready)
-        .map_err(|err| err.to_string())?;
+    ready_kanban_task(kanban, task_id)?;
     Ok(json!({"ok": true, "task_id": task_id, "status": "ready", "auto_dispatch": true}))
+}
+
+fn ready_kanban_task(kanban: &dyn KanbanStore, task_id: TaskId) -> Result<(), String> {
+    let task = kanban.get_task(task_id).map_err(|err| err.to_string())?;
+    match task.status {
+        Status::Ready => Ok(()),
+        Status::Triage => {
+            kanban
+                .transition(task_id, Status::Todo)
+                .map_err(|err| err.to_string())?;
+            kanban
+                .transition(task_id, Status::Ready)
+                .map_err(|err| err.to_string())
+        }
+        Status::Todo | Status::Running | Status::Blocked => kanban
+            .transition(task_id, Status::Ready)
+            .map_err(|err| err.to_string()),
+        Status::Done | Status::Archived => Err(format!(
+            "task #{} is {} and cannot be moved to ready",
+            task_id, task.status
+        )),
+    }
 }
 
 fn resolve_kanban_board(ctx: &ToolContext, args: &Value) -> Result<Board, String> {

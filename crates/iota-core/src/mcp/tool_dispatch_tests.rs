@@ -86,7 +86,7 @@ fn is_known_tool_recognizes_iota_tools() {
 }
 
 #[test]
-fn kanban_create_task_defaults_to_triage() {
+fn kanban_create_task_auto_promotes_generated_tasks_to_ready() {
     let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
     let workspace = std::path::Path::new("/tmp/iota-project");
     let skills = crate::skill::SkillRegistry::load(workspace, &[]);
@@ -111,8 +111,41 @@ fn kanban_create_task_defaults_to_triage() {
 
     let task_id = result["task_id"].as_u64().unwrap();
     let task = store.get_task(task_id).unwrap();
-    assert_eq!(task.status, Status::Triage);
+    assert_eq!(task.status, Status::Ready);
     assert_eq!(task.assignee.as_deref(), Some("research-agent"));
+    assert_eq!(result["created_status"], "triage");
+    assert_eq!(result["auto_ready"], true);
+    assert_eq!(result["auto_dispatch"], true);
+}
+
+#[test]
+fn kanban_create_task_can_keep_manual_triage_when_auto_ready_is_false() {
+    let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
+    let workspace = std::path::Path::new("/tmp/iota-project");
+    let skills = crate::skill::SkillRegistry::load(workspace, &[]);
+    let ctx = ToolContext {
+        memory: None,
+        ledger: None,
+        kanban: Some(&store),
+        skills: &skills,
+        workspace,
+    };
+
+    let result = dispatch_tool(
+        &ctx,
+        "iota_kanban_create_task",
+        &json!({
+            "title": "Raw idea for later grooming",
+            "auto_ready": false
+        }),
+    )
+    .unwrap();
+
+    let task_id = result["task_id"].as_u64().unwrap();
+    let task = store.get_task(task_id).unwrap();
+    assert_eq!(task.status, Status::Triage);
+    assert_eq!(result["status"], "triage");
+    assert_eq!(result["auto_ready"], false);
     assert_eq!(result["auto_dispatch"], false);
 }
 
@@ -146,4 +179,41 @@ fn kanban_create_task_allows_explicit_ready_for_dispatch() {
     assert_eq!(task.status, Status::Ready);
     assert_eq!(task.assignee.as_deref(), Some("research-agent"));
     assert_eq!(result["auto_dispatch"], true);
+}
+
+#[test]
+fn kanban_ready_task_manually_promotes_triage_through_todo() {
+    let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
+    let workspace = std::path::Path::new("/tmp/iota-project");
+    let skills = crate::skill::SkillRegistry::load(workspace, &[]);
+    let ctx = ToolContext {
+        memory: None,
+        ledger: None,
+        kanban: Some(&store),
+        skills: &skills,
+        workspace,
+    };
+    let task_id = store
+        .create_task(iota_kanban::CreateTaskRequest {
+            board_id: store.create_board("manual", "Manual").unwrap(),
+            title: "Manual ready promotion".to_string(),
+            body: None,
+            status: Some(Status::Triage),
+            assignee: None,
+            priority: None,
+            tags: Vec::new(),
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+
+    let result = dispatch_tool(
+        &ctx,
+        "iota_kanban_ready_task",
+        &json!({"task_id": task_id}),
+    )
+    .unwrap();
+
+    assert_eq!(result["status"], "ready");
+    assert_eq!(store.get_task(task_id).unwrap().status, Status::Ready);
 }

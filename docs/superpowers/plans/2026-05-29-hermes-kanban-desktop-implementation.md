@@ -27,7 +27,7 @@
 - Create: `crates/iota-desktop/src/components/kanbanModel.test.ts`
 - Modify: `crates/iota-desktop/src/components/KanbanWorkspace.tsx`
 
-- [ ] **Step 1: Write failing helper tests**
+- [x] **Step 1: Write failing helper tests**
 
 Create `crates/iota-desktop/src/components/kanbanModel.test.ts`:
 
@@ -89,7 +89,7 @@ test("formatDispatchReport makes a no-op nudge visible", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -99,7 +99,7 @@ cd crates/iota-desktop && npm test -- src/components/kanbanModel.test.ts
 
 Expected: FAIL because `./kanbanModel` does not exist.
 
-- [ ] **Step 3: Implement helper module**
+- [x] **Step 3: Implement helper module**
 
 Create `crates/iota-desktop/src/components/kanbanModel.ts`:
 
@@ -196,11 +196,11 @@ export function legalStatusActions(status: KanbanStatus): Array<{ label: string;
 }
 ```
 
-- [ ] **Step 4: Update `KanbanWorkspace.tsx` imports**
+- [x] **Step 4: Update `KanbanWorkspace.tsx` imports**
 
 Remove local `STATUSES`, `STATUS_LABELS`, and `formatDispatchReport`; import them from `kanbanModel.ts`.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
@@ -217,7 +217,7 @@ Expected: PASS for all helper tests.
 - Modify: `crates/iota-desktop/src/api.ts`
 - Modify: `crates/iota-desktop/src/types.ts`
 
-- [ ] **Step 1: Add frontend types**
+- [x] **Step 1: Add frontend types**
 
 In `crates/iota-desktop/src/types.ts`, add:
 
@@ -240,7 +240,7 @@ export type KanbanCreateLinkRequest = {
 };
 ```
 
-- [ ] **Step 2: Add API wrappers**
+- [x] **Step 2: Add API wrappers**
 
 In `crates/iota-desktop/src/api.ts`, import `KanbanCreateLinkRequest` and `KanbanTaskPatch`, then add:
 
@@ -258,7 +258,7 @@ export function removeKanbanLink(req: KanbanCreateLinkRequest): Promise<void> {
 }
 ```
 
-- [ ] **Step 3: Add Tauri commands**
+- [x] **Step 3: Add Tauri commands**
 
 In `crates/iota-desktop/src-tauri/src/lib.rs`, add after `transition_task`:
 
@@ -307,7 +307,7 @@ async fn remove_kanban_link(
 }
 ```
 
-- [ ] **Step 4: Register commands**
+- [x] **Step 4: Register commands**
 
 Add these names to `tauri::generate_handler!`:
 
@@ -317,7 +317,7 @@ create_kanban_link,
 remove_kanban_link,
 ```
 
-- [ ] **Step 5: Verify Rust and TypeScript compile**
+- [x] **Step 5: Verify Rust and TypeScript compile**
 
 Run:
 
@@ -333,7 +333,7 @@ Expected: both commands complete successfully.
 **Files:**
 - Modify: `crates/iota-desktop/src/components/KanbanWorkspace.tsx`
 
-- [ ] **Step 1: Add board state**
+- [x] **Step 1: Add board state**
 
 Add state near existing state variables:
 
@@ -344,7 +344,7 @@ const [selectedAssignee, setSelectedAssignee] = useState<string | "all">("all");
 const [lanesByProfile, setLanesByProfile] = useState(true);
 ```
 
-- [ ] **Step 2: Derive filtered tasks and columns**
+- [x] **Step 2: Derive filtered tasks and columns**
 
 Replace `visibleTasks` with:
 
@@ -358,7 +358,7 @@ const columns = useMemo(() => buildKanbanColumns(filteredTasks), [filteredTasks]
 const assignees = useMemo(() => uniqueAssignees(tasks), [tasks]);
 ```
 
-- [ ] **Step 3: Replace status pills with controls**
+- [x] **Step 3: Replace status pills with controls**
 
 In the header controls area, render:
 
@@ -395,7 +395,7 @@ In the header controls area, render:
 </label>
 ```
 
-- [ ] **Step 4: Replace list rendering with six-column board**
+- [x] **Step 4: Replace list rendering with six-column board**
 
 Render columns in the main area:
 
@@ -426,7 +426,7 @@ Render columns in the main area:
 </div>
 ```
 
-- [ ] **Step 5: Extract `renderTaskCard` local function**
+- [x] **Step 5: Extract `renderTaskCard` local function**
 
 Inside `KanbanWorkspace`, before `return`, define:
 
@@ -460,7 +460,7 @@ const renderTaskCard = (task: KanbanTask) => (
 );
 ```
 
-- [ ] **Step 6: Build frontend**
+- [x] **Step 6: Build frontend**
 
 Run:
 
@@ -475,7 +475,7 @@ Expected: TypeScript and Vite build successfully.
 **Files:**
 - Modify: `crates/iota-desktop/src/components/KanbanWorkspace.tsx`
 
-- [ ] **Step 1: Import new APIs and helper**
+- [x] **Step 1: Import new APIs and helper**
 
 Update imports:
 
@@ -486,7 +486,7 @@ import { legalStatusActions } from "./kanbanModel";
 
 If existing API names differ, define wrappers in `api.ts` with these exact names or adjust the import consistently.
 
-- [ ] **Step 2: Add drawer form state**
+- [x] **Step 2: Add drawer form state**
 
 Add:
 
@@ -495,7 +495,7 @@ const [commentBody, setCommentBody] = useState("");
 const [taskActionPending, setTaskActionPending] = useState(false);
 ```
 
-- [ ] **Step 3: Add action handlers**
+- [x] **Step 3: Add action handlers**
 
 Add:
 
@@ -528,7 +528,7 @@ const submitComment = async () => {
 };
 ```
 
-- [ ] **Step 4: Replace inline detail section with drawer**
+- [x] **Step 4: Replace inline detail section with drawer**
 
 Render the drawer as a right-side panel in the main flex layout:
 
@@ -552,7 +552,7 @@ Render the drawer as a right-side panel in the main flex layout:
 ) : null}
 ```
 
-- [ ] **Step 5: Add legal action buttons**
+- [x] **Step 5: Add legal action buttons**
 
 Near the top of drawer body:
 
@@ -574,7 +574,7 @@ Near the top of drawer body:
 ) : null}
 ```
 
-- [ ] **Step 6: Add comments form**
+- [x] **Step 6: Add comments form**
 
 Under comments list:
 
@@ -597,7 +597,7 @@ Under comments list:
 </div>
 ```
 
-- [ ] **Step 7: Build frontend**
+- [x] **Step 7: Build frontend**
 
 Run:
 
@@ -613,7 +613,7 @@ Expected: PASS.
 - Modify: `crates/iota-desktop/src/components/KanbanWorkspace.tsx`
 - Modify: `crates/iota-desktop/src/api.ts` if `createKanbanTask` wrapper is missing
 
-- [ ] **Step 1: Add create task API wrapper if missing**
+- [x] **Step 1: Add create task API wrapper if missing**
 
 In `api.ts`:
 
@@ -633,7 +633,7 @@ export function createKanbanTask(req: {
 }
 ```
 
-- [ ] **Step 2: Add form state**
+- [x] **Step 2: Add form state**
 
 In `KanbanWorkspace.tsx`:
 
@@ -645,7 +645,7 @@ const [newTaskAssignee, setNewTaskAssignee] = useState("");
 const [newTaskStatus, setNewTaskStatus] = useState<KanbanStatus>("ready");
 ```
 
-- [ ] **Step 3: Add submit handler**
+- [x] **Step 3: Add submit handler**
 
 ```ts
 const submitNewTask = async () => {
@@ -678,11 +678,11 @@ const submitNewTask = async () => {
 };
 ```
 
-- [ ] **Step 4: Add `New task` button and compact form**
+- [x] **Step 4: Add `New task` button and compact form**
 
 Add a header button and render the form above board columns when `creatingTask` is true. The form must include title, body, assignee, status, create, and cancel.
 
-- [ ] **Step 5: Build frontend**
+- [x] **Step 5: Build frontend**
 
 Run:
 
@@ -697,7 +697,7 @@ Expected: PASS.
 **Files:**
 - No code files unless fixing issues found by verification.
 
-- [ ] **Step 1: Run frontend tests**
+- [x] **Step 1: Run frontend tests**
 
 Run:
 
@@ -707,7 +707,7 @@ cd crates/iota-desktop && npm test
 
 Expected: all Node tests pass.
 
-- [ ] **Step 2: Run frontend build**
+- [x] **Step 2: Run frontend build**
 
 Run:
 
@@ -717,7 +717,7 @@ cd crates/iota-desktop && npm run build
 
 Expected: TypeScript and Vite build pass.
 
-- [ ] **Step 3: Run Rust check**
+- [x] **Step 3: Run Rust check**
 
 Run:
 
@@ -736,6 +736,8 @@ cd crates/iota-desktop && npm run dev:clean
 ```
 
 Expected: desktop app starts. If it blocks as a long-running process, keep it running only long enough to verify startup logs and then stop it before finishing.
+
+Current verification note: `npm run dev:clean` reaches Vite (`http://localhost:1420/`) and compiles/runs the Tauri binary, but this Linux snap environment fails at process launch with `/snap/core20/current/lib/x86_64-linux-gnu/libpthread.so.0: undefined symbol: __libc_pthread_init, version GLIBC_PRIVATE`. This is an environment/runtime loader issue after successful build, not a TypeScript or Rust compile failure.
 
 - [ ] **Step 5: Manual behavior checklist**
 

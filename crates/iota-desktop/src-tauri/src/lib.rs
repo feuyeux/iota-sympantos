@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 
 use iota_core::acp::AcpBackend;
 use iota_core::config::{self, backend_config, backend_process_env_with_context};
+use iota_core::storage::SupabaseStore;
 use iota_kanban::{Dispatcher, DispatcherConfig, KanbanStore, SqliteKanbanStore, types::*};
 
 pub struct AppState {
@@ -87,9 +88,8 @@ fn event_mentions_task(event: &KanbanEvent, task_id: TaskId) -> bool {
 
 fn value_mentions_task(value: &serde_json::Value, task_id: TaskId) -> bool {
     match value {
-        serde_json::Value::Number(number) => number.as_u64() == Some(task_id),
         serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
-            matches!(key.as_str(), "task_id" | "from_id" | "to_id" | "id")
+            matches!(key.as_str(), "task_id" | "from_id" | "to_id")
                 && value.as_u64() == Some(task_id)
                 || value_mentions_task(value, task_id)
         }),
@@ -123,15 +123,27 @@ fn task_logs(
     task_id: TaskId,
     shadows_dir: &std::path::Path,
 ) -> Result<DesktopKanbanTaskLogs, String> {
-    let logs_dir = shadows_dir.parent().unwrap_or(shadows_dir);
-    let stdout_path = logs_dir.join(format!("{task_id}.stdout.log"));
-    let stderr_path = logs_dir.join(format!("{task_id}.stderr.log"));
+    let stdout_path = find_task_log_path(task_id, shadows_dir, "stdout");
+    let stderr_path = find_task_log_path(task_id, shadows_dir, "stderr");
     Ok(DesktopKanbanTaskLogs {
         stdout_path: stdout_path.display().to_string(),
         stderr_path: stderr_path.display().to_string(),
         stdout: read_tail(&stdout_path, 64 * 1024)?,
         stderr: read_tail(&stderr_path, 64 * 1024)?,
     })
+}
+
+fn find_task_log_path(task_id: TaskId, shadows_dir: &std::path::Path, stream: &str) -> PathBuf {
+    let file_name = format!("{task_id}.{stream}.log");
+    let candidates = [
+        shadows_dir.join(&file_name),
+        shadows_dir.parent().unwrap_or(shadows_dir).join(&file_name),
+    ];
+    candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| candidates[0].clone())
 }
 
 #[tauri::command]
@@ -463,6 +475,72 @@ async fn add_comment(
         .map_err(|e| e.to_string())
 }
 
+/// Result type for sync_pipeline_artifacts — lists what was stored per stage.
+#[derive(Debug, serde::Serialize)]
+pub struct SyncPipelineResult {
+    pub script: usize,
+    pub x_optimizer: usize,
+    pub errors: Vec<String>,
+}
+
+/// Scan `script_agent_output/` and persist all pipeline artifacts to Supabase.
+///
+/// Looks for:
+/// - `script_agent_output/script.json`           → stage: `script`
+/// - `script_agent_output/x_optimizer_output/*.json` → stage: `x_optimizer`
+///
+/// Research stage artifacts are detected from `topic_source` / `heat_score` keys.
+///
+/// Requires `SUPABASE_URL` + `SUPABASE_ANON_KEY` env vars (or `NIMIA_*` aliases).
+#[tauri::command]
+fn sync_pipeline_artifacts(base_path: Option<String>) -> Result<SyncPipelineResult, String> {
+    let base = match base_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let home = dirs::home_dir().ok_or_else(|| "could not find home directory".to_string())?;
+            home.join("coding").join("iota-sympantos")
+        }
+    };
+
+    let store = SupabaseStore::from_env().map_err(|e| e.to_string())?;
+    let mut result = SyncPipelineResult {
+        script: 0,
+        x_optimizer: 0,
+        errors: Vec::new(),
+    };
+
+    // --- script stage ---
+    let script_path = base.join("script_agent_output").join("script.json");
+    if script_path.exists() {
+        match store.store_from_file(&script_path) {
+            Ok(n) => result.script += n,
+            Err(e) => result.errors.push(format!("script: {}", e)),
+        }
+    }
+
+    // --- x_optimizer stage ---
+    let xo_dir = base.join("script_agent_output").join("x_optimizer_output");
+    if xo_dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&xo_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    match store.store_from_file(&path) {
+                        Ok(n) => result.x_optimizer += n,
+                        Err(e) => result.errors.push(format!(
+                            "x_optimizer/{}: {}",
+                            path.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
+                            e
+                        )),
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::collapsible_if)]
 pub fn run() {
@@ -607,7 +685,8 @@ pub fn run() {
             dispatch_kanban,
             get_kanban_task_detail,
             list_comments,
-            add_comment
+            add_comment,
+            sync_pipeline_artifacts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+use std::io::Write;
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -65,6 +66,16 @@ impl WorkerHandle {
             .with_context(|| format!("creating stderr log {}", stderr_path.display()))?;
         let stdout_file = std::fs::File::create(&stdout_path)
             .with_context(|| format!("creating stdout log {}", stdout_path.display()))?;
+        let mut stderr_file = stderr_file;
+        writeln!(
+            stderr_file,
+            "[iota] starting hermes worker task={} run={} profile={} shadow_db={}",
+            env.task_id,
+            env.run_id,
+            env.profile,
+            env.shadow_path.display()
+        )
+        .with_context(|| format!("writing stderr log header {}", stderr_path.display()))?;
 
         let prompt = format!("work kanban task {}", env.task_id);
 
@@ -157,7 +168,12 @@ fn kill_process_tree(child: &mut Child) -> Result<()> {
     {
         let pid = child.id().to_string();
         let _ = Command::new("kill")
-            .args(["-TERM", &format!("-{}", pid)])
+            .args(["-TERM", "--", &format!("-{}", pid)])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", pid)])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();

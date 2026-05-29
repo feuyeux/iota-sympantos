@@ -15,9 +15,8 @@ import { ConfigPanel } from "./ConfigPanel";
 import type { BackendCheckResult, DesktopConfigSnapshot, ObservabilitySummary } from "../types";
 
 const BACKENDS = ["gemini", "claude", "hermes", "codex", "opencode"];
-const DEFAULT_INSPECTOR_WIDTH = 460;
 const MIN_INSPECTOR_WIDTH = 360;
-const MAX_INSPECTOR_WIDTH = 720;
+const MIN_WORKBENCH_WIDTH = 320;
 
 const BRIDGE_UNAVAILABLE_DETAIL = "Desktop bridge unavailable; run through Tauri to check configured backends.";
 
@@ -88,6 +87,15 @@ function shouldOpenKanbanForPrompt(prompt: string) {
   return text.includes("/kanban") || text.includes("kanban") || /看板|创建.*任务|任务.*创建/.test(prompt);
 }
 
+export function clampInspectorWidth(width: number, viewportWidth = window.innerWidth) {
+  const maxWidth = Math.max(MIN_INSPECTOR_WIDTH, viewportWidth - MIN_WORKBENCH_WIDTH);
+  return Math.min(maxWidth, Math.max(MIN_INSPECTOR_WIDTH, width));
+}
+
+export function defaultInspectorWidth(viewportWidth = window.innerWidth) {
+  return clampInspectorWidth(Math.round((viewportWidth * 2) / 3), viewportWidth);
+}
+
 export function ChatWorkbench() {
   const [state, dispatch] = useReducer(turnsReducer, initialTurnsState);
   const [backend, setBackend] = useState("hermes");
@@ -99,7 +107,7 @@ export function ChatWorkbench() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("observability");
   const [workspace, setWorkspace] = useState("");
   const [daemonStatus, setDaemonStatus] = useState<"connecting" | "connected" | "error">("connecting");
-  const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
+  const [inspectorWidth, setInspectorWidth] = useState(() => defaultInspectorWidth());
   const [isResizingInspector, setIsResizingInspector] = useState(false);
   const [isBackendMenuOpen, setIsBackendMenuOpen] = useState(false);
   const backendMenuRef = useRef<HTMLDivElement>(null);
@@ -306,7 +314,7 @@ export function ChatWorkbench() {
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       const nextWidth = startWidth - (moveEvent.clientX - startX);
-      setInspectorWidth(Math.min(MAX_INSPECTOR_WIDTH, Math.max(MIN_INSPECTOR_WIDTH, nextWidth)));
+      setInspectorWidth(clampInspectorWidth(nextWidth));
     };
     const onPointerUp = () => {
       setIsResizingInspector(false);
@@ -318,6 +326,96 @@ export function ChatWorkbench() {
     window.addEventListener("pointerup", onPointerUp);
   }, [inspectorWidth]);
 
+  const workspaceControls = (
+    <div className="flex flex-wrap items-center gap-2">
+      <nav className="flex items-center bg-slate-950/40 border border-slate-800/80 p-0.5 rounded-lg">
+        <button
+          className={`rounded-md px-3.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+            view === "chat" ? "bg-primary text-white shadow-sm shadow-primary/20" : "text-slate-400 hover:text-slate-200"
+          }`}
+          onClick={() => setView("chat")}
+        >
+          Chat
+        </button>
+        <button
+          className={`rounded-md px-3.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+            view === "config" ? "bg-primary text-white shadow-sm shadow-primary/20" : "text-slate-400 hover:text-slate-200"
+          }`}
+          onClick={() => setView("config")}
+        >
+          Config
+        </button>
+      </nav>
+
+      <div ref={backendMenuRef} className="relative">
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={isBackendMenuOpen}
+          onClick={() => setIsBackendMenuOpen((open) => !open)}
+          className="flex h-8.5 min-w-[150px] items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-slate-950/20 px-3 text-xs text-slate-300 outline-none transition-all hover:border-slate-700 hover:bg-slate-950/40 focus:border-primary/60 cursor-pointer"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${activeBackendTheme.dot}`} />
+            <span className="truncate font-semibold tracking-wide">{backend.toUpperCase()}</span>
+            <span className={`hidden text-[10px] font-medium sm:inline ${activeBackendTheme.text}`}>
+              {backendStatusLabel(activeBackendStatus)}
+            </span>
+          </span>
+          <ChevronDown
+            className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${isBackendMenuOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {isBackendMenuOpen ? (
+          <div
+            role="listbox"
+            aria-label="Backend"
+            className="absolute bottom-10 left-0 z-30 w-[260px] overflow-hidden rounded-xl border border-slate-800 bg-[#0d1220]/95 backdrop-blur-md p-1.5 shadow-2xl shadow-black/60"
+          >
+            {BACKENDS.map((item) => {
+              const check = backendChecks[item];
+              const status = backendStatus(check);
+              const theme = backendStatusTheme(status);
+              const isSelectedBackend = item === backend;
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelectedBackend}
+                  onClick={() => {
+                    setBackend(item);
+                    setIsBackendMenuOpen(false);
+                  }}
+                  className={`flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-all ${theme.row} ${
+                    isSelectedBackend ? "ring-1 ring-primary/45" : ""
+                  }`}
+                >
+                  <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${theme.dot}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="truncate text-xs font-bold tracking-wide text-gray-100">
+                        {item.toUpperCase()}
+                      </span>
+                      <span className={`flex shrink-0 items-center gap-1 text-[10px] font-semibold ${theme.text}`}>
+                        <BackendStatusIcon status={status} className={`h-3.5 w-3.5 ${theme.icon}`} />
+                        {backendStatusLabel(status)}
+                      </span>
+                    </span>
+                    <span className="mt-1 block truncate text-[11px] leading-4 text-gray-400" title={check?.details}>
+                      {status === "checking" ? "Checking configuration" : check?.details || "Configured and reachable"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <div
       className={`flex h-screen bg-[#0b0f19] text-slate-100 font-sans ${
@@ -326,7 +424,7 @@ export function ChatWorkbench() {
     >
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Header Bar */}
-        <header className="flex items-center justify-between border-b border-slate-800/50 bg-[#0d1220]/80 backdrop-blur-md px-6 py-3 shrink-0">
+        <header className="flex items-center border-b border-slate-800/50 bg-[#0d1220]/80 backdrop-blur-md px-6 py-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="iota-logo-container relative flex h-8 w-8 items-center justify-center cursor-pointer transition-transform duration-300 hover:scale-105 active:scale-95">
               <svg
@@ -455,93 +553,6 @@ export function ChatWorkbench() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <nav className="flex items-center bg-slate-950/40 border border-slate-800/80 p-0.5 rounded-lg">
-              <button
-                className={`rounded-md px-3.5 py-1 text-xs font-medium transition-all cursor-pointer ${
-                  view === "chat" ? "bg-primary text-white shadow-sm shadow-primary/20" : "text-slate-400 hover:text-slate-200"
-                }`}
-                onClick={() => setView("chat")}
-              >
-                Chat
-              </button>
-              <button
-                className={`rounded-md px-3.5 py-1 text-xs font-medium transition-all cursor-pointer ${
-                  view === "config" ? "bg-primary text-white shadow-sm shadow-primary/20" : "text-slate-400 hover:text-slate-200"
-                }`}
-                onClick={() => setView("config")}
-              >
-                Config
-              </button>
-            </nav>
-
-            <div ref={backendMenuRef} className="relative">
-              <button
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={isBackendMenuOpen}
-                onClick={() => setIsBackendMenuOpen((open) => !open)}
-                className="flex h-8.5 min-w-[150px] items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-slate-950/20 px-3 text-xs text-slate-300 outline-none transition-all hover:border-slate-700 hover:bg-slate-950/40 focus:border-primary/60 cursor-pointer"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${activeBackendTheme.dot}`} />
-                  <span className="truncate font-semibold tracking-wide">{backend.toUpperCase()}</span>
-                  <span className={`hidden text-[10px] font-medium sm:inline ${activeBackendTheme.text}`}>
-                    {backendStatusLabel(activeBackendStatus)}
-                  </span>
-                </span>
-                <ChevronDown
-                  className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${isBackendMenuOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-
-              {isBackendMenuOpen ? (
-                <div
-                  role="listbox"
-                  aria-label="Backend"
-                  className="absolute right-0 top-10 z-30 w-[260px] overflow-hidden rounded-xl border border-slate-800 bg-[#0d1220]/95 backdrop-blur-md p-1.5 shadow-2xl shadow-black/60"
-                >
-                  {BACKENDS.map((item) => {
-                    const check = backendChecks[item];
-                    const status = backendStatus(check);
-                    const theme = backendStatusTheme(status);
-                    const isSelectedBackend = item === backend;
-                    return (
-                      <button
-                        key={item}
-                        type="button"
-                        role="option"
-                        aria-selected={isSelectedBackend}
-                        onClick={() => {
-                          setBackend(item);
-                          setIsBackendMenuOpen(false);
-                        }}
-                        className={`flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-left transition-all ${theme.row} ${
-                          isSelectedBackend ? "ring-1 ring-primary/45" : ""
-                        }`}
-                      >
-                        <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${theme.dot}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center justify-between gap-3">
-                            <span className="truncate text-xs font-bold tracking-wide text-gray-100">
-                              {item.toUpperCase()}
-                            </span>
-                            <span className={`flex shrink-0 items-center gap-1 text-[10px] font-semibold ${theme.text}`}>
-                              <BackendStatusIcon status={status} className={`h-3.5 w-3.5 ${theme.icon}`} />
-                              {backendStatusLabel(status)}
-                            </span>
-                          </span>
-                          <span className="mt-1 block truncate text-[11px] leading-4 text-gray-400" title={check?.details}>
-                            {status === "checking" ? "Checking configuration" : check?.details || "Configured and reachable"}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          </div>
         </header>
 
         {/* Content Panel */}
@@ -609,6 +620,9 @@ export function ChatWorkbench() {
 
             {/* Prompt Form */}
             <div className="border-t border-slate-800/40 bg-[#0d1220]/60 backdrop-blur-md p-4 shrink-0">
+              <div className="mb-3 flex justify-start">
+                {workspaceControls}
+              </div>
               <form onSubmit={onSubmit} className="mx-auto max-w-3xl">
                 <div className="relative flex items-center bg-slate-950/40 border border-slate-800/80 rounded-xl px-3 py-2 shadow-inner focus-within:border-primary/60 transition-all">
                   <textarea
@@ -644,7 +658,16 @@ export function ChatWorkbench() {
             </div>
           </>
         ) : (
-          <ConfigPanel config={config} backendChecks={backendChecks} onConfigUpdate={handleConfigUpdate} />
+          <>
+            <div className="min-h-0 flex-1">
+              <ConfigPanel config={config} backendChecks={backendChecks} onConfigUpdate={handleConfigUpdate} />
+            </div>
+            <div className="border-t border-slate-800/40 bg-[#0d1220]/60 backdrop-blur-md p-4 shrink-0">
+              <div className="flex justify-start">
+                {workspaceControls}
+              </div>
+            </div>
+          </>
         )}
       </main>
 

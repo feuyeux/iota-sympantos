@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 
-use super::models::{PipelineArtifact, PipelineRecord};
+use super::models::{PipelineArtifact, PipelineRecord, ResearchData, ScriptData, XOptimizerData};
 use super::retry::with_backoff;
 
 const MAX_RETRIES: u32 = 3;
@@ -204,5 +204,46 @@ impl SupabaseStore {
             MAX_RETRIES,
             BASE_DELAY,
         )
+    }
+
+    /// Load an artifact from a JSON file and store it to Supabase.
+    ///
+    /// Infers the stage from the top-level key of the JSON file:
+    /// `{ "topic_source": ... }` → `research`
+    /// `{ "title": ... }`         → `script`
+    /// `{ "x_optimizer_output": ... }` → `x_optimizer`
+    ///
+    /// Returns the number of records stored.
+    pub fn store_from_file(&self, json_path: &std::path::Path) -> Result<usize> {
+        let text = std::fs::read_to_string(json_path)
+            .with_context(|| format!("failed to read {:?}", json_path))?;
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .with_context(|| format!("failed to parse {:?} as JSON", json_path))?;
+
+        let count = if let Some(obj) = json.as_object() {
+            if obj.contains_key("topic_source") || obj.contains_key("heat_score") {
+                let data: ResearchData = serde_json::from_value(json.clone())?;
+                self.store_artifact(PipelineArtifact::research(data))?;
+                1
+            } else if obj.contains_key("title") {
+                let data: ScriptData = serde_json::from_value(json.clone())?;
+                self.store_artifact(PipelineArtifact::script(data))?;
+                1
+            } else if let Some(xo) = obj.get("x_optimizer_output") {
+                let data: XOptimizerData = serde_json::from_value(xo.clone())?;
+                self.store_artifact(PipelineArtifact::x_optimizer(data))?;
+                1
+            } else {
+                return Err(anyhow::anyhow!(
+                    "unrecognised JSON shape in {:?} — expected top-level key: topic_source, title, or x_optimizer_output",
+                    json_path
+                ));
+            }
+        } else {
+            return Err(anyhow::anyhow!("JSON root must be an object"));
+        };
+
+        tracing::info!(path = %json_path.display(), count, "stored artifact(s) from file");
+        Ok(count)
     }
 }

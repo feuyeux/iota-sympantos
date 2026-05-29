@@ -45,5 +45,5 @@ pub mod supabase;
 #[path = "storage_tests.rs"]
 mod tests;
 
-pub use models::{PipelineArtifact, PipelineRecord, PipelineStatus};
+pub use models::{PipelineArtifact, PipelineRecord, PipelineStatus, ResearchData, ScriptData, XOptimizerData};
 pub use supabase::SupabaseStore;

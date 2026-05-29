@@ -34,3 +34,49 @@ fn test_get_memory_context_snapshot_message_building() {
         panic!("expected GetMemoryContextSnapshot message");
     }
 }
+
+#[test]
+fn event_mentions_task_only_matches_task_link_fields() {
+    let unrelated_same_board = KanbanEvent {
+        id: 1,
+        event_type: "task_created".to_string(),
+        payload: serde_json::json!({
+            "task_id": 42,
+            "board_id": 7,
+            "id": 7
+        })
+        .to_string(),
+        created_at: 0,
+    };
+    let related_link = KanbanEvent {
+        id: 2,
+        event_type: "link_created".to_string(),
+        payload: serde_json::json!({
+            "from_id": 42,
+            "to_id": 7,
+            "kind": "blocks"
+        })
+        .to_string(),
+        created_at: 0,
+    };
+
+    assert!(!event_mentions_task(&unrelated_same_board, 7));
+    assert!(event_mentions_task(&related_link, 7));
+}
+
+#[test]
+fn task_logs_reads_logs_from_shadows_dir() {
+    let tmp = std::env::temp_dir().join(format!("iota-desktop-logs-{}", uuid::Uuid::new_v4()));
+    let shadows = tmp.join("shadows");
+    std::fs::create_dir_all(&shadows).unwrap();
+    std::fs::write(shadows.join("7.stdout.log"), "stdout tail").unwrap();
+    std::fs::write(shadows.join("7.stderr.log"), "stderr tail").unwrap();
+
+    let logs = task_logs(7, &shadows).unwrap();
+
+    assert!(logs.stdout_path.ends_with("shadows/7.stdout.log"));
+    assert!(logs.stderr_path.ends_with("shadows/7.stderr.log"));
+    assert_eq!(logs.stdout, "stdout tail");
+    assert_eq!(logs.stderr, "stderr tail");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
