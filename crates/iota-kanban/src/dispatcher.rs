@@ -213,10 +213,10 @@ impl Dispatcher {
 
             // --- Claim TTL exceeded ---
             if elapsed > self.config.claim_ttl.as_secs() {
-                if let Some(entry) = self.workers.get_mut(&task_id) {
-                    if let Err(e) = entry.0.kill() {
-                        tracing::warn!(task_id, error = %e, "Failed to kill expired worker process");
-                    }
+                if let Some(entry) = self.workers.get_mut(&task_id)
+                    && let Err(e) = entry.0.kill()
+                {
+                    tracing::warn!(task_id, error = %e, "Failed to kill expired worker process");
                 }
                 if let Err(e) = store.complete_run(&run_id, RunStatus::TimedOut, None) {
                     tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete expired run in store");
@@ -242,10 +242,10 @@ impl Dispatcher {
                 .unwrap_or(false);
 
             if heartbeat_expired {
-                if let Some(entry) = self.workers.get_mut(&task_id) {
-                    if let Err(e) = entry.0.kill() {
-                        tracing::warn!(task_id, error = %e, "Failed to kill heartbeat-timeout worker process");
-                    }
+                if let Some(entry) = self.workers.get_mut(&task_id)
+                    && let Err(e) = entry.0.kill()
+                {
+                    tracing::warn!(task_id, error = %e, "Failed to kill heartbeat-timeout worker process");
                 }
                 if let Err(e) = store.complete_run(&run_id, RunStatus::TimedOut, None) {
                     tracing::error!(task_id, run_id = %run_id, error = %e, "Failed to complete heartbeat-timeout run in store");
@@ -264,10 +264,9 @@ impl Dispatcher {
                 if terminal_status.is_some()
                     && exit_code.is_none()
                     && let Some(entry) = self.workers.get_mut(&task_id)
+                    && let Err(e) = entry.0.kill()
                 {
-                    if let Err(e) = entry.0.kill() {
-                        tracing::warn!(task_id, error = %e, "Failed to kill active worker process after terminal status");
-                    }
+                    tracing::warn!(task_id, error = %e, "Failed to kill active worker process after terminal status");
                 }
                 let failed = exit_code.map(|c| c != 0).unwrap_or(false);
                 let rs = if failed {
@@ -356,10 +355,8 @@ impl Dispatcher {
                     .unwrap_or(false)
             });
 
-            if all_done {
-                if let Err(e) = store.transition(task.id, Status::Ready) {
-                    tracing::error!(task_id = task.id, error = %e, "Failed to transition unblocked task to Ready");
-                }
+            if all_done && let Err(e) = store.transition(task.id, Status::Ready) {
+                tracing::error!(task_id = task.id, error = %e, "Failed to transition unblocked task to Ready");
             }
         }
 

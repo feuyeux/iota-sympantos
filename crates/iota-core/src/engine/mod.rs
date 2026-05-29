@@ -147,32 +147,29 @@ impl IotaEngine {
         }
 
         if is_resumed {
-            if let Some(ref ledger) = self.session_ledger_store {
-                if let Ok(Some(summary)) = ledger.summary(&self.engine_session_id) {
-                    if let Some(backend_str) = summary.active_backend {
-                        if let Ok(backend) = AcpBackend::parse(&backend_str) {
-                            self.last_used_backend = Some(backend);
-                        }
-                    }
-                }
+            if let Some(ref ledger) = self.session_ledger_store
+                && let Ok(Some(summary)) = ledger.summary(&self.engine_session_id)
+                && let Some(backend_str) = summary.active_backend
+                && let Ok(backend) = AcpBackend::parse(&backend_str)
+            {
+                self.last_used_backend = Some(backend);
             }
-            if let Some(ref mem_store) = self.memory_store {
-                if let Ok(turns) = mem_store.get_session_turns(&self.engine_session_id) {
-                    self.working_memory = WorkingMemoryBuffer::new(20);
-                    for (backend_str, content) in turns {
-                        if let Ok(backend) = AcpBackend::parse(&backend_str) {
-                            if let Some(rest) = content.strip_prefix("Prompt: ") {
-                                if let Some(idx) = rest.find("\nOutput: ") {
-                                    let prompt_summary = rest[..idx].to_string();
-                                    let output_summary = rest[idx + 9..].to_string();
-                                    self.working_memory.push_turn_from_resume(
-                                        backend,
-                                        prompt_summary,
-                                        output_summary,
-                                    );
-                                }
-                            }
-                        }
+            if let Some(ref mem_store) = self.memory_store
+                && let Ok(turns) = mem_store.get_session_turns(&self.engine_session_id)
+            {
+                self.working_memory = WorkingMemoryBuffer::new(20);
+                for (backend_str, content) in turns {
+                    if let Ok(backend) = AcpBackend::parse(&backend_str)
+                        && let Some(rest) = content.strip_prefix("Prompt: ")
+                        && let Some(idx) = rest.find("\nOutput: ")
+                    {
+                        let prompt_summary = rest[..idx].to_string();
+                        let output_summary = rest[idx + 9..].to_string();
+                        self.working_memory.push_turn_from_resume(
+                            backend,
+                            prompt_summary,
+                            output_summary,
+                        );
                     }
                 }
             }

@@ -57,6 +57,68 @@ use crate::acp::AcpBackend;
 use crate::config::{BackendConfig, ModelConfig, NimiaConfig};
 
 pub const DESKTOP_PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION_MIN: u32 = 2;
+pub const PROTOCOL_VERSION_MAX: u32 = 3;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ObservabilitySummaryResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_secs: Option<i64>,
+    #[serde(default)]
+    pub token_summary: Vec<TokenSummaryEntry>,
+    #[serde(default)]
+    pub recent_token_executions: Vec<RecentTokenExecution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_latency: Option<LatencyPercentiles>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_throughput: Option<ThroughputSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LatencyPercentiles {
+    pub p50_ms: Option<f64>,
+    pub p99_ms: Option<f64>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThroughputSummary {
+    pub mean_tokens_per_sec: Option<f64>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TokenSummaryEntry {
+    pub backend: String,
+    pub count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens_mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens_mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_total_mean: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecentTokenExecution {
+    pub id: String,
+    pub ts: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_id: Option<String>,
+    pub backend: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_total_tokens: Option<u64>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -64,6 +126,10 @@ pub enum DaemonClientMessage {
     Hello {
         client_name: String,
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_version: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_version: Option<u32>,
     },
     StartTurn {
         turn_id: String,
@@ -95,6 +161,9 @@ pub enum DaemonClientMessage {
     GetMemoryContextSnapshot {
         cwd: PathBuf,
         scope_mode: DesktopMemoryScopeMode,
+    },
+    Ping {
+        seq: u64,
     },
 }
 
@@ -196,9 +265,12 @@ pub struct DesktopMemoryContextSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum DaemonServerMessage {
     HelloAccepted {
         protocol_version: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        negotiated_version: Option<u32>,
     },
     ProtocolError {
         message: String,
@@ -246,10 +318,13 @@ pub enum DaemonServerMessage {
         details: String,
     },
     ObservabilitySummary {
-        summary: serde_json::Value,
+        summary: ObservabilitySummaryResponse,
     },
     MemoryContextSnapshot {
         snapshot: DesktopMemoryContextSnapshot,
+    },
+    Pong {
+        seq: u64,
     },
 }
 

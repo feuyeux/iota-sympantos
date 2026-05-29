@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::runtime_event::TokenUsageEvent;
@@ -394,6 +395,109 @@ impl MeanAccumulator {
             return None;
         }
         Some(self.stddev()? / mean)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Performance Metrics
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatencyPercentiles {
+    pub p50_ms: Option<f64>,
+    pub p99_ms: Option<f64>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThroughputSummary {
+    pub mean_tokens_per_sec: Option<f64>,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ObservabilityMetrics {
+    write_latencies_ms: Arc<Mutex<Vec<f64>>>,
+    stream_throughput_tokens_per_sec: Arc<Mutex<Vec<f64>>>,
+}
+
+impl ObservabilityMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_write_latency(&self, latency_ms: f64) {
+        if let Ok(mut data) = self.write_latencies_ms.lock() {
+            data.push(latency_ms);
+        }
+    }
+
+    pub fn record_stream_throughput(&self, tokens_per_sec: f64) {
+        if let Ok(mut data) = self.stream_throughput_tokens_per_sec.lock() {
+            data.push(tokens_per_sec);
+        }
+    }
+
+    pub fn write_latency_percentiles(&self) -> LatencyPercentiles {
+        let data = self
+            .write_latencies_ms
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        compute_percentiles(&data)
+    }
+
+    pub fn stream_throughput_summary(&self) -> ThroughputSummary {
+        let data = self
+            .stream_throughput_tokens_per_sec
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let count = data.len();
+        let mean = if count > 0 {
+            Some(data.iter().sum::<f64>() / count as f64)
+        } else {
+            None
+        };
+        ThroughputSummary {
+            mean_tokens_per_sec: mean,
+            count,
+        }
+    }
+}
+
+impl ObservabilityStore {
+    pub fn record_token_usage_with_metrics(
+        &self,
+        metrics: &ObservabilityMetrics,
+        execution_id: Option<&str>,
+        session_id: Option<&str>,
+        backend: &str,
+        usage: &TokenUsageEvent,
+    ) -> Result<String> {
+        let start = Instant::now();
+        let result = self.record_token_usage(execution_id, session_id, backend, usage);
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+        metrics.record_write_latency(latency_ms);
+        result
+    }
+}
+
+fn compute_percentiles(data: &[f64]) -> LatencyPercentiles {
+    let count = data.len();
+    if count == 0 {
+        return LatencyPercentiles {
+            p50_ms: None,
+            p99_ms: None,
+            count: 0,
+        };
+    }
+    let mut sorted = data.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p50_idx = (count as f64 * 0.50).ceil() as usize - 1;
+    let p99_idx = (count as f64 * 0.99).ceil() as usize - 1;
+    LatencyPercentiles {
+        p50_ms: Some(sorted[p50_idx.min(count - 1)]),
+        p99_ms: Some(sorted[p99_idx.min(count - 1)]),
+        count,
     }
 }
 

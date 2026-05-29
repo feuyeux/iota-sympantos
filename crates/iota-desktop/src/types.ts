@@ -35,8 +35,10 @@ export type DesktopTurn = {
   error?: string;
 };
 
+export type DaemonConnectionState = "connected" | "reconnecting" | "disconnected";
+
 export type DaemonServerMessage =
-  | { type: "hello_accepted"; protocol_version: number }
+  | { type: "hello_accepted"; protocol_version: number; negotiated_version?: number }
   | { type: "protocol_error"; message: string }
   | { type: "turn_started"; turn_id: string }
   | { type: "text_chunk"; turn_id: string; chunk: string }
@@ -49,7 +51,8 @@ export type DaemonServerMessage =
   | { type: "config_snapshot"; config: DesktopConfigSnapshot }
   | { type: "backend_check_result"; backend: string; ok: boolean; details: string }
   | { type: "observability_summary"; summary: any }
-  | { type: "memory_context_snapshot"; snapshot: DesktopMemoryContextSnapshot };
+  | { type: "memory_context_snapshot"; snapshot: DesktopMemoryContextSnapshot }
+  | { type: "pong"; seq: number };
 
 export type DaemonClientError = {
   turn_id?: string;

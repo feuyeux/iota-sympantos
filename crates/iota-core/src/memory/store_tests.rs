@@ -309,6 +309,7 @@ fn recall_buckets_respects_confidence_threshold() {
     assert!(!buckets_low.identity.is_empty());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_memory(
     store: &MemoryStore,
     memory_type: MemoryType,

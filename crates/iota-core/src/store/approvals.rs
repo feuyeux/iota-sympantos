@@ -275,15 +275,16 @@ pub fn classify_operation(
             if let Some(cwd_path) = cwd {
                 let clean_cwd = clean_lexical_path(cwd_path);
                 // If the cleaned absolute path doesn't start with clean_cwd, it's outside
-                if absolute_path.is_absolute() && !absolute_path.starts_with(&clean_cwd) {
-                    if !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace) {
-                        dimensions.push(ApprovalDimension::FileOutsideWorkspace);
-                    }
+                if absolute_path.is_absolute()
+                    && !absolute_path.starts_with(&clean_cwd)
+                    && !dimensions.contains(&ApprovalDimension::FileOutsideWorkspace)
+                {
+                    dimensions.push(ApprovalDimension::FileOutsideWorkspace);
                 }
             }
         }
 
-        // Fallback legacy blacklists for commands/general fields
+        // Defense-in-depth: path traversal check for non-path fields
         let has_already_checked_path = is_path_field && cwd.is_some();
         if !has_already_checked_path
             && (value_lower.contains("../")

@@ -190,14 +190,14 @@ fn push_event(
     event_tx: Option<&mpsc::Sender<RuntimeEvent>>,
     event: RuntimeEvent,
 ) {
-    if let Some(tx) = event_tx {
-        if let Err(e) = tx.try_send(event.clone()) {
-            tracing::error!(
-                error = %e,
-                event = ?event,
-                "Failed to send RuntimeEvent to TUI; event may have been dropped"
-            );
-        }
+    if let Some(tx) = event_tx
+        && let Err(e) = tx.try_send(event.clone())
+    {
+        tracing::error!(
+            error = %e,
+            event = ?event,
+            "Failed to send RuntimeEvent to TUI; event may have been dropped"
+        );
     }
     events.push(event);
 }

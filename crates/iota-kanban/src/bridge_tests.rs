@@ -109,13 +109,13 @@ fn specify_respects_timeout() {
         let path = tmp.join("slow-hermes.cmd");
         std::fs::write(
                 &path,
-                "@echo off\r\npowershell -NoProfile -WindowStyle Hidden -Command Start-Sleep -Seconds 2\r\n",
+                "@echo off\r\npowershell -NoProfile -WindowStyle Hidden -Command Start-Sleep -Seconds 10\r\n",
             )
             .unwrap();
         path
     } else {
         let path = tmp.join("slow-hermes.sh");
-        std::fs::write(&path, "#!/bin/sh\nsleep 2\n").unwrap();
+        std::fs::write(&path, "#!/bin/sh\nsleep 10\n").unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -131,9 +131,16 @@ fn specify_respects_timeout() {
     let started = std::time::Instant::now();
     let result = bridge.specify(task_id, &store);
 
-    assert!(result.is_err());
+    let err = match result {
+        Ok(_) => panic!("slow hermes command should time out"),
+        Err(err) => err,
+    };
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(1),
+        format!("{err:#}").contains("timed out"),
+        "expected timeout error, got {err:#}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
         "timeout should stop the command promptly"
     );
     let _ = std::fs::remove_dir_all(&tmp);

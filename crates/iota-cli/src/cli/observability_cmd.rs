@@ -1,5 +1,8 @@
 use anyhow::{Context, Result, bail};
 
+use iota_core::daemon::{
+    DaemonClientMessage, DaemonServerMessage, ObservabilitySummaryResponse, daemon_addr,
+};
 use iota_core::store::observability::{ObservabilityStore, StoredTokenUsage, TokenUsageSummary};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -95,6 +98,18 @@ async fn run_trace_command_inner(trace_id: &str) -> Result<()> {
 
 pub(super) async fn run_observability_command(args: &[String]) -> Result<()> {
     let command = parse_observability_args(args)?;
+
+    match &command {
+        ObservabilityCommand::TokensRecent { json, .. }
+        | ObservabilityCommand::TokensSummary { json, .. } => {
+            if let Ok(summary) = try_daemon_observability_summary().await {
+                return print_daemon_summary(&summary, &command, *json);
+            }
+        }
+        _ => {}
+    }
+
+    // Offline fallback: direct store access when daemon is unavailable
     let store = ObservabilityStore::open(&ObservabilityStore::default_path()?)?;
     match command {
         ObservabilityCommand::LoggingRecent { limit } => print_token_recent(&store, limit, false),
@@ -136,6 +151,116 @@ pub(super) async fn run_observability_command(args: &[String]) -> Result<()> {
         ObservabilityCommand::Logs { execution_id } => run_logs_command_inner(&execution_id).await,
         ObservabilityCommand::Trace { trace_id } => run_trace_command_inner(&trace_id).await,
     }
+}
+
+async fn try_daemon_observability_summary() -> Result<ObservabilitySummaryResponse> {
+    let addr = daemon_addr();
+    let mut stream = tokio::net::TcpStream::connect(&addr).await?;
+
+    let hello = DaemonClientMessage::Hello {
+        client_name: "iota-cli".to_string(),
+        protocol_version: iota_core::daemon::DESKTOP_PROTOCOL_VERSION,
+        min_version: Some(iota_core::daemon::PROTOCOL_VERSION_MIN),
+        max_version: Some(iota_core::daemon::PROTOCOL_VERSION_MAX),
+    };
+    let mut line = serde_json::to_vec(&hello)?;
+    line.push(b'\n');
+    tokio::io::AsyncWriteExt::write_all(&mut stream, &line).await?;
+    tokio::io::AsyncWriteExt::flush(&mut stream).await?;
+
+    let mut reader = tokio::io::BufReader::new(&mut stream);
+    let mut resp_line = String::new();
+    tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut resp_line).await?;
+    let hello_resp: DaemonServerMessage = serde_json::from_str(resp_line.trim())?;
+    if !matches!(hello_resp, DaemonServerMessage::HelloAccepted { .. }) {
+        bail!("daemon handshake failed");
+    }
+
+    let get_msg = DaemonClientMessage::GetObservabilitySummary { cwd: None };
+    let mut line = serde_json::to_vec(&get_msg)?;
+    line.push(b'\n');
+    tokio::io::AsyncWriteExt::write_all(&mut stream, &line).await?;
+    tokio::io::AsyncWriteExt::flush(&mut stream).await?;
+
+    let mut reader = tokio::io::BufReader::new(&mut stream);
+    let mut resp_line = String::new();
+    tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut resp_line).await?;
+    let msg: DaemonServerMessage = serde_json::from_str(resp_line.trim())?;
+    match msg {
+        DaemonServerMessage::ObservabilitySummary { summary } => Ok(summary),
+        _ => bail!("unexpected daemon response"),
+    }
+}
+
+fn print_daemon_summary(
+    summary: &ObservabilitySummaryResponse,
+    command: &ObservabilityCommand,
+    json: bool,
+) -> Result<()> {
+    match command {
+        ObservabilityCommand::TokensSummary { .. } => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&summary.token_summary)?);
+            } else {
+                println!(
+                    "backend\tcount\tinput_tokens_mean\toutput_tokens_mean\tnormalized_total_mean"
+                );
+                for entry in &summary.token_summary {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        entry.backend,
+                        entry.count,
+                        entry
+                            .input_tokens_mean
+                            .map(|v| format!("{:.1}", v))
+                            .unwrap_or_else(|| "-".to_string()),
+                        entry
+                            .output_tokens_mean
+                            .map(|v| format!("{:.1}", v))
+                            .unwrap_or_else(|| "-".to_string()),
+                        entry
+                            .normalized_total_mean
+                            .map(|v| format!("{:.1}", v))
+                            .unwrap_or_else(|| "-".to_string()),
+                    );
+                }
+            }
+        }
+        ObservabilityCommand::TokensRecent { .. } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&summary.recent_token_executions)?
+                );
+            } else {
+                println!(
+                    "id\tbackend\tmodel\tinput_tokens\toutput_tokens\tnormalized_total_tokens"
+                );
+                for entry in &summary.recent_token_executions {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}\t{}",
+                        entry.execution_id.as_deref().unwrap_or(&entry.id),
+                        entry.backend,
+                        entry.model.as_deref().unwrap_or("-"),
+                        entry
+                            .input_tokens
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        entry
+                            .output_tokens
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        entry
+                            .normalized_total_tokens
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn parse_observability_args(args: &[String]) -> Result<ObservabilityCommand> {

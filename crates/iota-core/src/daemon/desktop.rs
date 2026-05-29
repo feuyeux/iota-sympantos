@@ -11,10 +11,10 @@ use crate::acp::{AcpBackend, permission::ApprovalRequest};
 use crate::config::{RecallThresholdsConfig, backend_readiness, read_config, save_config};
 use crate::daemon::pool::EnginePool;
 use crate::daemon::proto::{
-    DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot,
-    DesktopContextEngineSnapshot, DesktopMemoryBuckets, DesktopMemoryContextSnapshot,
-    DesktopMemoryRecord, DesktopMemoryScopeMode, DesktopMemorySummary, DesktopSnapshotError,
-    apply_desktop_model_update,
+    DaemonClientMessage, DaemonServerMessage, DesktopConfigSnapshot, DesktopContextEngineSnapshot,
+    DesktopMemoryBuckets, DesktopMemoryContextSnapshot, DesktopMemoryRecord,
+    DesktopMemoryScopeMode, DesktopMemorySummary, DesktopSnapshotError, PROTOCOL_VERSION_MAX,
+    PROTOCOL_VERSION_MIN, apply_desktop_model_update,
 };
 use crate::memory::{MemoryRecord, MemoryStore, RecallBuckets};
 use crate::store::observability::ObservabilityStore;
@@ -103,6 +103,33 @@ impl TurnRegistry {
     }
 }
 
+pub(crate) fn negotiate_version(msg: &DaemonClientMessage) -> Result<u32, String> {
+    match msg {
+        DaemonClientMessage::Hello {
+            protocol_version,
+            min_version,
+            max_version,
+            ..
+        } => {
+            let client_min = min_version.unwrap_or(*protocol_version);
+            let client_max = max_version.unwrap_or(*protocol_version);
+
+            let server_min = PROTOCOL_VERSION_MIN;
+            let server_max = PROTOCOL_VERSION_MAX;
+
+            let negotiated = client_max.min(server_max);
+            if negotiated < server_min || negotiated < client_min {
+                return Err(format!(
+                    "Protocol version mismatch: client [{},{}] vs server [{},{}]",
+                    client_min, client_max, server_min, server_max
+                ));
+            }
+            Ok(negotiated)
+        }
+        _ => Err("Expected Hello message".to_string()),
+    }
+}
+
 pub(crate) async fn handle_desktop_connection<R>(
     first_message: DaemonClientMessage,
     reader: BufReader<R>,
@@ -127,13 +154,7 @@ where
         .await?;
         return Ok(());
     }
-    if matches!(
-        first_message,
-        DaemonClientMessage::Hello {
-            protocol_version: DESKTOP_PROTOCOL_VERSION,
-            ..
-        }
-    ) {
+    if negotiate_version(&first_message).is_ok() {
         handshake_ok = true;
     }
     handle_message(
@@ -167,13 +188,7 @@ where
             break;
         }
         if matches!(message, DaemonClientMessage::Hello { .. }) {
-            handshake_ok = matches!(
-                message,
-                DaemonClientMessage::Hello {
-                    protocol_version: DESKTOP_PROTOCOL_VERSION,
-                    ..
-                }
-            );
+            handshake_ok = negotiate_version(&message).is_ok();
         }
         handle_message(
             message,
@@ -199,30 +214,25 @@ async fn handle_message(
     connection_turns: Arc<Mutex<Vec<String>>>,
 ) -> Result<()> {
     match message {
-        DaemonClientMessage::Hello {
-            protocol_version, ..
-        } => {
-            if protocol_version != DESKTOP_PROTOCOL_VERSION {
-                send_message(
-                    &writer,
-                    &DaemonServerMessage::ProtocolError {
-                        message: format!(
-                            "unsupported desktop daemon protocol version {}; expected {}",
-                            protocol_version, DESKTOP_PROTOCOL_VERSION
-                        ),
-                    },
-                )
-                .await?;
-            } else {
+        DaemonClientMessage::Hello { .. } => match negotiate_version(&message) {
+            Ok(negotiated) => {
                 send_message(
                     &writer,
                     &DaemonServerMessage::HelloAccepted {
-                        protocol_version: DESKTOP_PROTOCOL_VERSION,
+                        protocol_version: negotiated,
+                        negotiated_version: Some(negotiated),
                     },
                 )
                 .await?;
             }
-        }
+            Err(err_msg) => {
+                send_message(
+                    &writer,
+                    &DaemonServerMessage::ProtocolError { message: err_msg },
+                )
+                .await?;
+            }
+        },
         DaemonClientMessage::StartTurn {
             turn_id,
             cwd,
@@ -337,6 +347,9 @@ async fn handle_message(
                 &DaemonServerMessage::MemoryContextSnapshot { snapshot },
             )
             .await?;
+        }
+        DaemonClientMessage::Ping { seq } => {
+            send_message(&writer, &DaemonServerMessage::Pong { seq }).await?;
         }
     }
     Ok(())
@@ -565,27 +578,61 @@ async fn send_message(
     Ok(())
 }
 
-fn observability_summary(cwd: Option<PathBuf>) -> Result<serde_json::Value> {
+fn observability_summary(
+    cwd: Option<PathBuf>,
+) -> Result<crate::daemon::proto::ObservabilitySummaryResponse> {
+    use crate::daemon::proto::{
+        ObservabilitySummaryResponse, RecentTokenExecution, TokenSummaryEntry,
+    };
+
     let store = ObservabilityStore::default_path().and_then(|path| ObservabilityStore::open(&path));
     match store {
         Ok(store) => {
             let since_ts = crate::utils::now_ts() - 7 * 24 * 60 * 60;
-            let token_summary = store.token_summary_since(since_ts)?;
-            let recent_token_executions = store.recent_token_executions(10)?;
-            Ok(serde_json::json!({
-                "cwd": cwd,
-                "window_secs": 7 * 24 * 60 * 60,
-                "token_summary": token_summary,
-                "recent_token_executions": recent_token_executions,
-            }))
+            let summaries = store.token_summary_since(since_ts)?;
+            let recent = store.recent_token_executions(10)?;
+            let token_summary = summaries
+                .into_iter()
+                .map(|s| TokenSummaryEntry {
+                    backend: s.backend,
+                    count: s.count,
+                    input_tokens_mean: s.input_tokens_mean,
+                    output_tokens_mean: s.output_tokens_mean,
+                    normalized_total_mean: s.normalized_total_mean,
+                })
+                .collect();
+            let recent_token_executions = recent
+                .into_iter()
+                .map(|r| RecentTokenExecution {
+                    id: r.id,
+                    ts: r.ts,
+                    execution_id: r.execution_id,
+                    backend: r.backend,
+                    model: r.model,
+                    input_tokens: r.input_tokens,
+                    output_tokens: r.output_tokens,
+                    normalized_total_tokens: r.normalized_total_tokens,
+                })
+                .collect();
+            Ok(ObservabilitySummaryResponse {
+                cwd,
+                window_secs: Some(7 * 24 * 60 * 60),
+                token_summary,
+                recent_token_executions,
+                write_latency: None,
+                stream_throughput: None,
+                error: None,
+            })
         }
-        Err(err) => Ok(serde_json::json!({
-            "cwd": cwd,
-            "window_secs": 7 * 24 * 60 * 60,
-            "token_summary": [],
-            "recent_token_executions": [],
-            "error": err.to_string(),
-        })),
+        Err(err) => Ok(ObservabilitySummaryResponse {
+            cwd,
+            window_secs: Some(7 * 24 * 60 * 60),
+            token_summary: Vec::new(),
+            recent_token_executions: Vec::new(),
+            write_latency: None,
+            stream_throughput: None,
+            error: Some(err.to_string()),
+        }),
     }
 }
 

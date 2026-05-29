@@ -204,3 +204,7 @@ async fn wait_id(
         return Ok(value.get("result").cloned().unwrap_or(Value::Null));
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

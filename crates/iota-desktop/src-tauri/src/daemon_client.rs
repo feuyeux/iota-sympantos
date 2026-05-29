@@ -1,18 +1,87 @@
 use anyhow::{Context, Result, anyhow};
 use iota_core::daemon::{
-    DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, daemon_addr,
+    DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, PROTOCOL_VERSION_MAX,
+    PROTOCOL_VERSION_MIN, daemon_addr,
 };
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
+use std::time::Duration;
 use tauri::Emitter;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+struct ReconnectConfig {
+    initial_delay_ms: u64,
+    max_delay_ms: u64,
+    jitter_percent: u8,
+    heartbeat_interval_secs: u64,
+    heartbeat_max_misses: u8,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            initial_delay_ms: 1000,
+            max_delay_ms: 30000,
+            jitter_percent: 20,
+            heartbeat_interval_secs: 30,
+            heartbeat_max_misses: 3,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Connection state
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionState {
+    Connected,
+    Reconnecting,
+    Disconnected,
+}
+
+struct DaemonConnection {
+    ping_seq: AtomicU64,
+    missed_pongs: u8,
+    state: ConnectionState,
+    negotiated_version: u32,
+}
+
+impl DaemonConnection {
+    fn new() -> Self {
+        Self {
+            ping_seq: AtomicU64::new(0),
+            missed_pongs: 0,
+            state: ConnectionState::Disconnected,
+            negotiated_version: DESKTOP_PROTOCOL_VERSION,
+        }
+    }
+}
+
+static PERSISTENT_CONNECTION: OnceLock<Mutex<DaemonConnection>> = OnceLock::new();
+
+fn persistent_connection() -> &'static Mutex<DaemonConnection> {
+    PERSISTENT_CONNECTION.get_or_init(|| Mutex::new(DaemonConnection::new()))
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 pub fn hello_message() -> DaemonClientMessage {
     DaemonClientMessage::Hello {
         client_name: "iota-desktop".to_string(),
         protocol_version: DESKTOP_PROTOCOL_VERSION,
+        min_version: Some(PROTOCOL_VERSION_MIN),
+        max_version: Some(PROTOCOL_VERSION_MAX),
     }
 }
 
@@ -74,6 +143,198 @@ pub async fn start_turn(
     Ok(())
 }
 
+pub async fn send_one(message: DaemonClientMessage) -> Result<Vec<DaemonServerMessage>> {
+    let mut stream = connect_or_start().await?;
+    write_message(&mut stream, &message).await?;
+
+    let mut reader = BufReader::new(stream);
+    let mut messages = Vec::new();
+    let mut line = String::new();
+    while reader.read_line(&mut line).await? > 0 {
+        messages.push(serde_json::from_str(line.trim())?);
+        if matches!(
+            messages.last(),
+            Some(DaemonServerMessage::ConfigSnapshot { .. })
+                | Some(DaemonServerMessage::BackendCheckResult { .. })
+                | Some(DaemonServerMessage::ObservabilitySummary { .. })
+                | Some(DaemonServerMessage::ApprovalResponded { .. })
+                | Some(DaemonServerMessage::TurnCancelled { .. })
+                | Some(DaemonServerMessage::ProtocolError { .. })
+                | Some(DaemonServerMessage::MemoryContextSnapshot { .. })
+                | Some(DaemonServerMessage::Pong { .. })
+        ) {
+            break;
+        }
+        line.clear();
+    }
+    Ok(messages)
+}
+
+// ---------------------------------------------------------------------------
+// Reconnection with exponential backoff
+// ---------------------------------------------------------------------------
+
+pub async fn reconnect_with_backoff(app: Option<&tauri::AppHandle>) -> Result<TcpStream> {
+    let conn = persistent_connection();
+    let mut guard = conn.lock().await;
+    guard.state = ConnectionState::Reconnecting;
+    guard.missed_pongs = 0;
+    if let Some(app) = app {
+        let _ = app.emit("daemon-connection-state", &ConnectionState::Reconnecting);
+    }
+    drop(guard);
+
+    let config = ReconnectConfig::default();
+    let mut delay_ms = config.initial_delay_ms;
+
+    loop {
+        let jitter_range = delay_ms as f64 * (config.jitter_percent as f64 / 100.0);
+        let jitter = (pseudo_random_factor() * 2.0 - 1.0) * jitter_range;
+        let actual_delay = ((delay_ms as f64) + jitter).max(100.0) as u64;
+
+        tokio::time::sleep(Duration::from_millis(actual_delay)).await;
+
+        let addr = desktop_daemon_addr();
+        match connect_and_handshake(&addr).await {
+            Ok(stream) => {
+                let mut guard = conn.lock().await;
+                guard.state = ConnectionState::Connected;
+                guard.missed_pongs = 0;
+                if let Some(app) = app {
+                    let _ = app.emit("daemon-connection-state", &ConnectionState::Connected);
+                }
+                tokio::spawn(async {
+                    drain_pending_queue().await;
+                });
+                return Ok(stream);
+            }
+            Err(_) => {
+                delay_ms = (delay_ms * 2).min(config.max_delay_ms);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
+
+pub async fn start_heartbeat_loop(app: tauri::AppHandle) {
+    let config = ReconnectConfig::default();
+    let interval = Duration::from_secs(config.heartbeat_interval_secs);
+    let max_misses = config.heartbeat_max_misses;
+
+    loop {
+        tokio::time::sleep(interval).await;
+
+        let conn = persistent_connection();
+        let guard = conn.lock().await;
+
+        if guard.state != ConnectionState::Connected {
+            continue;
+        }
+
+        if guard.negotiated_version < 3 {
+            continue;
+        }
+
+        let seq = guard.ping_seq.fetch_add(1, Ordering::Relaxed);
+        drop(guard);
+
+        let ping_result = send_ping(seq).await;
+        let mut guard = conn.lock().await;
+        match ping_result {
+            Ok(true) => {
+                guard.missed_pongs = 0;
+            }
+            _ => {
+                guard.missed_pongs += 1;
+                if guard.missed_pongs >= max_misses {
+                    guard.state = ConnectionState::Disconnected;
+                    let _ = app.emit("daemon-connection-state", &ConnectionState::Disconnected);
+                    drop(guard);
+                    let _ = reconnect_with_backoff(Some(&app)).await;
+                }
+            }
+        }
+    }
+}
+
+async fn send_ping(seq: u64) -> Result<bool> {
+    let addr = desktop_daemon_addr();
+    let stream = connect_and_handshake(&addr).await;
+    match stream {
+        Ok(mut stream) => {
+            write_message(&mut stream, &DaemonClientMessage::Ping { seq }).await?;
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            let read_result =
+                tokio::time::timeout(Duration::from_secs(10), reader.read_line(&mut line)).await;
+            match read_result {
+                Ok(Ok(n)) if n > 0 => {
+                    if let Ok(DaemonServerMessage::Pong { seq: pong_seq }) =
+                        serde_json::from_str(line.trim())
+                    {
+                        Ok(pong_seq == seq)
+                    } else {
+                        Ok(false)
+                    }
+                }
+                _ => Ok(false),
+            }
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Operation queue (pending operations during reconnection)
+// ---------------------------------------------------------------------------
+
+struct PendingOperation {
+    message: DaemonClientMessage,
+    reply: tokio::sync::oneshot::Sender<Result<Vec<DaemonServerMessage>>>,
+}
+
+static PENDING_QUEUE: OnceLock<Mutex<Vec<PendingOperation>>> = OnceLock::new();
+
+fn pending_queue() -> &'static Mutex<Vec<PendingOperation>> {
+    PENDING_QUEUE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub async fn send_or_queue(message: DaemonClientMessage) -> Result<Vec<DaemonServerMessage>> {
+    let conn = persistent_connection();
+    let guard = conn.lock().await;
+    if guard.state == ConnectionState::Reconnecting {
+        drop(guard);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        pending_queue()
+            .lock()
+            .await
+            .push(PendingOperation { message, reply: tx });
+        rx.await
+            .map_err(|_| anyhow!("pending operation cancelled"))?
+    } else {
+        drop(guard);
+        send_one(message).await
+    }
+}
+
+pub async fn drain_pending_queue() {
+    let ops: Vec<PendingOperation> = {
+        let mut queue = pending_queue().lock().await;
+        std::mem::take(&mut *queue)
+    };
+    for op in ops {
+        let result = send_one(op.message).await;
+        let _ = op.reply.send(result);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
 #[derive(Clone, serde::Serialize)]
 struct DaemonClientErrorPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -95,32 +356,6 @@ fn is_terminal_turn_message(message: &DaemonServerMessage) -> bool {
             | DaemonServerMessage::TurnFailed { .. }
             | DaemonServerMessage::TurnCancelled { accepted: true, .. }
     )
-}
-
-pub async fn send_one(message: DaemonClientMessage) -> Result<Vec<DaemonServerMessage>> {
-    let mut stream = connect_or_start().await?;
-    write_message(&mut stream, &message).await?;
-
-    let mut reader = BufReader::new(stream);
-    let mut messages = Vec::new();
-    let mut line = String::new();
-    while reader.read_line(&mut line).await? > 0 {
-        messages.push(serde_json::from_str(line.trim())?);
-        if matches!(
-            messages.last(),
-            Some(DaemonServerMessage::ConfigSnapshot { .. })
-                | Some(DaemonServerMessage::BackendCheckResult { .. })
-                | Some(DaemonServerMessage::ObservabilitySummary { .. })
-                | Some(DaemonServerMessage::ApprovalResponded { .. })
-                | Some(DaemonServerMessage::TurnCancelled { .. })
-                | Some(DaemonServerMessage::ProtocolError { .. })
-                | Some(DaemonServerMessage::MemoryContextSnapshot { .. })
-        ) {
-            break;
-        }
-        line.clear();
-    }
-    Ok(messages)
 }
 
 async fn connect_or_start() -> Result<TcpStream> {
@@ -205,7 +440,15 @@ async fn connect_and_handshake(addr: &str) -> Result<TcpStream> {
         .await
         .with_context(|| format!("Failed to connect to daemon at {}", addr))?;
     write_message(&mut stream, &hello_message()).await?;
-    wait_for_hello(&mut stream).await?;
+    let negotiated = wait_for_hello(&mut stream).await?;
+
+    let conn = persistent_connection();
+    let mut guard = conn.lock().await;
+    guard.state = ConnectionState::Connected;
+    guard.negotiated_version = negotiated;
+    guard.missed_pongs = 0;
+    drop(guard);
+
     Ok(stream)
 }
 
@@ -256,7 +499,7 @@ async fn write_message(stream: &mut TcpStream, message: &DaemonClientMessage) ->
     Ok(())
 }
 
-async fn wait_for_hello(stream: &mut TcpStream) -> Result<()> {
+async fn wait_for_hello(stream: &mut TcpStream) -> Result<u32> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     let bytes_read = reader.read_line(&mut line).await?;
@@ -269,8 +512,19 @@ async fn wait_for_hello(stream: &mut TcpStream) -> Result<()> {
         "Connected daemon returned an invalid desktop handshake response; restart the iota daemon"
     })?;
     match message {
-        DaemonServerMessage::HelloAccepted { .. } => Ok(()),
+        DaemonServerMessage::HelloAccepted {
+            protocol_version,
+            negotiated_version,
+        } => Ok(negotiated_version.unwrap_or(protocol_version)),
         DaemonServerMessage::ProtocolError { message } => anyhow::bail!(message),
         other => anyhow::bail!("daemon returned unexpected handshake message: {:?}", other),
     }
+}
+
+fn pseudo_random_factor() -> f64 {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    (t as f64) / (u32::MAX as f64)
 }

@@ -10,7 +10,10 @@
       "Skill(keybindings-help)",
       "Skill(keybindings-help:*)",
       "Skill(superpowers:using-superpowers)",
-      "Skill(superpowers:using-superpowers:*)"
+      "Skill(superpowers:using-superpowers:*)",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__close_page"
     ]
   }
 }

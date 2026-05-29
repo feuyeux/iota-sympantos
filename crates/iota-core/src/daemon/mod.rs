@@ -21,7 +21,9 @@ pub use proto::{
     DesktopContextBudgetsSnapshot, DesktopContextEngineSnapshot, DesktopContextSection,
     DesktopMemoryBuckets, DesktopMemoryContextSnapshot, DesktopMemoryRecord,
     DesktopMemoryScopeMode, DesktopMemorySummary, DesktopModelConfig,
-    DesktopRuntimeContextSnapshot, DesktopSnapshotError, apply_desktop_model_update,
+    DesktopRuntimeContextSnapshot, DesktopSnapshotError, LatencyPercentiles,
+    ObservabilitySummaryResponse, PROTOCOL_VERSION_MAX, PROTOCOL_VERSION_MIN, RecentTokenExecution,
+    ThroughputSummary, TokenSummaryEntry, apply_desktop_model_update,
 };
 
 use anyhow::{Context, Result};
@@ -210,6 +212,7 @@ async fn handle_connection(
                 | "check_backend"
                 | "get_observability_summary"
                 | "get_memory_context_snapshot"
+                | "ping"
         )
     ) {
         let first_message: DaemonClientMessage =

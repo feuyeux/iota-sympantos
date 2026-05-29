@@ -148,7 +148,7 @@ fn find_task_log_path(task_id: TaskId, shadows_dir: &std::path::Path, stream: &s
 
 #[tauri::command]
 async fn get_config() -> Result<iota_core::daemon::DesktopConfigSnapshot, String> {
-    let messages = daemon_client::send_one(iota_core::daemon::DaemonClientMessage::GetConfig)
+    let messages = daemon_client::send_or_queue(iota_core::daemon::DaemonClientMessage::GetConfig)
         .await
         .map_err(|e| e.to_string())?;
     messages
@@ -166,7 +166,7 @@ async fn save_backend_model(
     model: iota_core::daemon::DesktopModelConfig,
 ) -> Result<iota_core::daemon::DesktopConfigSnapshot, String> {
     let messages =
-        daemon_client::send_one(iota_core::daemon::DaemonClientMessage::SaveBackendModel {
+        daemon_client::send_or_queue(iota_core::daemon::DaemonClientMessage::SaveBackendModel {
             backend: backend_str,
             model,
         })
@@ -200,7 +200,7 @@ async fn submit_prompt(
 #[tauri::command]
 async fn handle_approval(req_id: String, approved: bool) -> Result<(), String> {
     let messages =
-        daemon_client::send_one(iota_core::daemon::DaemonClientMessage::RespondApproval {
+        daemon_client::send_or_queue(iota_core::daemon::DaemonClientMessage::RespondApproval {
             approval_id: req_id,
             approved,
         })
@@ -222,11 +222,12 @@ async fn handle_approval(req_id: String, approved: bool) -> Result<(), String> {
 
 #[tauri::command]
 async fn cancel_turn(turn_id: String, window: tauri::Window) -> Result<(), String> {
-    let messages = daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CancelTurn {
-        turn_id: turn_id.clone(),
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let messages =
+        daemon_client::send_or_queue(iota_core::daemon::DaemonClientMessage::CancelTurn {
+            turn_id: turn_id.clone(),
+        })
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut accepted = None;
     for message in messages {
@@ -249,7 +250,7 @@ async fn cancel_turn(turn_id: String, window: tauri::Window) -> Result<(), Strin
 async fn check_backend(
     backend_str: String,
 ) -> Result<iota_core::daemon::DaemonServerMessage, String> {
-    daemon_client::send_one(iota_core::daemon::DaemonClientMessage::CheckBackend {
+    daemon_client::send_or_queue(iota_core::daemon::DaemonClientMessage::CheckBackend {
         backend: backend_str,
     })
     .await
@@ -268,7 +269,7 @@ async fn check_backend(
 async fn get_observability_summary() -> Result<serde_json::Value, String> {
     let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
     let cwd = std::env::current_dir().unwrap_or(home);
-    daemon_client::send_one(
+    daemon_client::send_or_queue(
         iota_core::daemon::DaemonClientMessage::GetObservabilitySummary { cwd: Some(cwd) },
     )
     .await
@@ -278,6 +279,8 @@ async fn get_observability_summary() -> Result<serde_json::Value, String> {
         iota_core::daemon::DaemonServerMessage::ObservabilitySummary { summary } => Some(summary),
         _ => None,
     })
+    .map(|summary| serde_json::to_value(summary).map_err(|e| e.to_string()))
+    .transpose()?
     .ok_or_else(|| "daemon did not return observability summary".to_string())
 }
 
@@ -292,7 +295,7 @@ async fn get_memory_context_snapshot(
     let home = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
     let cwd = std::env::current_dir().unwrap_or(home);
 
-    let messages = daemon_client::send_one(
+    let messages = daemon_client::send_or_queue(
         iota_core::daemon::DaemonClientMessage::GetMemoryContextSnapshot { cwd, scope_mode },
     )
     .await
@@ -439,7 +442,7 @@ async fn get_kanban_task_detail(
         .into_iter()
         .filter(|event| event_mentions_task(event, task_id))
         .collect();
-    events.sort_by(|left, right| right.id.cmp(&left.id));
+    events.sort_by_key(|event| std::cmp::Reverse(event.id));
     events.truncate(30);
     let logs = task_logs(task_id, &state.shadows_dir)?;
     Ok(DesktopKanbanTaskDetail {
@@ -497,7 +500,8 @@ fn sync_pipeline_artifacts(base_path: Option<String>) -> Result<SyncPipelineResu
     let base = match base_path {
         Some(p) => std::path::PathBuf::from(p),
         None => {
-            let home = dirs::home_dir().ok_or_else(|| "could not find home directory".to_string())?;
+            let home =
+                dirs::home_dir().ok_or_else(|| "could not find home directory".to_string())?;
             home.join("coding").join("iota-sympantos")
         }
     };
@@ -520,19 +524,19 @@ fn sync_pipeline_artifacts(base_path: Option<String>) -> Result<SyncPipelineResu
 
     // --- x_optimizer stage ---
     let xo_dir = base.join("script_agent_output").join("x_optimizer_output");
-    if xo_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&xo_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    match store.store_from_file(&path) {
-                        Ok(n) => result.x_optimizer += n,
-                        Err(e) => result.errors.push(format!(
-                            "x_optimizer/{}: {}",
-                            path.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
-                            e
-                        )),
-                    }
+    if xo_dir.is_dir()
+        && let Ok(entries) = std::fs::read_dir(&xo_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                match store.store_from_file(&path) {
+                    Ok(n) => result.x_optimizer += n,
+                    Err(e) => result.errors.push(format!(
+                        "x_optimizer/{}: {}",
+                        path.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
+                        e
+                    )),
                 }
             }
         }
@@ -627,6 +631,7 @@ pub fn run() {
             let store = app.state::<AppState>().kanban_store.clone();
             let dispatcher = app.state::<AppState>().kanban_dispatcher.clone();
             let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(daemon_client::start_heartbeat_loop(app_handle.clone()));
             tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
                 loop {

@@ -216,7 +216,6 @@ fn run_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output> 
         }
         if started.elapsed() >= timeout {
             kill_child_tree(&mut child);
-            let _ = child.wait_with_output();
             bail!("hermes command timed out after {}ms", timeout.as_millis());
         }
         std::thread::sleep(Duration::from_millis(10));

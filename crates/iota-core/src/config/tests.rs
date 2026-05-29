@@ -47,7 +47,6 @@ fn all_backends_can_disable_mcp_servers() {
                 mcp_session_new: Some(false),
                 ..BackendContextConfig::default()
             }),
-            ..ContextEngineBackendConfig::default()
         }),
         ..NimiaConfig::default()
     };

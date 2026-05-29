@@ -207,12 +207,8 @@ fn kanban_ready_task_manually_promotes_triage_through_todo() {
         })
         .unwrap();
 
-    let result = dispatch_tool(
-        &ctx,
-        "iota_kanban_ready_task",
-        &json!({"task_id": task_id}),
-    )
-    .unwrap();
+    let result =
+        dispatch_tool(&ctx, "iota_kanban_ready_task", &json!({"task_id": task_id})).unwrap();
 
     assert_eq!(result["status"], "ready");
     assert_eq!(store.get_task(task_id).unwrap().status, Status::Ready);

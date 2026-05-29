@@ -145,3 +145,48 @@ fn summary_deduplicates_multiple_token_events_for_one_execution() {
     assert_eq!(summaries[0].count, 1);
     assert_eq!(summaries[0].normalized_total_mean, Some(100.0));
 }
+
+#[test]
+fn observability_metrics_records_latency_and_throughput() {
+    use super::observability::ObservabilityMetrics;
+
+    let metrics = ObservabilityMetrics::new();
+
+    metrics.record_write_latency(1.5);
+    metrics.record_write_latency(2.0);
+    metrics.record_write_latency(3.0);
+    metrics.record_write_latency(0.5);
+
+    let percentiles = metrics.write_latency_percentiles();
+    assert_eq!(percentiles.count, 4);
+    assert!(percentiles.p50_ms.is_some());
+    assert!(percentiles.p99_ms.is_some());
+
+    metrics.record_stream_throughput(100.0);
+    metrics.record_stream_throughput(200.0);
+
+    let throughput = metrics.stream_throughput_summary();
+    assert_eq!(throughput.count, 2);
+    assert_eq!(throughput.mean_tokens_per_sec, Some(150.0));
+}
+
+#[test]
+fn record_token_usage_with_metrics_records_latency() {
+    use super::observability::ObservabilityMetrics;
+
+    let store = ObservabilityStore::open(Path::new(":memory:")).unwrap();
+    let metrics = ObservabilityMetrics::new();
+    let usage = token_usage_from_value(&json!({
+        "model": "test-model",
+        "usage": { "input_tokens": 10, "output_tokens": 5 }
+    }))
+    .unwrap();
+
+    store
+        .record_token_usage_with_metrics(&metrics, Some("exec-m"), Some("sess"), "codex", &usage)
+        .unwrap();
+
+    let percentiles = metrics.write_latency_percentiles();
+    assert_eq!(percentiles.count, 1);
+    assert!(percentiles.p50_ms.unwrap() >= 0.0);
+}

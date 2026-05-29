@@ -203,6 +203,50 @@ async fn memory_context_snapshot_reports_injection_off_as_disabled() {
     assert!(!snapshot.context_engine.enabled);
 }
 
+#[test]
+fn negotiate_version_v2_client_without_range() {
+    let hello = DaemonClientMessage::Hello {
+        client_name: "old-client".to_string(),
+        protocol_version: 2,
+        min_version: None,
+        max_version: None,
+    };
+    let result = negotiate_version(&hello).unwrap();
+    assert_eq!(result, 2);
+}
+
+#[test]
+fn negotiate_version_v3_client_with_range() {
+    let hello = DaemonClientMessage::Hello {
+        client_name: "new-client".to_string(),
+        protocol_version: 2,
+        min_version: Some(2),
+        max_version: Some(3),
+    };
+    let result = negotiate_version(&hello).unwrap();
+    assert_eq!(result, 3);
+}
+
+#[test]
+fn negotiate_version_incompatible_client() {
+    let hello = DaemonClientMessage::Hello {
+        client_name: "future-client".to_string(),
+        protocol_version: 99,
+        min_version: Some(99),
+        max_version: Some(100),
+    };
+    let result = negotiate_version(&hello);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("mismatch"));
+}
+
+#[test]
+fn negotiate_version_rejects_non_hello() {
+    let msg = DaemonClientMessage::GetConfig;
+    let result = negotiate_version(&msg);
+    assert!(result.is_err());
+}
+
 fn desktop_record(id: &str, memory_type: &str, facet: Option<&str>) -> DesktopMemoryRecord {
     DesktopMemoryRecord {
         id: id.to_string(),

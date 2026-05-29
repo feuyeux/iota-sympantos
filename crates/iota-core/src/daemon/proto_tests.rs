@@ -127,6 +127,64 @@ fn desktop_model_update_clears_blank_text_fields() {
     assert_eq!(model.api_key.as_deref(), Some("secret-value"));
 }
 
+#[test]
+fn version_negotiation_v2_client_without_range_succeeds() {
+    let hello = DaemonClientMessage::Hello {
+        client_name: "old-client".to_string(),
+        protocol_version: DESKTOP_PROTOCOL_VERSION,
+        min_version: None,
+        max_version: None,
+    };
+    let json = serde_json::to_string(&hello).unwrap();
+    assert!(!json.contains("min_version"));
+    assert!(!json.contains("max_version"));
+
+    let decoded: DaemonClientMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, hello);
+}
+
+#[test]
+fn version_negotiation_v3_client_with_range_succeeds() {
+    let hello = DaemonClientMessage::Hello {
+        client_name: "new-client".to_string(),
+        protocol_version: DESKTOP_PROTOCOL_VERSION,
+        min_version: Some(2),
+        max_version: Some(3),
+    };
+    let json = serde_json::to_string(&hello).unwrap();
+    assert!(json.contains("\"min_version\":2"));
+    assert!(json.contains("\"max_version\":3"));
+
+    let decoded: DaemonClientMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, hello);
+}
+
+#[test]
+fn hello_accepted_with_negotiated_version() {
+    let msg = DaemonServerMessage::HelloAccepted {
+        protocol_version: 3,
+        negotiated_version: Some(3),
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains("\"negotiated_version\":3"));
+}
+
+#[test]
+fn hello_accepted_without_negotiated_version_backward_compat() {
+    let json = r#"{"type":"hello_accepted","protocol_version":2}"#;
+    let decoded: DaemonServerMessage = serde_json::from_str(json).unwrap();
+    match decoded {
+        DaemonServerMessage::HelloAccepted {
+            protocol_version,
+            negotiated_version,
+        } => {
+            assert_eq!(protocol_version, 2);
+            assert_eq!(negotiated_version, None);
+        }
+        _ => panic!("expected HelloAccepted"),
+    }
+}
+
 fn config_with_gemini_model() -> crate::config::NimiaConfig {
     let model = crate::config::ModelConfig {
         provider: Some("google".to_string()),

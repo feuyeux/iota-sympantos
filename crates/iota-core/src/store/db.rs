@@ -10,12 +10,11 @@ use std::path::Path;
 /// - 5000ms busy timeout to prevent transient write locks.
 /// - Foreign Key constraint enforcement.
 pub fn open_db(path: &Path) -> Result<Connection> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create parent directory: {}", parent.display())
-            })?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create parent directory: {}", parent.display()))?;
     }
 
     let conn = Connection::open(path)

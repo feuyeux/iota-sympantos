@@ -602,7 +602,7 @@ npm run dev:clean
 | :--- | :--- | :--- |
 | 当前手册 | `docs/iota book.md`、`architecture.md`、`code-call-chains.md`、`command.md`、`observability.md`、`debugging.md`、`docker.md` | 读当前系统行为和操作方式 |
 | 模块上下文 | 各 crate/module 的 `SKILL.md` | 给 AI coding 工具快速理解局部模块 |
-| 历史记录 | `docs/superpowers/`、`gefsi/` | 保留设计计划、实施记录和实验结果 |
+| 历史记录 | `gefsi/` | 保留实验结果 |
 
 为什么保留历史记录？因为很多实现决策来自实验和计划，例如 daemon-first desktop、token usage 归一化、Kanban shadow DB。它们不是最新命令手册，但能解释当前代码为什么长成这样。
 
