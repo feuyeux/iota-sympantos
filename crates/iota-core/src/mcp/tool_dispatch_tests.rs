@@ -86,7 +86,7 @@ fn is_known_tool_recognizes_iota_tools() {
 }
 
 #[test]
-fn kanban_create_task_defaults_to_ready() {
+fn kanban_create_task_defaults_to_triage() {
     let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
     let workspace = std::path::Path::new("/tmp/iota-project");
     let skills = crate::skill::SkillRegistry::load(workspace, &[]);
@@ -103,6 +103,38 @@ fn kanban_create_task_defaults_to_ready() {
         "iota_kanban_create_task",
         &json!({
             "title": "Research Agent - TinyFish trending to Supabase",
+            "assignee": "research-agent",
+            "tags": ["research", "supabase"]
+        }),
+    )
+    .unwrap();
+
+    let task_id = result["task_id"].as_u64().unwrap();
+    let task = store.get_task(task_id).unwrap();
+    assert_eq!(task.status, Status::Triage);
+    assert_eq!(task.assignee.as_deref(), Some("research-agent"));
+    assert_eq!(result["auto_dispatch"], false);
+}
+
+#[test]
+fn kanban_create_task_allows_explicit_ready_for_dispatch() {
+    let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
+    let workspace = std::path::Path::new("/tmp/iota-project");
+    let skills = crate::skill::SkillRegistry::load(workspace, &[]);
+    let ctx = ToolContext {
+        memory: None,
+        ledger: None,
+        kanban: Some(&store),
+        skills: &skills,
+        workspace,
+    };
+
+    let result = dispatch_tool(
+        &ctx,
+        "iota_kanban_create_task",
+        &json!({
+            "title": "Research Agent - TinyFish trending to Supabase",
+            "status": "ready",
             "assignee": "research-agent",
             "tags": ["research", "supabase"]
         }),

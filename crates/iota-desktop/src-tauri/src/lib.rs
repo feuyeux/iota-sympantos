@@ -352,6 +352,51 @@ async fn transition_task(
 }
 
 #[tauri::command]
+async fn update_kanban_task(
+    task_id: TaskId,
+    patch: TaskPatch,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let store = state.kanban_store.lock().await;
+        store
+            .update_task(task_id, patch)
+            .map_err(|e| e.to_string())?;
+    }
+    let _ = tick_kanban_dispatcher(state.inner()).await;
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DesktopKanbanLinkRequest {
+    from_id: TaskId,
+    to_id: TaskId,
+    kind: LinkKind,
+}
+
+#[tauri::command]
+async fn create_kanban_link(
+    req: DesktopKanbanLinkRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let store = state.kanban_store.lock().await;
+    store
+        .create_link(req.from_id, req.to_id, req.kind)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn remove_kanban_link(
+    req: DesktopKanbanLinkRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let store = state.kanban_store.lock().await;
+    store
+        .remove_link(req.from_id, req.to_id, req.kind)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn dispatch_kanban(
     window: tauri::Window,
     state: tauri::State<'_, AppState>,
@@ -556,6 +601,9 @@ pub fn run() {
             list_tasks,
             create_task,
             transition_task,
+            update_kanban_task,
+            create_kanban_link,
+            remove_kanban_link,
             dispatch_kanban,
             get_kanban_task_detail,
             list_comments,

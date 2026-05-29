@@ -107,6 +107,17 @@ export type KanbanTask = {
   claim_ttl_secs: number;
 };
 
+export type KanbanTaskPatch = {
+  title?: string;
+  body?: string | null;
+  status?: KanbanStatus;
+  assignee?: string | null;
+  priority?: number;
+  tags?: string[];
+  workspace_kind?: string | null;
+  workspace_path?: string | null;
+};
+
 export type KanbanComment = {
   id: number;
   task_id: number;
@@ -132,6 +143,12 @@ export type KanbanRun = {
 export type KanbanLinkKind = "parent" | "blocks" | "related";
 
 export type KanbanLink = {
+  from_id: number;
+  to_id: number;
+  kind: KanbanLinkKind;
+};
+
+export type KanbanCreateLinkRequest = {
   from_id: number;
   to_id: number;
   kind: KanbanLinkKind;

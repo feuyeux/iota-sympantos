@@ -326,7 +326,7 @@ impl McpTool for KanbanCreateTaskTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a task in iota's Kanban DB. Defaults status to ready so the desktop dispatcher can execute it automatically. Use assignee for Hermes profile names."
+        "Create a task in iota's Kanban DB. Defaults status to triage for raw ideas. Use status=ready or iota_kanban_ready_task only when the task should be dispatcher-claimable."
     }
 
     fn input_schema(&self) -> Value {
@@ -336,7 +336,7 @@ impl McpTool for KanbanCreateTaskTool {
             "properties": {
                 "title": {"type": "string"},
                 "body": {"type": "string"},
-                "status": {"type": "string", "enum": ["triage", "todo", "ready", "running", "blocked", "done", "archived"], "description": "Default ready"},
+                "status": {"type": "string", "enum": ["triage", "todo", "ready", "running", "blocked", "done", "archived"], "description": "Default triage"},
                 "assignee": {"type": "string", "description": "Hermes profile name, e.g. research-agent"},
                 "priority": {"type": "integer"},
                 "tags": {"type": "array", "items": {"type": "string"}},
@@ -580,7 +580,7 @@ fn dispatch_kanban_create_task(ctx: &ToolContext, args: &Value) -> Result<Value,
         .and_then(Value::as_str)
         .map(parse_kanban_status)
         .transpose()?
-        .unwrap_or(Status::Ready);
+        .unwrap_or(Status::Triage);
     let tags = args
         .get("tags")
         .and_then(Value::as_array)

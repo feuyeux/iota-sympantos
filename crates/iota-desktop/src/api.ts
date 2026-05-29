@@ -6,10 +6,13 @@ import type {
   DaemonServerMessage,
   DesktopConfigSnapshot,
   KanbanBoard,
+  KanbanCreateLinkRequest,
   KanbanDispatchReport,
+  KanbanStatus,
   KanbanTask,
   KanbanTaskDetail,
   KanbanTaskFilter,
+  KanbanTaskPatch,
   DesktopModelConfig,
   ObservabilitySummary,
   DesktopMemoryContextSnapshot,
@@ -71,12 +74,46 @@ export function listKanbanTasks(filter: KanbanTaskFilter = {}): Promise<KanbanTa
   return invoke<KanbanTask[]>("list_tasks", { filter });
 }
 
+export function createKanbanTask(req: {
+  board_id: number;
+  title: string;
+  body?: string | null;
+  status?: KanbanStatus;
+  assignee?: string | null;
+  priority?: number | null;
+  tags: string[];
+  workspace_kind?: string | null;
+  workspace_path?: string | null;
+}): Promise<number> {
+  return invoke<number>("create_task", { req });
+}
+
+export function updateKanbanTask(taskId: number, patch: KanbanTaskPatch): Promise<void> {
+  return invoke<void>("update_kanban_task", { taskId, patch });
+}
+
+export function transitionKanbanTask(taskId: number, toStatus: KanbanStatus): Promise<void> {
+  return invoke<void>("transition_task", { taskId, toStatus });
+}
+
 export function dispatchKanban(): Promise<KanbanDispatchReport> {
   return invoke<KanbanDispatchReport>("dispatch_kanban");
 }
 
 export function getKanbanTaskDetail(taskId: number): Promise<KanbanTaskDetail> {
   return invoke<KanbanTaskDetail>("get_kanban_task_detail", { taskId });
+}
+
+export function addKanbanComment(taskId: number, author: string, body: string): Promise<number> {
+  return invoke<number>("add_comment", { taskId, author, body });
+}
+
+export function createKanbanLink(req: KanbanCreateLinkRequest): Promise<void> {
+  return invoke<void>("create_kanban_link", { req });
+}
+
+export function removeKanbanLink(req: KanbanCreateLinkRequest): Promise<void> {
+  return invoke<void>("remove_kanban_link", { req });
 }
 
 export function listenKanbanUpdates(callback: (report: KanbanDispatchReport) => void): Promise<() => void> {
