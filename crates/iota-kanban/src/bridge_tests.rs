@@ -186,3 +186,94 @@ fn read_new_shadow_tasks_excludes_existing_materialized_tasks() {
     assert_eq!(tasks[0].assignee.as_deref(), Some("alice"));
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// ── ensure_bridge_available tests ────────────────────────────────────────────
+
+#[test]
+fn ensure_bridge_available_returns_err_when_hermes_missing() {
+    let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let bridge = AdvancedBridge::new(PathBuf::from("/nonexistent/hermes-xyz"), tmp.clone());
+
+    let result = crate::bridge::ensure_bridge_available(&bridge);
+    assert!(result.is_err(), "expected Err when hermes binary is missing");
+
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("/nonexistent/hermes-xyz"),
+        "error message must contain the hermes_bin path, got: {msg}"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn specify_error_message_contains_hermes_binary_not_found() {
+    let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let store = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = store.create_board("b", "B").unwrap();
+    let task_id = store
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Test task".into(),
+            body: None,
+            status: None,
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+
+    let missing_bin = PathBuf::from("/nonexistent/hermes-not-found-xyz");
+    let bridge = AdvancedBridge::new(missing_bin.clone(), tmp.clone());
+
+    let err = bridge.specify(task_id, &store).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("hermes binary not found"),
+        "specify error must contain 'hermes binary not found', got: {msg}"
+    );
+    assert!(
+        msg.contains(missing_bin.to_str().unwrap()),
+        "specify error must contain the binary path, got: {msg}"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn decompose_error_message_contains_hermes_binary_not_found() {
+    let tmp = std::env::temp_dir().join(format!("iota-bridge-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let store = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_id = store.create_board("b", "B").unwrap();
+    let task_id = store
+        .create_task(CreateTaskRequest {
+            board_id,
+            title: "Big task".into(),
+            body: None,
+            status: None,
+            assignee: None,
+            priority: None,
+            tags: vec![],
+            workspace_kind: None,
+            workspace_path: None,
+        })
+        .unwrap();
+
+    let missing_bin = PathBuf::from("/nonexistent/hermes-not-found-xyz");
+    let bridge = AdvancedBridge::new(missing_bin.clone(), tmp.clone());
+
+    let err = bridge.decompose(task_id, &store).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("hermes binary not found"),
+        "decompose error must contain 'hermes binary not found', got: {msg}"
+    );
+    assert!(
+        msg.contains(missing_bin.to_str().unwrap()),
+        "decompose error must contain the binary path, got: {msg}"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

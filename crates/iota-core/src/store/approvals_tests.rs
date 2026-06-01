@@ -3,6 +3,17 @@ use rusqlite::OptionalExtension;
 use serde_json::json;
 
 #[test]
+fn default_path_ends_with_store_sqlite() {
+    let path = ApprovalStore::default_path().unwrap();
+    assert_eq!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("store.sqlite"),
+        "ApprovalStore::default_path() should point to store.sqlite, got: {}",
+        path.display()
+    );
+}
+
+#[test]
 fn records_request_with_execution_id_before_decision() {
     let store = ApprovalStore::open(Path::new(":memory:")).unwrap();
     let request_id = store

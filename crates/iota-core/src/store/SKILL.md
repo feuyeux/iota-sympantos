@@ -42,6 +42,16 @@ SQLite-backed persistence for execution cache, tool approvals, session ledger, a
 - `ObservabilityStore` — token usage events with execution-level best-record deduplication
 - `StoreConfig` — configurable retention via `~/.i6/nimia.yaml` (`store:` section)
 
+## Database Paths
+
+| Store(s) | SQLite File |
+| :--------| :-----------|
+| `CacheStore` + `ObservabilityStore` | `~/.i6/context/events.sqlite` |
+| `MemoryStore` | `~/.i6/context/memory.sqlite` |
+| `SessionLedger` + `ApprovalStore` | `~/.i6/context/store.sqlite` (merged) |
+
+`SessionLedger` and `ApprovalStore` share `store.sqlite` via `StorePaths::store_db()`. The former `sessions.sqlite` and `approvals.sqlite` files are no longer used; users upgrading must delete them manually.
+
 ## Configuration (StoreConfig)
 
 Data retention values are read from `~/.i6/nimia.yaml` once per store `open()`:

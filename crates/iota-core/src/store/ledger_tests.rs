@@ -86,6 +86,17 @@ fn latest_session_for_cwd_returns_some_for_known_cwd() {
 }
 
 #[test]
+fn default_path_ends_with_store_sqlite() {
+    let path = SessionLedger::default_path().unwrap();
+    assert_eq!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("store.sqlite"),
+        "SessionLedger::default_path() should point to store.sqlite, got: {}",
+        path.display()
+    );
+}
+
+#[test]
 fn record_backend_session_is_idempotent() {
     let ledger = SessionLedger::open(Path::new(":memory:")).unwrap();
     let cwd = Path::new("/tmp/proj");

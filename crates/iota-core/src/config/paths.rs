@@ -24,11 +24,7 @@ impl StorePaths {
         self.root.join("memory.sqlite")
     }
 
-    pub fn sessions_db(&self) -> PathBuf {
-        self.root.join("sessions.sqlite")
-    }
-
-    pub fn approvals_db(&self) -> PathBuf {
-        self.root.join("approvals.sqlite")
+    pub fn store_db(&self) -> PathBuf {
+        self.root.join("store.sqlite")
     }
 }

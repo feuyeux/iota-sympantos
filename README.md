@@ -75,6 +75,8 @@ pip install 'hermes-agent[acp]'
 | [`docs/code-call-chains.md`](docs/code-call-chains.md) | 代码调用链路 |
 | [`docs/observability.md`](docs/observability.md) | logs / trace / metrics |
 | [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
+| [`docs/docker.md`](docs/docker.md) | Docker 与外部观测栈 |
+| [`docs/desktop-mvp-acceptance.md`](docs/desktop-mvp-acceptance.md) | Desktop MVP 验收标准 |
 
 ---
 

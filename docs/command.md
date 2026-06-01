@@ -33,6 +33,7 @@
 | `--show-native` | 打印原生 ACP wire 内容；不能与 `--daemon` 同用 |
 | `--log-events` | 输出 normalized `RuntimeEvent` |
 | `--timing` | 输出 route、spawn、init、prompt、total timing JSON |
+| `--trace-timing` | `--timing` 的别名，输出 route、spawn、init、prompt、total timing JSON |
 | `--timeout-ms <ms>` | 覆盖 ACP prompt timeout |
 
 ## 后端别名

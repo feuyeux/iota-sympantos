@@ -41,7 +41,7 @@ impl ApprovalStore {
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        Ok(crate::config::paths::StorePaths::resolve()?.approvals_db())
+        Ok(crate::config::paths::StorePaths::resolve()?.store_db())
     }
 
     pub fn open_default() -> Result<Self> {

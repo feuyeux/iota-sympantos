@@ -14,11 +14,13 @@ pub struct AdvancedBridge {
     materializer: ShadowMaterializer,
 }
 
+#[derive(Debug)]
 pub struct SpecifyResult {
     pub task_id: TaskId,
     pub spec_body: String,
 }
 
+#[derive(Debug)]
 pub struct DecomposeResult {
     pub parent_id: TaskId,
     pub child_ids: Vec<TaskId>,
@@ -52,6 +54,9 @@ impl AdvancedBridge {
 
     /// Expand a vague task description into a structured spec via LLM
     pub fn specify(&self, task_id: TaskId, store: &dyn KanbanStore) -> Result<SpecifyResult> {
+        if !self.hermes_bin.exists() {
+            anyhow::bail!("hermes binary not found: {}", self.hermes_bin.display());
+        }
         let task = store.get_task(task_id)?;
         let board = self.get_board_for_task(&task, store)?;
         let shadow = self.materializer.materialize(&task, &board, store)?;
@@ -102,6 +107,9 @@ impl AdvancedBridge {
 
     /// Decompose a large task into subtasks via LLM
     pub fn decompose(&self, task_id: TaskId, store: &dyn KanbanStore) -> Result<DecomposeResult> {
+        if !self.hermes_bin.exists() {
+            anyhow::bail!("hermes binary not found: {}", self.hermes_bin.display());
+        }
         let task = store.get_task(task_id)?;
         let board = self.get_board_for_task(&task, store)?;
         let shadow = self.materializer.materialize(&task, &board, store)?;
@@ -252,6 +260,26 @@ fn kill_child_tree(child: &mut std::process::Child) {
             .stderr(Stdio::null())
             .status();
         let _ = child.kill();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public helpers
+// ---------------------------------------------------------------------------
+
+/// Returns `Ok(())` if the bridge is available, or an `Err` with a human-readable
+/// message when the hermes binary is not found or not executable.
+///
+/// Use this before calling `specify` or `decompose` to surface a clear error
+/// to the user instead of a cryptic process spawn failure.
+pub fn ensure_bridge_available(bridge: &AdvancedBridge) -> Result<()> {
+    if bridge.is_available() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "hermes binary not found or not executable: {}",
+            bridge.hermes_bin.display()
+        )
     }
 }
 

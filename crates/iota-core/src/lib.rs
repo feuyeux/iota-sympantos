@@ -7,7 +7,6 @@ pub mod mcp;
 pub mod memory;
 pub mod runtime_event;
 pub mod skill;
-pub mod storage;
 pub mod store;
 pub mod telemetry;
 pub mod utils;

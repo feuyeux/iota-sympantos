@@ -1,5 +1,6 @@
 use iota_kanban::{
     AdvancedBridge, CreateTaskRequest, Dispatcher, KanbanStore, Status, TaskFilter, TaskPatch,
+    ensure_bridge_available,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -616,8 +617,8 @@ fn cmd_specify(
     let Some(bridge) = bridge else {
         return vec!["Advanced kanban bridge is not available.".to_string()];
     };
-    if !bridge.is_available() {
-        return vec!["Advanced kanban bridge is not available: hermes command failed.".to_string()];
+    if let Err(e) = ensure_bridge_available(bridge) {
+        return vec![e.to_string()];
     }
 
     match bridge.specify(id, store.as_ref()) {
@@ -642,8 +643,8 @@ fn cmd_decompose(
     let Some(bridge) = bridge else {
         return vec!["Advanced kanban bridge is not available.".to_string()];
     };
-    if !bridge.is_available() {
-        return vec!["Advanced kanban bridge is not available: hermes command failed.".to_string()];
+    if let Err(e) = ensure_bridge_available(bridge) {
+        return vec![e.to_string()];
     }
 
     match bridge.decompose(id, store.as_ref()) {

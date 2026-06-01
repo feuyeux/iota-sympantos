@@ -19,7 +19,6 @@ use crate::store::observability::ObservabilityStore;
 
 mod memory_ops;
 mod prompt;
-mod session_ledger;
 mod telemetry;
 
 #[cfg(test)]

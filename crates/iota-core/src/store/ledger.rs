@@ -32,7 +32,7 @@ impl SessionLedger {
     }
 
     pub fn default_path() -> Result<PathBuf> {
-        Ok(crate::config::paths::StorePaths::resolve()?.sessions_db())
+        Ok(crate::config::paths::StorePaths::resolve()?.store_db())
     }
 
     pub fn latest_session_for_cwd(&self, cwd: &Path) -> Result<Option<String>> {

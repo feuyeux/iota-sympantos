@@ -4,7 +4,7 @@ description: Use when working on IotaEngine orchestration, prompt turns, ACP cli
 triggers:
   - crates/iota-core/src/engine
   - IotaEngine
-  - ClientKey
+  - AcpClientKey
   - run_with_timing
   - session ledger
   - backend handoff
@@ -34,4 +34,4 @@ Core orchestration layer that manages ACP client pools, executes prompt turns, a
 ## Key Types
 
 - `IotaEngine` — main orchestrator holding ACP clients, stores, config
-- `ClientKey` — `(AcpBackend, PathBuf)` key for client reuse
+- `AcpClientKey` — `(AcpBackend, PathBuf)` key for ACP client pool reuse

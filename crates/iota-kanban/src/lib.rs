@@ -10,7 +10,7 @@ pub mod types;
 pub mod utils;
 pub mod worker;
 
-pub use bridge::AdvancedBridge;
+pub use bridge::{AdvancedBridge, ensure_bridge_available};
 pub use dispatcher::{Dispatcher, DispatcherConfig, TickReport};
 pub use event_sync::{
     default_pull_source, export_event_bundle, import_event_bundle, pull_event_bundle,

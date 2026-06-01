@@ -92,7 +92,7 @@ Stores and observability
 | `engine/` | 按 `(backend, cwd)` 复用 ACP client；处理 session ledger、handoff、memory recall/write、skill short-circuit、context capsule、ACP 调用、events 和 store 写回 |
 | `acp/` | 后端枚举、命令解析、子进程生命周期、`initialize/session/new/session/prompt`、stream reader、permission、wire parse |
 | `daemon/` | 默认 `127.0.0.1:47661` TCP daemon；legacy CLI request/response；desktop protocol v2；config、backend check、observability、memory/context snapshot |
-| `config/` | 唯一读取 `~/.i6/nimia.yaml`；生成 effective config、backend command/env、context options、MCP server 注入 |
+| `config/` | 唯一读取 `~/.i6/nimia.yaml`；生成 effective config、backend command/env、context options、MCP server 注入；包含 `effective.rs`（resolved config with defaults）、`helpers.rs`（path expansion, command normalization）、`paths.rs`（store path resolution） |
 | `context/` | 组装 `<iota-context>` capsule：session、memory tools、memory buckets、working memory、workspace、skills、handoff |
 | `memory/` | 六桶 memory taxonomy、FTS/LIKE、vector/hybrid search、embedding API 或 local trigram fallback |
 | `skill/` | workspace/config/home skill 加载；trigger 匹配；engine-run MCP skill；skill pull/cache；iota-fun 7 语言 MCP server |
@@ -198,8 +198,8 @@ Hermes 使用自己的默认 home，配置和 desktop 都不应覆盖 `HERMES_HO
 | `MemoryStore` | `~/.i6/context/memory.sqlite` | memory taxonomy、recall、search、embedding |
 | `CacheStore` | `~/.i6/context/events.sqlite` | execution lifecycle、status、fencing |
 | `ObservabilityStore` | `~/.i6/context/events.sqlite` | token usage events、summary、metrics |
-| `SessionLedger` | `~/.i6/context/sessions.sqlite` | sessions、backend sessions、turns、handoff |
-| `ApprovalStore` | `~/.i6/context/approvals.sqlite` | approval request/decision |
+| `SessionLedger` | `~/.i6/context/store.sqlite` | sessions、backend sessions、turns、handoff |
+| `ApprovalStore` | `~/.i6/context/store.sqlite` | approval request/decision |
 | `SqliteKanbanStore` | `~/.i6/kanban/iota.db` | board/task/comment/link/run/event sourcing |
 
 ## Kanban

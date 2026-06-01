@@ -49,6 +49,7 @@ iota-sympantos/
 │   │       │   ├── stream_reader.rs # 流式读取器
 │   │       │   ├── permission.rs  # 权限请求处理
 │   │       │   ├── wire.rs        # line read/parse、response id 匹配
+│   │       │   ├── util.rs        # Helpers: elapsed_ms, should_forward_backend_stderr
 │   │       │   └── types.rs       # 类型定义
 │   │       ├── config/            # nimia.yaml 配置解析
 │   │       │   ├── mod.rs         # 配置入口、store_config
@@ -57,7 +58,10 @@ iota-sympantos/
 │   │       │   ├── backend.rs     # BackendConfig、后端环境变量映射
 │   │       │   ├── model.rs       # ModelConfig
 │   │       │   ├── context.rs    # ContextEngineConfig 等
-│   │       │   └── adapters.rs    # BackendAdapter
+│   │       │   ├── adapters.rs    # BackendAdapter
+│   │       │   ├── effective.rs   # EffectiveConfig — resolved config with defaults
+│   │       │   ├── helpers.rs     # expand_home_path, normalize_command
+│   │       │   └── paths.rs       # StorePaths — ~/.i6/context store path resolution
 │   │       ├── daemon/            # 内部 daemon TCP server
 │   │       │   ├── mod.rs         # daemon 入口
 │   │       │   ├── pool.rs        # EnginePool（按 cwd 维度复用 IotaEngine）
@@ -67,7 +71,6 @@ iota-sympantos/
 │   │       │   ├── mod.rs        # IotaEngine、ACP client pool、context、memory、skill
 │   │       │   ├── prompt.rs      # prompt 处理
 │   │       │   ├── memory_ops.rs  # 记忆操作
-│   │       │   ├── session_ledger.rs # SessionLedger
 │   │       │   └── telemetry.rs   # 遥测
 │   │       ├── context/          # ContextFabric 实现
 │   │       │   └── mod.rs         # ContextEngine、WorkingMemoryBuffer、capsule 组装 + budget
@@ -211,6 +214,7 @@ iota kanban <cmd>           # kanban 命令（list/add/update/sync 等）
 iota check                  # 显示后端、配置信息
 iota observability <cmd>    # 可观测性查询
 iota __daemon               # 内部 daemon 入口
+iota __bench_cache          # 内部缓存 benchmark（3 轮 Claude Code 对话，输出 token 统计）
 ```
 
 ---
@@ -234,6 +238,7 @@ iota __daemon               # 内部 daemon 入口
 | Esc 中断运行中任务 | `tui/loop.rs` | ✅ |
 | Tab 队列（运行时缓存输入） | `tui/loop.rs` | ✅ |
 | 浮层枚举（None/Help/Pager/QuitConfirm） | `tui/loop.rs` | ✅ |
+| `/memory`（`/mem`）本地 memory recall / hybrid search | `tui/slash_command.rs` | ✅ |
 
 ### TUI 当前状态
 
@@ -370,6 +375,8 @@ fn my_test() { ... }
 - `store/approvals_tests.rs`
 - `store/ledger_tests.rs`
 - `store/observability_tests.rs`
+- `engine/tests.rs`
+- `mcp/client_tests.rs`
 - `runtime_event/tests.rs`
 - `utils/tests.rs`
 

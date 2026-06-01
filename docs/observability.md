@@ -53,13 +53,20 @@ ApprovalDecision
 | 字段 | 含义 |
 | :--- | :--- |
 | `input_tokens` / `output_tokens` | 输入和输出 token |
+| `cache_tokens` | `cache_read_input_tokens` 的别名字段 |
 | `cache_read_input_tokens` | 缓存命中的输入 token |
 | `cache_creation_input_tokens` | 缓存写入的输入 token |
 | `thinking_tokens` | reasoning / thoughts / thinking token |
 | `tool_use_prompt_tokens` | 工具结果回灌 token，provider 支持时填充 |
+| `total_tokens` | 中间计算字段：`provider_reported_total_tokens` 或 `input + output + thinking` 的和 |
 | `provider_reported_total_tokens` | provider 或 adapter 原样上报 total |
 | `normalized_total_tokens` | iota 归一化后的 total，字段不足时为 `None` |
 | `raw_payload` | 原始 usage JSON |
+
+`normalized_total_tokens` 的计算逻辑因 provider 而异：
+
+- **Anthropic**：`input + cache_read + cache_creation + output + thinking`
+- **OpenAI / Gemini / adapter**：优先使用 `provider_reported_total_tokens`；不可用时回退为 `input + output + thinking + tool_use_prompt`
 
 `ObservabilityStore` 使用 `~/.i6/context/events.sqlite`。同一 execution 中如果同时存在 streaming `usage_update` 和 final `usage`，查询层优先选择字段更完整的 final usage。字段缺失不按 0 计入 summary。
 

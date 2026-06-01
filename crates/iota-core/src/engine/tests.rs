@@ -211,6 +211,101 @@ fn test_engine() -> IotaEngine {
     IotaEngine::create_session(NimiaConfig::default(), false, 30_000, None)
 }
 
+// ── prepare_backend_handoff tests ────────────────────────────────────────────
+
+/// When the active backend switches, `prepare_backend_handoff` must call
+/// `SessionLedger::publish_handoff` with `from_backend = last_used_backend`
+/// and `to_backend = new backend`.
+///
+/// Requirements: 2.3
+#[test]
+fn prepare_backend_handoff_publishes_handoff_on_backend_switch() {
+    let ledger_path = unique_test_path("engine-handoff-switch");
+    let cwd = std::env::current_dir().unwrap();
+
+    let ledger = SessionLedger::open(&ledger_path).unwrap();
+
+    let mut engine = test_engine();
+    // Inject a real ledger so publish_handoff writes to SQLite.
+    engine.session_ledger_store = Some(ledger.clone());
+
+    // Seed the session row so the ledger FK constraints are satisfied.
+    ledger
+        .ensure_session(&engine.engine_session_id, &cwd, Some("codex"), None)
+        .unwrap();
+
+    // Simulate a previous turn on Codex.
+    engine.last_used_backend = Some(AcpBackend::Codex);
+
+    // Add working-memory content so the handoff summary is non-empty.
+    engine
+        .working_memory
+        .push_turn(AcpBackend::Codex, "write a hello world", "fn main() {}");
+
+    // Switch to ClaudeCode — this should trigger publish_handoff.
+    let result = engine.prepare_backend_handoff(AcpBackend::ClaudeCode, &cwd);
+
+    // The method must return a non-empty summary string.
+    assert!(
+        result.is_some(),
+        "expected a handoff summary when switching backends"
+    );
+
+    // Verify the handoff row was written to the ledger.
+    let history = ledger
+        .get_handoff_history(&engine.engine_session_id)
+        .unwrap();
+    assert_eq!(history.len(), 1, "exactly one handoff row should be written");
+
+    let (from_backend, to_backend, summary) = &history[0];
+    assert_eq!(from_backend, "codex", "from_backend must equal last_used_backend");
+    assert_eq!(to_backend, "claude-code", "to_backend must equal the new backend");
+    assert!(!summary.is_empty(), "handoff summary must not be empty");
+}
+
+/// When the requested backend is the same as `last_used_backend`,
+/// `prepare_backend_handoff` must NOT call `SessionLedger::publish_handoff`.
+///
+/// Requirements: 2.4
+#[test]
+fn prepare_backend_handoff_skips_handoff_when_backend_unchanged() {
+    let ledger_path = unique_test_path("engine-handoff-same");
+    let cwd = std::env::current_dir().unwrap();
+
+    let ledger = SessionLedger::open(&ledger_path).unwrap();
+
+    let mut engine = test_engine();
+    engine.session_ledger_store = Some(ledger.clone());
+
+    ledger
+        .ensure_session(&engine.engine_session_id, &cwd, Some("codex"), None)
+        .unwrap();
+
+    // Both last_used_backend and the requested backend are Codex.
+    engine.last_used_backend = Some(AcpBackend::Codex);
+    engine
+        .working_memory
+        .push_turn(AcpBackend::Codex, "write a hello world", "fn main() {}");
+
+    // Call with the same backend — no handoff should be published.
+    let result = engine.prepare_backend_handoff(AcpBackend::Codex, &cwd);
+
+    // The method must return None (no handoff needed).
+    assert!(
+        result.is_none(),
+        "expected no handoff summary when backend is unchanged"
+    );
+
+    // Verify no handoff row was written to the ledger.
+    let history = ledger
+        .get_handoff_history(&engine.engine_session_id)
+        .unwrap();
+    assert!(
+        history.is_empty(),
+        "no handoff row should be written when backend is unchanged"
+    );
+}
+
 #[test]
 fn recent_context_snapshot_starts_empty() {
     let engine = test_engine();

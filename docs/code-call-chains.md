@@ -156,6 +156,8 @@ initialize
   -> session/complete
 ```
 
+`session/request_permission` is optional and only occurs when the backend requests permission to invoke a tool. If no tool permission is needed during a turn, this step is skipped entirely.
+
 ## 链路 3：CLI 经 daemon
 
 Client:

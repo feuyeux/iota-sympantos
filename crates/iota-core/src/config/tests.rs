@@ -188,6 +188,5 @@ fn store_paths_join_expected_database_names() {
     let paths = paths::StorePaths::new(root.clone());
     assert_eq!(paths.events_db(), root.join("events.sqlite"));
     assert_eq!(paths.memory_db(), root.join("memory.sqlite"));
-    assert_eq!(paths.sessions_db(), root.join("sessions.sqlite"));
-    assert_eq!(paths.approvals_db(), root.join("approvals.sqlite"));
+    assert_eq!(paths.store_db(), root.join("store.sqlite"));
 }
