@@ -38,11 +38,11 @@ ACP usage -> RuntimeEvent::TokenUsage -> ObservabilityStore -> iota observabilit
 
 | Backend | ACP Adapter | 模型 | 当前 token 数据形态 |
 | :---------| :-------------| :------| :---------------------|
-| claude-code | `@agentclientprotocol/claude-agent-acp` | MiniMax-M2.7 | `usage`，含 input/output/cache read/cache write/total |
+| claude-code | `@agentclientprotocol/claude-agent-acp` | MiniMax-M3 | `usage`，含 input/output/cache read/cache write/total |
 | codex | `@zed-industries/codex-acp` | gpt-5.4-mini (medium) | `usage_update.used`，只有 adapter total |
 | gemini | `@google/gemini-cli --acp` | gemini-2.5-flash | `_meta.quota.token_count` + `_meta.quota.model_usage`，含 input/output/model |
-| hermes | `hermes acp` | MiniMax-M2.7 | `usage`，含 input/output/cache read/total |
-| opencode | `opencode-ai acp` | MiniMax-M2.7 | `usage`，含 input/output/thinking/total |
+| hermes | `hermes acp` | MiniMax-M3 | `usage`，含 input/output/cache read/total |
+| opencode | `opencode-ai acp` | MiniMax-M3 | `usage`，含 input/output/thinking/total |
 
 ### 2.2 协议
 

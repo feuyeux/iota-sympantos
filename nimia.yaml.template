@@ -67,7 +67,7 @@ opencode:
     bin: "1.14.40"
   model:
     provider: opencode
-    name: MiniMax-M2.7
+    name: MiniMax-M3
   tool_whitelist:
     - iota_memory_write
     - mcp__iota-context__iota_memory_write
@@ -83,7 +83,7 @@ hermes:
     bin: "0.12.0"
   model:
     provider: minimax-cn
-    name: MiniMax-M2.7
+    name: MiniMax-M3
     base_url: https://api.minimaxi.com/anthropic
     api_key: <api-key>
   tool_whitelist:

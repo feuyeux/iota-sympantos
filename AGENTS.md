@@ -170,7 +170,7 @@ initialize → session/new → session/prompt → 流式 session/update → sess
 ```yaml
 model:
   provider: minimax-cn
-  name: MiniMax-M2.7
+  name: MiniMax-M3
   base_url: https://api.minimaxi.com/anthropic
   api_key: <api-key>
 ```

@@ -81,11 +81,11 @@
 
 | backend | 状态 | model |
 |:---------|:------|:-------|
-| claude-code | configured | `MiniMax-M2.7` |
+| claude-code | configured | `MiniMax-M3` |
 | codex | configured | `gh/gpt-5.4` |
 | gemini | configured | `gemini-2.5-flash` |
-| hermes | configured | `MiniMax-M2.7` |
-| opencode | configured | `minimax-cn-coding-plan/MiniMax-M2.7` |
+| hermes | configured | `MiniMax-M3` |
+| opencode | configured | `minimax-cn-coding-plan/MiniMax-M3` |
 
 ### 2.2 路径约定
 
