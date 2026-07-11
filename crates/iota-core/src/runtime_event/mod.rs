@@ -823,5 +823,5 @@ fn tool_update_ok(update: &Value, result: &Value) -> bool {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "runtime_event_tests.rs"]
 mod tests;

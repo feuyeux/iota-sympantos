@@ -1,5 +1,5 @@
-use super::*;
 use crate::acp::AcpBackend;
+use crate::config::*;
 
 #[test]
 fn mcp_servers_default_to_enabled_for_all_backends() {

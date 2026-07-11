@@ -1,4 +1,4 @@
-use super::*;
+use crate::context::*;
 
 #[test]
 fn disabled_context_returns_prompt_unchanged() {

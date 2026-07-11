@@ -1,4 +1,4 @@
-use super::*;
+use crate::mcp::router::*;
 use serde_json::json;
 
 #[test]

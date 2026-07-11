@@ -1,5 +1,5 @@
-use super::*;
 use crate::config::{ContextEngineConfig, NimiaConfig};
+use crate::engine::*;
 use crate::memory::{MemoryFacet, MemoryRecord, MemoryScope, MemoryType};
 use crate::runtime_event::{RuntimeEvent, ToolResultEvent};
 use crate::store::cache::request_hash;
@@ -255,11 +255,21 @@ fn prepare_backend_handoff_publishes_handoff_on_backend_switch() {
     let history = ledger
         .get_handoff_history(&engine.engine_session_id)
         .unwrap();
-    assert_eq!(history.len(), 1, "exactly one handoff row should be written");
+    assert_eq!(
+        history.len(),
+        1,
+        "exactly one handoff row should be written"
+    );
 
     let (from_backend, to_backend, summary) = &history[0];
-    assert_eq!(from_backend, "codex", "from_backend must equal last_used_backend");
-    assert_eq!(to_backend, "claude-code", "to_backend must equal the new backend");
+    assert_eq!(
+        from_backend, "codex",
+        "from_backend must equal last_used_backend"
+    );
+    assert_eq!(
+        to_backend, "claude-code",
+        "to_backend must equal the new backend"
+    );
     assert!(!summary.is_empty(), "handoff summary must not be empty");
 }
 

@@ -1,4 +1,4 @@
-use super::*;
+use crate::cli::info_cmd::*;
 
 #[test]
 fn backend_info_includes_version_mapping() {

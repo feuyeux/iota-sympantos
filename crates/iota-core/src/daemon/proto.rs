@@ -366,8 +366,11 @@ impl DesktopConfigSnapshot {
         }
 
         Self {
-            config_path: crate::config::config_path()
-                .unwrap_or_else(|_| PathBuf::from("~/.i6/nimia.yaml")),
+            config_path: crate::config::config_path().unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .map(|home| home.join(".i6").join("nimia.yaml"))
+                    .unwrap_or_default()
+            }),
             backends,
         }
     }

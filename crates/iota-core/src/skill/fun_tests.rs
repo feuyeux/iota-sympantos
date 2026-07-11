@@ -1,4 +1,4 @@
-use super::*;
+use crate::skill::fun::*;
 
 #[cfg(unix)]
 #[test]

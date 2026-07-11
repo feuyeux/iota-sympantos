@@ -1,4 +1,4 @@
-use super::*;
+use crate::cli::kanban_cmd::*;
 use iota_kanban::{CreateTaskRequest, Status};
 
 fn fake_hermes_echo_spec(tmp: &Path) -> PathBuf {

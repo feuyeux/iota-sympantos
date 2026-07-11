@@ -1,4 +1,4 @@
-use super::*;
+use crate::tui::input::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn key(code: KeyCode) -> KeyEvent {

@@ -376,7 +376,9 @@ async fn connect_or_start() -> Result<TcpStream> {
         return Ok(stream);
     }
 
-    autostart_daemon(&fallback_addr).context("Failed to autostart daemon")?;
+    autostart_daemon(&fallback_addr)
+        .await
+        .context("Failed to autostart daemon")?;
     wait_for_daemon(&fallback_addr).await
 }
 
@@ -452,13 +454,20 @@ async fn connect_and_handshake(addr: &str) -> Result<TcpStream> {
     Ok(stream)
 }
 
-fn autostart_daemon(addr: &str) -> Result<()> {
+async fn autostart_daemon(addr: &str) -> Result<()> {
     let daemon_exe = locate_iota_cli().context("Failed to locate iota CLI for daemon autostart")?;
-    std::process::Command::new(daemon_exe)
+    let mut child = tokio::process::Command::new(daemon_exe)
         .arg("__daemon")
         .env("IOTA_DAEMON_ADDR", addr)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .context("Failed to spawn iota daemon")?;
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
     Ok(())
 }
 

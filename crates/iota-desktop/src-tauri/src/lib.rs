@@ -477,7 +477,6 @@ async fn add_comment(
         .map_err(|e| e.to_string())
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::collapsible_if)]
 pub fn run() {

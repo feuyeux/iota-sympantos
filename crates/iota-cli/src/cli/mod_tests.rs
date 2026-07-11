@@ -1,4 +1,4 @@
-use super::*;
+use crate::cli::*;
 
 #[test]
 fn parse_rounds_skips_daemon_flags() {

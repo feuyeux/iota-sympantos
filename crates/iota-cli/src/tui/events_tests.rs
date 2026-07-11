@@ -1,4 +1,4 @@
-use super::*;
+use crate::tui::events::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 

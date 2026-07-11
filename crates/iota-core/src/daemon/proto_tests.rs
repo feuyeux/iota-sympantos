@@ -1,4 +1,4 @@
-use super::*;
+use crate::daemon::proto::*;
 use crate::runtime_event::{OutputEvent, RuntimeEvent};
 
 #[test]

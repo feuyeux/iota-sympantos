@@ -1,4 +1,4 @@
-use super::*;
+use crate::utils::*;
 
 #[test]
 fn now_ts_is_positive() {

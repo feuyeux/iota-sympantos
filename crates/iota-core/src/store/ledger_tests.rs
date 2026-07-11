@@ -1,4 +1,4 @@
-use super::*;
+use crate::store::ledger::*;
 use std::path::Path;
 
 #[test]

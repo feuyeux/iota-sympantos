@@ -44,7 +44,7 @@ pub(super) async fn send_prompt_autostart_daemon(
     match daemon::send_prompt(daemon_addr, request).await {
         Ok(response) => Ok(response),
         Err(first_error) => {
-            start_daemon_silently()?;
+            start_daemon_silently().await?;
             wait_for_daemon(daemon_addr).await.with_context(|| {
                 format!(
                     "Failed to start daemon at {} after initial connection error: {}",
@@ -69,7 +69,7 @@ pub(super) async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result
     let response = match daemon::send_warm(&daemon_addr, &request).await {
         Ok(response) => response,
         Err(first_error) => {
-            start_daemon_silently()?;
+            start_daemon_silently().await?;
             wait_for_daemon(&daemon_addr).await.with_context(|| {
                 format!(
                     "Failed to start daemon at {} after initial warm error: {}",
@@ -186,26 +186,19 @@ pub(super) async fn run_warm_benchmark(config: NimiaConfig, rounds: usize) -> Re
     Ok(())
 }
 
-fn start_daemon_silently() -> Result<()> {
+async fn start_daemon_silently() -> Result<()> {
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;
-    let child = std::process::Command::new(exe)
+    let mut child = tokio::process::Command::new(exe)
         .arg("__daemon")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .context("Failed to start daemon process")?;
-    // On Unix the daemon detaches naturally once its parent (this call) returns.
-    // On Windows the Child handle must be explicitly dropped or waited to avoid
-    // leaking a kernel handle.  We spawn a background thread to wait on it so
-    // we don't block the caller.
-    #[cfg(target_os = "windows")]
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
+    tokio::spawn(async move {
+        let _ = child.wait().await;
     });
-    #[cfg(not(target_os = "windows"))]
-    drop(child);
     Ok(())
 }
 

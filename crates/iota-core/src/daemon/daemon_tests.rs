@@ -1,4 +1,4 @@
-use super::*;
+use crate::daemon::*;
 
 #[test]
 fn warm_count_only_increments_for_newly_started_backend() {

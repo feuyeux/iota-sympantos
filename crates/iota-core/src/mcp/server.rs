@@ -78,8 +78,7 @@ fn handle_request(
     request: &Value,
     memory: Option<&MemoryStore>,
     ledger: Option<&SessionLedger>,
-    #[cfg(feature = "kanban")]
-    kanban: Option<&SqliteKanbanStore>,
+    #[cfg(feature = "kanban")] kanban: Option<&SqliteKanbanStore>,
     skills: &SkillRegistry,
     workspace: &std::path::Path,
 ) -> Value {

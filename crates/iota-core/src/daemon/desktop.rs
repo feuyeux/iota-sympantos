@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
@@ -16,6 +16,7 @@ use crate::daemon::proto::{
     DesktopMemoryScopeMode, DesktopMemorySummary, DesktopSnapshotError, PROTOCOL_VERSION_MAX,
     PROTOCOL_VERSION_MIN, apply_desktop_model_update,
 };
+use crate::daemon::read_limited_line;
 use crate::memory::{MemoryRecord, MemoryStore, RecallBuckets};
 use crate::store::observability::ObservabilityStore;
 use std::path::Path;
@@ -173,7 +174,8 @@ where
     let mut reader = reader;
     let mut line = String::new();
 
-    while reader.read_line(&mut line).await? > 0 {
+    const MAX_DESKTOP_MESSAGE_BYTES: u64 = 10 * 1024 * 1024;
+    while read_limited_line(&mut reader, &mut line, MAX_DESKTOP_MESSAGE_BYTES).await? > 0 {
         let message: DaemonClientMessage =
             serde_json::from_str(line.trim()).context("Failed to decode desktop daemon message")?;
         if !handshake_ok {
@@ -522,12 +524,11 @@ async fn start_turn(
 }
 
 async fn abort_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {
-    let Some(writer) = turns.abort(turn_id).await else {
+    if turns.abort(turn_id).await.is_none() {
         return false;
-    };
+    }
     approvals.deny_for_turn(turn_id).await;
     crate::acp::permission::remove_scoped_approval_channel(turn_id).await;
-    close_writer(&writer).await;
     true
 }
 
@@ -545,13 +546,7 @@ async fn cancel_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id
         },
     )
     .await;
-    close_writer(&writer).await;
     true
-}
-
-async fn close_writer(writer: &Arc<Mutex<OwnedWriteHalf>>) {
-    let mut writer = writer.lock().await;
-    let _ = writer.shutdown().await;
 }
 
 async fn cleanup_connection_turns(

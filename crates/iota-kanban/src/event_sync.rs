@@ -1,11 +1,12 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::Arc;
 
 /// Read/write timeout for each event-sync TCP connection.
 const EVENT_SYNC_IO_TIMEOUT_SECS: u64 = 30;
+const MAX_EVENT_SYNC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -125,7 +126,16 @@ pub fn default_pull_source(addr: &str) -> String {
 }
 
 pub fn serve_event_sync<A: ToSocketAddrs>(store: Arc<SqliteKanbanStore>, addr: A) -> Result<()> {
-    let listener = TcpListener::bind(addr).context("binding kanban event sync listener")?;
+    let bind_addr = addr
+        .to_socket_addrs()
+        .context("resolving kanban event sync address")?
+        .next()
+        .context("kanban event sync address did not resolve")?;
+    anyhow::ensure!(
+        bind_addr.ip().is_loopback(),
+        "refusing to expose unauthenticated kanban sync outside loopback"
+    );
+    let listener = TcpListener::bind(bind_addr).context("binding kanban event sync listener")?;
     for stream in listener.incoming() {
         let stream = stream.context("accepting kanban event sync connection")?;
         // Guard against a slow/hung peer blocking the server thread indefinitely.
@@ -190,14 +200,12 @@ fn send_event_sync_request<A: ToSocketAddrs>(
     stream.write_all(b"\n")?;
     stream.flush()?;
 
-    let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line)?;
+    let line = read_limited_line(BufReader::new(stream))?;
     serde_json::from_str(&line).context("parsing kanban sync peer response")
 }
 
 fn handle_event_sync_stream(store: &SqliteKanbanStore, mut stream: TcpStream) -> Result<()> {
-    let mut line = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+    let line = read_limited_line(BufReader::new(stream.try_clone()?))?;
     let response = match serde_json::from_str::<EventSyncRequest>(&line) {
         Ok(request) => handle_event_sync_request(store, request),
         Err(err) => EventSyncResponse {
@@ -215,6 +223,20 @@ fn handle_event_sync_stream(store: &SqliteKanbanStore, mut stream: TcpStream) ->
     // before the OS drops the connection.
     let _ = stream.shutdown(Shutdown::Write);
     Ok(())
+}
+
+fn read_limited_line<R: BufRead>(mut reader: R) -> Result<String> {
+    let mut bytes = Vec::new();
+    reader
+        .by_ref()
+        .take(MAX_EVENT_SYNC_MESSAGE_BYTES as u64 + 1)
+        .read_until(b'\n', &mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() <= MAX_EVENT_SYNC_MESSAGE_BYTES,
+        "kanban sync message exceeded {} byte limit",
+        MAX_EVENT_SYNC_MESSAGE_BYTES
+    );
+    String::from_utf8(bytes).context("kanban sync message was not valid UTF-8")
 }
 
 fn handle_event_sync_request(

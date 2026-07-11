@@ -1,4 +1,4 @@
-use super::*;
+use crate::acp::wire::*;
 use tokio::io::AsyncBufReadExt;
 
 #[test]

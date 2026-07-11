@@ -1,4 +1,4 @@
-use super::*;
+use crate::skill::*;
 
 #[test]
 fn skill_execution_mode_deserializes_normalized_values() {

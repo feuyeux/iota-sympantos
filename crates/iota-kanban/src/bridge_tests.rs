@@ -196,7 +196,10 @@ fn ensure_bridge_available_returns_err_when_hermes_missing() {
     let bridge = AdvancedBridge::new(PathBuf::from("/nonexistent/hermes-xyz"), tmp.clone());
 
     let result = crate::bridge::ensure_bridge_available(&bridge);
-    assert!(result.is_err(), "expected Err when hermes binary is missing");
+    assert!(
+        result.is_err(),
+        "expected Err when hermes binary is missing"
+    );
 
     let msg = result.unwrap_err().to_string();
     assert!(

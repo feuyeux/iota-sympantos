@@ -1,4 +1,4 @@
-use super::*;
+use crate::tui::status_bar::*;
 
 #[test]
 fn observability_status_shows_input_cache_output_tokens() {

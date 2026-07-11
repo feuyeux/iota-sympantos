@@ -1,5 +1,5 @@
-use super::*;
 use crate::config::{ContextEngineConfig, ContextInjection, NimiaConfig, RecallThresholdsConfig};
+use crate::daemon::desktop::*;
 use crate::memory::{
     MemoryFacet, MemoryInsert, MemoryMergeMode, MemoryScope, MemoryStore, MemoryType,
 };

@@ -1,4 +1,4 @@
-use super::*;
+use crate::tui::kanban_view::*;
 use iota_kanban::{LinkKind, RunStatus};
 
 fn task(id: TaskId, status: Status, title: &str) -> KanbanTaskSnapshot {

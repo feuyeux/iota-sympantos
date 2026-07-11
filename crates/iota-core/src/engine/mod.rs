@@ -541,5 +541,5 @@ fn parse_memory_context_section(body: &str) -> Option<DesktopContextSection> {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "engine_tests.rs"]
 mod tests;

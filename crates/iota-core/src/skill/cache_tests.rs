@@ -1,4 +1,4 @@
-use super::*;
+use crate::skill::cache::*;
 
 #[test]
 fn accepts_normal_names() {

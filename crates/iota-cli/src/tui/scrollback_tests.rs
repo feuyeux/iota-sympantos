@@ -1,6 +1,6 @@
 use iota_core::acp::AcpBackend;
 
-use super::*;
+use crate::tui::scrollback::*;
 
 #[test]
 fn user_message_uses_solid_circle_prompt() {

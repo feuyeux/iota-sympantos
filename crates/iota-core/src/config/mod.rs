@@ -37,7 +37,7 @@ pub use model::ModelConfig;
 pub use schema::{NimiaConfig, StoreConfig};
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "config_tests.rs"]
 mod tests;
 
 pub fn store_config() -> StoreConfig {

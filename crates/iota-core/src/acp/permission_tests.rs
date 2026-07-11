@@ -1,4 +1,4 @@
-use super::*;
+use crate::acp::permission::*;
 use tokio::sync::mpsc;
 
 #[test]

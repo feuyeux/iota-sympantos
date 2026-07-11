@@ -1,4 +1,4 @@
-use super::*;
+use crate::*;
 use iota_core::daemon::{DESKTOP_PROTOCOL_VERSION, DaemonClientMessage};
 
 #[test]
@@ -74,8 +74,14 @@ fn task_logs_reads_logs_from_shadows_dir() {
 
     let logs = task_logs(7, &shadows).unwrap();
 
-    assert!(logs.stdout_path.ends_with("shadows/7.stdout.log"));
-    assert!(logs.stderr_path.ends_with("shadows/7.stderr.log"));
+    assert!(
+        std::path::Path::new(&logs.stdout_path)
+            .ends_with(std::path::Path::new("shadows").join("7.stdout.log"))
+    );
+    assert!(
+        std::path::Path::new(&logs.stderr_path)
+            .ends_with(std::path::Path::new("shadows").join("7.stderr.log"))
+    );
     assert_eq!(logs.stdout, "stdout tail");
     assert_eq!(logs.stderr, "stderr tail");
     let _ = std::fs::remove_dir_all(&tmp);

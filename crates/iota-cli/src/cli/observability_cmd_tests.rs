@@ -1,4 +1,4 @@
-use super::*;
+use crate::cli::observability_cmd::*;
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()

@@ -75,7 +75,7 @@ fn import_skips_events_at_or_below_stored_source_cursor() {
 }
 
 #[test]
-fn unapplicable_event_is_skipped_and_cursor_still_advances() {
+fn unapplicable_event_does_not_advance_cursor() {
     let target = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
     let bundle = KanbanEventBundle {
         format_version: 1,
@@ -95,10 +95,8 @@ fn unapplicable_event_is_skipped_and_cursor_still_advances() {
         }],
     };
 
-    let report = import_event_bundle(&target, &bundle).unwrap();
-    assert_eq!(report.events_seen, 1);
-    assert_eq!(report.events_applied, 0);
-    assert_eq!(target.sync_cursor("node-a").unwrap(), 2);
+    assert!(import_event_bundle(&target, &bundle).is_err());
+    assert_eq!(target.sync_cursor("node-a").unwrap(), 0);
 }
 
 #[test]

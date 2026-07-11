@@ -1,4 +1,4 @@
-use super::*;
+use crate::memory::store::*;
 
 #[test]
 fn deduplicates_memory_content() {

@@ -1,4 +1,4 @@
-use super::*;
+use crate::acp::parser::*;
 
 #[test]
 fn parses_run_flags_and_prompt_parts() {

@@ -157,22 +157,16 @@ impl SqliteKanbanStore {
 
     /// Replay a sequence of events against this store, rebuilding state.
     /// Used for syncing a remote node's events into this store.
-    /// Returns the number of events successfully applied.
+    /// Returns the number of applied events. A failed event aborts the replay so
+    /// callers never acknowledge a cursor that contains an unapplied event.
     #[allow(dead_code)]
     pub fn replay_events(&self, events: &[KanbanEvent]) -> Result<usize> {
         let mut applied = 0;
         for event in events {
-            match self.apply_event(event) {
-                Ok(()) => applied += 1,
-                Err(e) => {
-                    tracing::warn!(
-                        event_id = event.id,
-                        event_type = %event.event_type,
-                        error = %e,
-                        "skipping event during replay"
-                    );
-                }
-            }
+            self.apply_event(event).with_context(|| {
+                format!("failed to replay event {} ({})", event.id, event.event_type)
+            })?;
+            applied += 1;
         }
         Ok(applied)
     }

@@ -190,10 +190,9 @@ async fn handle_connection(
     // a malicious or misbehaving client sending an unbounded line.
     const MAX_REQUEST_BYTES: u64 = 10 * 1024 * 1024;
     let (read_half, mut write_half) = stream.into_split();
-    let limited = tokio::io::AsyncReadExt::take(read_half, MAX_REQUEST_BYTES + 1);
-    let mut reader = BufReader::new(limited);
+    let mut reader = BufReader::new(read_half);
     let mut request_line = String::new();
-    let bytes_read = reader.read_line(&mut request_line).await?;
+    let bytes_read = read_limited_line(&mut reader, &mut request_line, MAX_REQUEST_BYTES).await?;
     if bytes_read as u64 > MAX_REQUEST_BYTES {
         anyhow::bail!("daemon request exceeded {} byte limit", MAX_REQUEST_BYTES);
     }
@@ -243,6 +242,26 @@ async fn handle_connection(
     write_half.write_all(&line).await?;
     write_half.flush().await?;
     Ok(())
+}
+
+pub(crate) async fn read_limited_line<R>(
+    reader: &mut BufReader<R>,
+    line: &mut String,
+    max_bytes: u64,
+) -> Result<usize>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+
+    let mut limited = reader.take(max_bytes + 1);
+    let bytes_read = limited.read_line(line).await?;
+    anyhow::ensure!(
+        bytes_read as u64 <= max_bytes,
+        "daemon request exceeded {} byte limit",
+        max_bytes
+    );
+    Ok(bytes_read)
 }
 
 async fn handle_prompt(
