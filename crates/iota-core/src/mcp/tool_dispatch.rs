@@ -8,6 +8,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
+#[cfg(feature = "kanban")]
 use iota_kanban::{Board, CreateTaskRequest, KanbanStore, Status, Task, TaskFilter, TaskId};
 
 use crate::memory::{
@@ -26,6 +27,7 @@ use crate::store::ledger::SessionLedger;
 pub struct ToolContext<'a> {
     pub memory: Option<&'a MemoryStore>,
     pub ledger: Option<&'a SessionLedger>,
+    #[cfg(feature = "kanban")]
     pub kanban: Option<&'a dyn KanbanStore>,
     pub skills: &'a SkillRegistry,
     pub workspace: &'a Path,
@@ -68,12 +70,15 @@ impl McpToolRegistry {
         tools.insert(t.name().to_string(), Box::new(t));
         let t = HandoffReadTool;
         tools.insert(t.name().to_string(), Box::new(t));
-        let t = KanbanCreateTaskTool;
-        tools.insert(t.name().to_string(), Box::new(t));
-        let t = KanbanListTasksTool;
-        tools.insert(t.name().to_string(), Box::new(t));
-        let t = KanbanReadyTaskTool;
-        tools.insert(t.name().to_string(), Box::new(t));
+        #[cfg(feature = "kanban")]
+        {
+            let t = KanbanCreateTaskTool;
+            tools.insert(t.name().to_string(), Box::new(t));
+            let t = KanbanListTasksTool;
+            tools.insert(t.name().to_string(), Box::new(t));
+            let t = KanbanReadyTaskTool;
+            tools.insert(t.name().to_string(), Box::new(t));
+        }
 
         Self { tools }
     }
@@ -319,7 +324,9 @@ impl McpTool for HandoffReadTool {
     }
 }
 
+#[cfg(feature = "kanban")]
 struct KanbanCreateTaskTool;
+#[cfg(feature = "kanban")]
 impl McpTool for KanbanCreateTaskTool {
     fn name(&self) -> &'static str {
         "iota_kanban_create_task"
@@ -354,7 +361,9 @@ impl McpTool for KanbanCreateTaskTool {
     }
 }
 
+#[cfg(feature = "kanban")]
 struct KanbanListTasksTool;
+#[cfg(feature = "kanban")]
 impl McpTool for KanbanListTasksTool {
     fn name(&self) -> &'static str {
         "iota_kanban_list_tasks"
@@ -380,7 +389,9 @@ impl McpTool for KanbanListTasksTool {
     }
 }
 
+#[cfg(feature = "kanban")]
 struct KanbanReadyTaskTool;
+#[cfg(feature = "kanban")]
 impl McpTool for KanbanReadyTaskTool {
     fn name(&self) -> &'static str {
         "iota_kanban_ready_task"
@@ -570,6 +581,7 @@ fn dispatch_handoff_read(ctx: &ToolContext, args: &Value) -> Result<Value, Strin
         .map_err(|err| err.to_string())
 }
 
+#[cfg(feature = "kanban")]
 fn dispatch_kanban_create_task(ctx: &ToolContext, args: &Value) -> Result<Value, String> {
     let kanban = ctx
         .kanban
@@ -643,6 +655,7 @@ fn dispatch_kanban_create_task(ctx: &ToolContext, args: &Value) -> Result<Value,
     }))
 }
 
+#[cfg(feature = "kanban")]
 fn dispatch_kanban_list_tasks(ctx: &ToolContext, args: &Value) -> Result<Value, String> {
     let kanban = ctx
         .kanban
@@ -669,6 +682,7 @@ fn dispatch_kanban_list_tasks(ctx: &ToolContext, args: &Value) -> Result<Value, 
     Ok(json!({"tasks": summarize_kanban_tasks(tasks)}))
 }
 
+#[cfg(feature = "kanban")]
 fn dispatch_kanban_ready_task(ctx: &ToolContext, args: &Value) -> Result<Value, String> {
     let kanban = ctx
         .kanban
@@ -681,6 +695,7 @@ fn dispatch_kanban_ready_task(ctx: &ToolContext, args: &Value) -> Result<Value, 
     Ok(json!({"ok": true, "task_id": task_id, "status": "ready", "auto_dispatch": true}))
 }
 
+#[cfg(feature = "kanban")]
 fn ready_kanban_task(kanban: &dyn KanbanStore, task_id: TaskId) -> Result<(), String> {
     let task = kanban.get_task(task_id).map_err(|err| err.to_string())?;
     match task.status {
@@ -703,6 +718,7 @@ fn ready_kanban_task(kanban: &dyn KanbanStore, task_id: TaskId) -> Result<(), St
     }
 }
 
+#[cfg(feature = "kanban")]
 fn resolve_kanban_board(ctx: &ToolContext, args: &Value) -> Result<Board, String> {
     let kanban = ctx
         .kanban
@@ -736,6 +752,7 @@ fn resolve_kanban_board(ctx: &ToolContext, args: &Value) -> Result<Board, String
         .map_err(|err| format!("created board {board_id}, but failed to read it back: {err}"))
 }
 
+#[cfg(feature = "kanban")]
 fn summarize_kanban_tasks(tasks: Vec<Task>) -> Vec<Value> {
     tasks
         .into_iter()
@@ -756,6 +773,7 @@ fn summarize_kanban_tasks(tasks: Vec<Task>) -> Vec<Value> {
 // Parsers & validators (single canonical copy)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "kanban")]
 fn parse_kanban_status(value: &str) -> Result<Status, String> {
     value
         .parse::<Status>()

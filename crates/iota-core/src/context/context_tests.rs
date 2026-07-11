@@ -227,6 +227,9 @@ fn minimal_context_still_includes_memory_write_contract() {
 
     assert!(prompt.contains("<memory-tools>"));
     assert!(prompt.contains("iota_memory_write"));
+    #[cfg(feature = "kanban")]
     assert!(prompt.contains("iota_kanban_create_task"));
+    #[cfg(not(feature = "kanban"))]
+    assert!(!prompt.contains("iota_kanban_create_task"));
     assert!(prompt.contains("Do not say that information was remembered"));
 }

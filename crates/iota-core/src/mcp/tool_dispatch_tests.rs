@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "kanban")]
 use iota_kanban::{KanbanStore, SqliteKanbanStore, Status};
 use serde_json::json;
 
@@ -78,14 +79,18 @@ fn is_known_tool_recognizes_iota_tools() {
     assert!(is_known_tool("iota_session_summary"));
     assert!(is_known_tool("iota_handoff_publish"));
     assert!(is_known_tool("iota_handoff_read"));
-    assert!(is_known_tool("iota_kanban_create_task"));
-    assert!(is_known_tool("iota_kanban_list_tasks"));
-    assert!(is_known_tool("iota_kanban_ready_task"));
+    #[cfg(feature = "kanban")]
+    {
+        assert!(is_known_tool("iota_kanban_create_task"));
+        assert!(is_known_tool("iota_kanban_list_tasks"));
+        assert!(is_known_tool("iota_kanban_ready_task"));
+    }
     assert!(!is_known_tool("external_tool"));
     assert!(!is_known_tool("iota_unknown"));
 }
 
 #[test]
+#[cfg(feature = "kanban")]
 fn kanban_create_task_auto_promotes_generated_tasks_to_ready() {
     let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
     let workspace = std::path::Path::new("/tmp/iota-project");
@@ -119,6 +124,7 @@ fn kanban_create_task_auto_promotes_generated_tasks_to_ready() {
 }
 
 #[test]
+#[cfg(feature = "kanban")]
 fn kanban_create_task_can_keep_manual_triage_when_auto_ready_is_false() {
     let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
     let workspace = std::path::Path::new("/tmp/iota-project");
@@ -150,6 +156,7 @@ fn kanban_create_task_can_keep_manual_triage_when_auto_ready_is_false() {
 }
 
 #[test]
+#[cfg(feature = "kanban")]
 fn kanban_create_task_allows_explicit_ready_for_dispatch() {
     let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
     let workspace = std::path::Path::new("/tmp/iota-project");
@@ -182,6 +189,7 @@ fn kanban_create_task_allows_explicit_ready_for_dispatch() {
 }
 
 #[test]
+#[cfg(feature = "kanban")]
 fn kanban_ready_task_manually_promotes_triage_through_todo() {
     let store = SqliteKanbanStore::open(std::path::Path::new(":memory:")).unwrap();
     let workspace = std::path::Path::new("/tmp/iota-project");

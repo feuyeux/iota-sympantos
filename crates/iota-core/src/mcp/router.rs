@@ -12,6 +12,7 @@
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 
+#[cfg(feature = "kanban")]
 use iota_kanban::SqliteKanbanStore;
 
 use crate::memory::MemoryStore;
@@ -66,12 +67,14 @@ fn route_via_dispatch(name: &str, arguments: &Value) -> Result<Value> {
     let ledger = SessionLedger::default_path()
         .ok()
         .and_then(|path| SessionLedger::open(&path).ok());
+    #[cfg(feature = "kanban")]
     let kanban = default_kanban_store();
     let skills = SkillRegistry::load(&workspace, &[]);
 
     let ctx = ToolContext {
         memory: memory.as_ref(),
         ledger: ledger.as_ref(),
+        #[cfg(feature = "kanban")]
         kanban: kanban
             .as_ref()
             .map(|store| store as &dyn iota_kanban::KanbanStore),
@@ -101,6 +104,7 @@ fn is_fun_tool(name: &str) -> bool {
         .any(|(tool, _)| *tool == name)
 }
 
+#[cfg(feature = "kanban")]
 fn default_kanban_store() -> Option<SqliteKanbanStore> {
     let path = dirs::home_dir()?.join(".i6").join("kanban").join("iota.db");
     SqliteKanbanStore::open(&path).ok()

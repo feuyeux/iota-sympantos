@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
+#[cfg(feature = "kanban")]
 use iota_kanban::SqliteKanbanStore;
 
 use crate::memory::MemoryStore;
@@ -32,6 +33,7 @@ pub fn run_stdio() -> Result<()> {
     let ledger = SessionLedger::default_path()
         .ok()
         .and_then(|path| SessionLedger::open(&path).ok());
+    #[cfg(feature = "kanban")]
     let kanban = default_kanban_store();
 
     for line in stdin.lock().lines() {
@@ -52,6 +54,7 @@ pub fn run_stdio() -> Result<()> {
             &request,
             memory.as_ref(),
             ledger.as_ref(),
+            #[cfg(feature = "kanban")]
             kanban.as_ref(),
             &skills,
             &workspace,
@@ -75,6 +78,7 @@ fn handle_request(
     request: &Value,
     memory: Option<&MemoryStore>,
     ledger: Option<&SessionLedger>,
+    #[cfg(feature = "kanban")]
     kanban: Option<&SqliteKanbanStore>,
     skills: &SkillRegistry,
     workspace: &std::path::Path,
@@ -93,6 +97,7 @@ fn handle_request(
             let ctx = ToolContext {
                 memory,
                 ledger,
+                #[cfg(feature = "kanban")]
                 kanban: kanban.map(|store| store as &dyn iota_kanban::KanbanStore),
                 skills,
                 workspace,
@@ -129,6 +134,7 @@ fn handle_request(
             let ctx = ToolContext {
                 memory,
                 ledger,
+                #[cfg(feature = "kanban")]
                 kanban: kanban.map(|store| store as &dyn iota_kanban::KanbanStore),
                 skills,
                 workspace,
@@ -176,6 +182,7 @@ fn emit_route_log(level: &str, event: &str, fields: Value) {
     }
 }
 
+#[cfg(feature = "kanban")]
 fn default_kanban_store() -> Option<SqliteKanbanStore> {
     let path = dirs::home_dir()?.join(".i6").join("kanban").join("iota.db");
     SqliteKanbanStore::open(&path).ok()

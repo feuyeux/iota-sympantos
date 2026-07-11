@@ -22,7 +22,7 @@ tokio.workspace = true
 dirs.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
-iota-core = { path = "../../iota-core" }
+iota-core = { path = "../../iota-core", features = ["kanban"] }
 iota-kanban = { path = "../../iota-kanban" }
 
 

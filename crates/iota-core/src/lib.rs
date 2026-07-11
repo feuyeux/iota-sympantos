@@ -1,3 +1,8 @@
+//! Reusable runtime primitives for orchestrating ACP coding assistants.
+//!
+//! The module tree remains public for advanced integrations. The root exports
+//! below cover the normal engine construction and execution path.
+
 pub mod acp;
 pub mod config;
 pub mod context;
@@ -10,3 +15,8 @@ pub mod skill;
 pub mod store;
 pub mod telemetry;
 pub mod utils;
+
+pub use acp::{AcpBackend, AcpPromptOutput, DEFAULT_TIMEOUT_MS};
+pub use config::NimiaConfig;
+pub use engine::IotaEngine;
+pub use runtime_event::RuntimeEvent;
