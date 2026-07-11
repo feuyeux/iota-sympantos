@@ -78,7 +78,8 @@ ApprovalDecision
 | :--- | :--- |
 | `iota.execution.count` | execution 结束计数，按 status 记录 |
 | `iota.prompt.queued` | TUI prompt 队列长度变化 |
-| `iota.token.*` | token usage 事件和 input/cache/output/thinking/total token |
+| `iota.token.usage.count` | token usage 事件计数 |
+| `iota.token.input` / `iota.token.output` / `iota.token.total` | 输入 / 输出 / 归一化 total token 计数 |
 | `iota.prompt.duration` / `iota.init.duration` | prompt 与 ACP init 耗时直方图 |
 
 默认 CLI 只初始化本地 tracing，不要求 collector。Docker compose 会提供 OpenTelemetry Collector、Jaeger、Prometheus、Loki 和 Grafana。

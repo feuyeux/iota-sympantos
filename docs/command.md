@@ -29,11 +29,11 @@
 | :--- | :--- |
 | `--backend <name>` | 指定后端，也可直接把 backend 放在 prompt 前 |
 | `--cwd <path>` | 指定执行工作目录 |
-| `--daemon` / `-d` | 经 daemon 路由 |
+| `--daemon` / `-d` | 经 daemon 路由（默认开启） |
+| `--no-daemon` | 绕过 daemon，直接在进程内执行 |
 | `--show-native` | 打印原生 ACP wire 内容；不能与 `--daemon` 同用 |
 | `--log-events` | 输出 normalized `RuntimeEvent` |
 | `--timing` | 输出 route、spawn、init、prompt、total timing JSON |
-| `--trace-timing` | `--timing` 的别名，输出 route、spawn、init、prompt、total timing JSON |
 | `--timeout-ms <ms>` | 覆盖 ACP prompt timeout |
 
 ## 后端别名
