@@ -32,3 +32,29 @@ fn begin_execution_allows_same_request_after_completion() {
 
     assert_ne!(second, first);
 }
+
+#[test]
+fn cancelled_status_round_trips_through_string() {
+    assert_eq!(ExecutionStatus::Cancelled.as_str(), "cancelled");
+    assert_eq!(
+        ExecutionStatus::from("cancelled"),
+        ExecutionStatus::Cancelled
+    );
+}
+
+#[test]
+fn begin_execution_allows_same_request_after_cancellation() {
+    let store = CacheStore::open(Path::new(":memory:")).unwrap();
+
+    let first = store
+        .begin_execution_with_id("codex", "session", "same-request", None)
+        .unwrap();
+    store
+        .finish_execution(&first, ExecutionStatus::Cancelled)
+        .unwrap();
+    let second = store
+        .begin_execution_with_id("codex", "session", "same-request", None)
+        .unwrap();
+
+    assert_ne!(second, first);
+}

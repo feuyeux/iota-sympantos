@@ -5,8 +5,9 @@ use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tokio::time::{Duration, timeout};
+use tokio_util::sync::CancellationToken;
 
-use super::message::{JsonRpcRequest, JsonRpcResponse};
+use super::message::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use super::session::session_new_params_with_options;
 use super::stream_reader::read_prompt_events_for_id;
 use super::types::{AcpClientStartOptions, AcpSessionResolution};
@@ -155,6 +156,26 @@ impl AcpClient {
         prompt: &str,
         execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
+        self.execute_cancellable(cwd, prompt, execution_id, None).await
+    }
+
+    /// Run a prompt that can be stopped early by an external cancellation signal.
+    ///
+    /// When `cancel` fires before the turn completes, the client sends the backend
+    /// a cooperative `session/cancel` notification (telling it to actually stop its
+    /// current turn) and returns [`TurnCancelled`]. This is the real cancellation
+    /// entry point that downstream consumers previously could not reach: it is
+    /// distinct from dropping the future on timeout, which leaves the backend
+    /// running because it is never told to stop.
+    ///
+    /// [`TurnCancelled`]: super::message::TurnCancelled
+    pub async fn execute_cancellable(
+        &mut self,
+        cwd: &std::path::PathBuf,
+        prompt: &str,
+        execution_id: Option<&str>,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<AcpPromptOutput> {
         let total_started = Instant::now();
         self.prompt_counter += 1;
         let result = timeout(Duration::from_millis(self.timeout_ms), async {
@@ -187,6 +208,8 @@ impl AcpClient {
                     event_tx: event_tx.as_ref(),
                     execution_id,
                     cwd: &self.cwd,
+                    cancel,
+                    session_id: &session.session_id,
                 },
             )
             .await?;
@@ -344,6 +367,32 @@ pub(super) async fn send_request(
         .write_all(line.as_slice())
         .await
         .context("Failed to write ACP request")?;
+    stdin.flush().await.context("Failed to flush ACP stdin")?;
+    Ok(())
+}
+
+/// Send a JSON-RPC notification (no `id`, no reply expected).
+///
+/// Used to deliver the ACP `session/cancel` control message when a turn is
+/// cancelled: the backend stops its current turn cooperatively instead of being
+/// killed, which keeps the session state machine intact for later turns.
+pub(super) async fn send_notification(
+    stdin: &mut ChildStdin,
+    method: &str,
+    params: Value,
+) -> Result<()> {
+    let notification = JsonRpcNotification {
+        jsonrpc: "2.0",
+        method,
+        params,
+    };
+    let mut line =
+        serde_json::to_vec(&notification).context("Failed to serialize ACP notification")?;
+    line.push(b'\n');
+    stdin
+        .write_all(line.as_slice())
+        .await
+        .context("Failed to write ACP notification")?;
     stdin.flush().await.context("Failed to flush ACP stdin")?;
     Ok(())
 }

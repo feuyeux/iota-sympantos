@@ -68,6 +68,7 @@ async fn turn_registry_cancel_reports_whether_turn_existed() {
             "turn-1".to_string(),
             handle,
             Arc::new(Mutex::new(write_half)),
+            tokio_util::sync::CancellationToken::new(),
         )
         .await;
 

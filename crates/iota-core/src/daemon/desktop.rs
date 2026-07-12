@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use tokio::io::{AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 use crate::acp::{AcpBackend, permission::ApprovalRequest};
 use crate::config::{RecallThresholdsConfig, backend_readiness, read_config, save_config};
@@ -75,6 +76,7 @@ pub(crate) struct TurnRegistry {
 struct ActiveTurn {
     handle: Arc<tokio::task::JoinHandle<()>>,
     writer: Arc<Mutex<OwnedWriteHalf>>,
+    cancel: CancellationToken,
 }
 
 impl TurnRegistry {
@@ -83,12 +85,14 @@ impl TurnRegistry {
         turn_id: String,
         handle: tokio::task::JoinHandle<()>,
         writer: Arc<Mutex<OwnedWriteHalf>>,
+        cancel: CancellationToken,
     ) {
         self.active.lock().await.insert(
             turn_id,
             ActiveTurn {
                 handle: Arc::new(handle),
                 writer,
+                cancel,
             },
         );
     }
@@ -97,9 +101,21 @@ impl TurnRegistry {
         self.active.lock().await.remove(turn_id)
     }
 
+    /// Hard-stop a turn by aborting its task. Used for connection teardown, where
+    /// we no longer have anyone to deliver a graceful result to.
     pub async fn abort(&self, turn_id: &str) -> Option<Arc<Mutex<OwnedWriteHalf>>> {
         let turn = self.remove(turn_id).await?;
+        turn.cancel.cancel();
         turn.handle.abort();
+        Some(turn.writer)
+    }
+
+    /// Cooperatively cancel a turn: fire its cancellation token so the engine tells
+    /// the live ACP backend to stop, then let the turn task finish and report the
+    /// cancelled result itself. Returns the writer so the caller can acknowledge.
+    pub async fn request_cancel(&self, turn_id: &str) -> Option<Arc<Mutex<OwnedWriteHalf>>> {
+        let turn = self.remove(turn_id).await?;
+        turn.cancel.cancel();
         Some(turn.writer)
     }
 }
@@ -455,10 +471,12 @@ async fn start_turn(
         }
     });
 
+    let cancel = CancellationToken::new();
     let task_writer = Arc::clone(&writer);
     let task_turn_id = turn_id.clone();
     let task_turns = turns.clone();
     let task_streamed_events = Arc::clone(&streamed_events);
+    let task_cancel = cancel.clone();
     let handle = tokio::spawn(async move {
         let result = {
             let mut engine = engine.lock().await;
@@ -467,7 +485,9 @@ async fn start_turn(
             }
             engine.set_stream_output_sender(Some(stream_tx));
             engine.set_stream_event_sender(Some(event_tx));
-            let result = engine.run(backend, cwd, &prompt, Some(&task_turn_id)).await;
+            let result = engine
+                .run_cancellable(backend, cwd, &prompt, Some(&task_turn_id), Some(&task_cancel))
+                .await;
             engine.set_stream_output_sender(None);
             engine.set_stream_event_sender(None);
             result
@@ -504,6 +524,18 @@ async fn start_turn(
                 )
                 .await;
             }
+            Err(err) if err.downcast_ref::<crate::acp::TurnCancelled>().is_some() => {
+                // The turn was stopped by a cancel request; the backend was told to
+                // stop. Report it as cancelled rather than a failure.
+                let _ = send_message(
+                    &task_writer,
+                    &DaemonServerMessage::TurnCancelled {
+                        turn_id: task_turn_id,
+                        accepted: true,
+                    },
+                )
+                .await;
+            }
             Err(err) => {
                 let _ = send_message(
                     &task_writer,
@@ -518,7 +550,9 @@ async fn start_turn(
     });
 
     connection_turns.lock().await.push(turn_id.clone());
-    turns.insert(turn_id, handle, Arc::clone(&writer)).await;
+    turns
+        .insert(turn_id, handle, Arc::clone(&writer), cancel)
+        .await;
 
     Ok(())
 }
@@ -533,19 +567,16 @@ async fn abort_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id:
 }
 
 async fn cancel_turn(turns: &TurnRegistry, approvals: &ApprovalRegistry, turn_id: &str) -> bool {
-    let Some(writer) = turns.abort(turn_id).await else {
+    // Cooperative cancel: fire the turn's token so the engine tells the live ACP
+    // backend to stop, and deny any pending approval so a blocked turn can proceed
+    // to observe the cancellation. The turn task itself emits the final
+    // `TurnCancelled` once the backend has actually stopped; the caller sends the
+    // immediate `accepted` acknowledgment.
+    if turns.request_cancel(turn_id).await.is_none() {
         return false;
-    };
+    }
     approvals.deny_for_turn(turn_id).await;
     crate::acp::permission::remove_scoped_approval_channel(turn_id).await;
-    let _ = send_message(
-        &writer,
-        &DaemonServerMessage::TurnCancelled {
-            turn_id: turn_id.to_string(),
-            accepted: true,
-        },
-    )
-    .await;
     true
 }
 

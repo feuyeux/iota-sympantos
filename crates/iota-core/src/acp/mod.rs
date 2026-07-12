@@ -17,7 +17,7 @@ pub use types::{
     AcpClient, AcpClientStartOptions, AcpPromptOutput, AcpPromptTiming, AcpStartupTiming,
 };
 
-pub use message::extract_text;
+pub use message::{TurnCancelled, extract_text};
 
 pub const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 

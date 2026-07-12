@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use tokio_util::sync::CancellationToken;
 
-use crate::acp::{AcpBackend, AcpPromptOutput};
+use crate::acp::{AcpBackend, AcpPromptOutput, TurnCancelled};
 use crate::config::configured_model;
 use crate::context::ComposeInput;
 use crate::runtime_event::{ErrorEvent, MemoryEvent, OutputEvent, RuntimeEvent, StateEvent};
@@ -40,8 +41,29 @@ impl IotaEngine {
     ///
     /// The daemon uses `requested_execution_id` so callers can correlate persisted cache/events
     /// with their own request id. When it is `None`, the cache layer allocates the id.
+    pub async fn run(
+        &mut self,
+        backend: AcpBackend,
+        cwd: PathBuf,
+        prompt: &str,
+        requested_execution_id: Option<&str>,
+    ) -> Result<AcpPromptOutput> {
+        self.run_cancellable(backend, cwd, prompt, requested_execution_id, None)
+            .await
+    }
+
+    /// Run a prompt that can be cancelled mid-turn via `cancel`.
+    ///
+    /// This is the cancellation entry point downstream consumers previously lacked.
+    /// When `cancel` fires while the backend is producing a turn, the live ACP
+    /// process is told to stop (a cooperative `session/cancel` notification), the
+    /// turn is recorded as [`ExecutionStatus::Cancelled`] for durable evidence, and
+    /// the call returns `Err` carrying [`TurnCancelled`]. Passing `None` is
+    /// identical to [`run`](Self::run).
+    ///
+    /// [`ExecutionStatus::Cancelled`]: crate::store::cache::ExecutionStatus::Cancelled
     #[tracing::instrument(
-        skip(self, prompt),
+        skip(self, prompt, cancel),
         fields(
             acp.backend = %backend,
             cwd = %cwd.display(),
@@ -51,12 +73,13 @@ impl IotaEngine {
             request.hash = tracing::field::Empty,
         )
     )]
-    pub async fn run(
+    pub async fn run_cancellable(
         &mut self,
         backend: AcpBackend,
         cwd: PathBuf,
         prompt: &str,
         requested_execution_id: Option<&str>,
+        cancel: Option<&CancellationToken>,
     ) -> Result<AcpPromptOutput> {
         let request_hash = request_hash(&backend.to_string(), &cwd, prompt);
         tracing::Span::current().record("request.hash", &request_hash);
@@ -307,7 +330,7 @@ impl IotaEngine {
             .context("ACP client missing after warm")?;
         let startup_timing = client.startup_timing();
         match client
-            .execute(&cwd, &effective_prompt, execution_id.as_deref())
+            .execute_cancellable(&cwd, &effective_prompt, execution_id.as_deref(), cancel)
             .await
         {
             Ok(mut output) => {
@@ -405,6 +428,14 @@ impl IotaEngine {
                 Ok(output)
             }
             Err(err) => {
+                // A cancelled turn is not a failure: the backend was deliberately told
+                // to stop. Record it as Cancelled so the ledger reflects what happened.
+                let cancelled = err.downcast_ref::<TurnCancelled>().is_some();
+                let status = if cancelled {
+                    ExecutionStatus::Cancelled
+                } else {
+                    ExecutionStatus::Failed
+                };
                 self.record_runtime_event(
                     &execution_id,
                     backend,
@@ -414,14 +445,18 @@ impl IotaEngine {
                         data: None,
                     }),
                 );
-                self.mark_execution_finished(&execution_id, ExecutionStatus::Failed);
-                tracing::warn!(error = %err, "execution.failed");
+                self.mark_execution_finished(&execution_id, status.clone());
+                if cancelled {
+                    tracing::info!("execution.cancelled");
+                } else {
+                    tracing::warn!(error = %err, "execution.failed");
+                }
                 self.record_ledger_turn(
                     backend,
                     execution_id.as_deref(),
                     &request_hash,
                     &err.to_string(),
-                    ExecutionStatus::Failed.as_str(),
+                    status.as_str(),
                 );
                 Err(err)
             }

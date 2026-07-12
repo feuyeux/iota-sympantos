@@ -28,6 +28,7 @@ pub enum ExecutionStatus {
     Running,
     Completed,
     Failed,
+    Cancelled,
     Unknown(String),
 }
 
@@ -37,6 +38,7 @@ impl ExecutionStatus {
             Self::Running => "running",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
             Self::Unknown(value) => value.as_str(),
         }
     }
@@ -48,6 +50,7 @@ impl From<&str> for ExecutionStatus {
             "running" => Self::Running,
             "completed" => Self::Completed,
             "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
             other => {
                 tracing::warn!(
                     status = other,

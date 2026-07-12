@@ -190,3 +190,30 @@ fn errors_when_no_id() {
     };
     assert!(permission_request_id(&msg).is_err());
 }
+
+#[test]
+fn turn_cancelled_displays_and_is_error() {
+    let err: Box<dyn std::error::Error> = Box::new(TurnCancelled);
+    assert_eq!(err.to_string(), "turn cancelled before completion");
+}
+
+#[test]
+fn turn_cancelled_downcasts_from_anyhow() {
+    let err: anyhow::Error = TurnCancelled.into();
+    assert!(err.downcast_ref::<TurnCancelled>().is_some());
+}
+
+#[test]
+fn cancel_notification_has_no_id() {
+    let notification = JsonRpcNotification {
+        jsonrpc: "2.0",
+        method: "session/cancel",
+        params: json!({ "sessionId": "sess-1" }),
+    };
+    let value = serde_json::to_value(&notification).unwrap();
+    assert_eq!(value["jsonrpc"], "2.0");
+    assert_eq!(value["method"], "session/cancel");
+    assert_eq!(value["params"]["sessionId"], "sess-1");
+    // A notification must not carry an id, or the backend would try to reply.
+    assert!(value.get("id").is_none());
+}

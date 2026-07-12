@@ -19,6 +19,34 @@ pub(super) struct JsonRpcResponse {
     pub(super) result: Value,
 }
 
+/// A JSON-RPC notification carries no `id`, so the backend does not reply to it.
+/// The ACP `session/cancel` control message is sent this way.
+#[derive(Debug, Serialize)]
+pub(super) struct JsonRpcNotification<'a> {
+    pub(super) jsonrpc: &'static str,
+    pub(super) method: &'a str,
+    pub(super) params: Value,
+}
+
+/// Returned when a turn is stopped early by a caller-supplied cancellation signal.
+///
+/// This is distinct from a timeout or a backend error: it means we deliberately
+/// sent the backend a `session/cancel` notification and stopped awaiting the turn.
+/// Callers (the engine) map it to [`ExecutionStatus::Cancelled`] rather than
+/// `Failed` so cancellation leaves durable, honest evidence.
+///
+/// [`ExecutionStatus::Cancelled`]: crate::store::cache::ExecutionStatus::Cancelled
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TurnCancelled;
+
+impl std::fmt::Display for TurnCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("turn cancelled before completion")
+    }
+}
+
+impl std::error::Error for TurnCancelled {}
+
 pub(super) fn text_from_session_update(params: Option<&Value>) -> Option<String> {
     let params = params?;
     let update = params.get("update").unwrap_or(params);

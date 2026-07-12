@@ -16,7 +16,7 @@ pub mod store;
 pub mod telemetry;
 pub mod utils;
 
-pub use acp::{AcpBackend, AcpPromptOutput, DEFAULT_TIMEOUT_MS};
+pub use acp::{AcpBackend, AcpPromptOutput, DEFAULT_TIMEOUT_MS, TurnCancelled};
 pub use config::NimiaConfig;
 pub use engine::IotaEngine;
 pub use runtime_event::RuntimeEvent;
