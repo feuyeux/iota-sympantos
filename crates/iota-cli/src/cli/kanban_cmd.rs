@@ -299,7 +299,6 @@ fn execute_kanban_command(
                     }
                     prev_status = current.status;
                 }
-                let _ = report; // suppress unused warning
 
                 if std::time::Instant::now() >= deadline {
                     bail!(

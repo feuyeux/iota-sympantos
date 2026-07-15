@@ -525,24 +525,6 @@ fn token_event_score(event: &StoredTokenUsage) -> u8 {
     score
 }
 
-/// Validates that computed token sum does not exceed provider-reported total.
-#[allow(dead_code)]
-fn validate_token_counts(event: &StoredTokenUsage) -> Option<String> {
-    let provider_total = event.provider_reported_total_tokens.unwrap_or(0);
-    let computed = event
-        .input_tokens
-        .unwrap_or(0)
-        .saturating_add(event.output_tokens.unwrap_or(0))
-        .saturating_add(event.thinking_tokens.unwrap_or(0));
-    if provider_total > 0 && computed > 0 && computed > provider_total {
-        return Some(format!(
-            "computed tokens ({}) exceed provider total ({})",
-            computed, provider_total
-        ));
-    }
-    None
-}
-
 fn opt_i64(value: Option<u64>) -> Option<i64> {
     value.and_then(|value| value.try_into().ok())
 }

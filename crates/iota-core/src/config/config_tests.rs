@@ -190,3 +190,54 @@ fn store_paths_join_expected_database_names() {
     assert_eq!(paths.memory_db(), root.join("memory.sqlite"));
     assert_eq!(paths.store_db(), root.join("store.sqlite"));
 }
+
+#[test]
+fn hermes_without_model_config_preserves_its_own_environment() {
+    let missing_model = BackendConfig::default();
+    let empty_model = BackendConfig {
+        model: Some(ModelConfig::default()),
+        ..BackendConfig::default()
+    };
+
+    assert!(
+        get_adapter(AcpBackend::Hermes)
+            .process_env(&missing_model, None)
+            .is_empty()
+    );
+    assert!(
+        get_adapter(AcpBackend::Hermes)
+            .process_env(&empty_model, None)
+            .is_empty()
+    );
+}
+
+#[test]
+fn hermes_explicit_model_config_maps_provider_environment() {
+    let section = BackendConfig {
+        model: Some(ModelConfig {
+            provider: Some("anthropic".to_string()),
+            name: Some("claude-sonnet".to_string()),
+            base_url: Some("https://api.anthropic.com".to_string()),
+            api_key: Some("test-key".to_string()),
+        }),
+        ..BackendConfig::default()
+    };
+
+    let env = get_adapter(AcpBackend::Hermes).process_env(&section, None);
+    assert_eq!(
+        env.get("HERMES_INFERENCE_PROVIDER").map(String::as_str),
+        Some("anthropic")
+    );
+    assert_eq!(
+        env.get("HERMES_MODEL").map(String::as_str),
+        Some("claude-sonnet")
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+        Some("https://api.anthropic.com")
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_API_KEY").map(String::as_str),
+        Some("test-key")
+    );
+}

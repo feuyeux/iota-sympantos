@@ -243,7 +243,7 @@ fn cmd_view(
 
     for row in 0..max_rows {
         let mut task_line = String::from("\u{2502}");
-        for (i, col_tasks) in grouped.iter().enumerate() {
+        for col_tasks in &grouped {
             let cell = if row < col_tasks.len() {
                 let t = col_tasks[row];
                 let marker = if t.status == Status::Running { "*" } else { "" };
@@ -262,7 +262,6 @@ fn cmd_view(
             let padded = format!("{:<width$}", cell, width = col_width + 2);
             task_line.push_str(&padded);
             task_line.push('\u{2502}');
-            let _ = i; // suppress unused warning
         }
         lines.push(task_line);
     }

@@ -158,7 +158,19 @@ impl BackendAdapter for HermesAdapter {
         _context: Option<&BackendContextConfig>,
     ) -> BTreeMap<String, String> {
         let mut process_env = BTreeMap::new();
-        let model = section.model.as_ref();
+        let Some(model) = section.model.as_ref() else {
+            // No iota model override: let Hermes load its provider, model, and
+            // credentials from its own configuration and process environment.
+            return process_env;
+        };
+        let model = Some(model);
+        let configured = model_value(model, |model| model.provider.as_deref()).is_some()
+            || model_value(model, |model| model.name.as_deref()).is_some()
+            || model_value(model, |model| model.base_url.as_deref()).is_some()
+            || model_value(model, |model| model.api_key.as_deref()).is_some();
+        if !configured {
+            return process_env;
+        }
         let provider = model_value(model, |model| model.provider.as_deref())
             .or_else(|| {
                 model_value(model, |model| model.base_url.as_deref())
