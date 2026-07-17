@@ -130,18 +130,13 @@ pub(crate) fn negotiate_version(msg: &DaemonClientMessage) -> Result<u32, String
         } => {
             let client_min = min_version.unwrap_or(*protocol_version);
             let client_max = max_version.unwrap_or(*protocol_version);
-
-            let server_min = PROTOCOL_VERSION_MIN;
-            let server_max = PROTOCOL_VERSION_MAX;
-
-            let negotiated = client_max.min(server_max);
-            if negotiated < server_min || negotiated < client_min {
-                return Err(format!(
-                    "Protocol version mismatch: client [{},{}] vs server [{},{}]",
-                    client_min, client_max, server_min, server_max
-                ));
-            }
-            Ok(negotiated)
+            crate::ipc_client::negotiate_version(
+                client_min,
+                client_max,
+                PROTOCOL_VERSION_MIN,
+                PROTOCOL_VERSION_MAX,
+            )
+            .map_err(|err| err.to_string())
         }
         _ => Err("Expected Hello message".to_string()),
     }

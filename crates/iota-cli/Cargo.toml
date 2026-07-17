@@ -11,7 +11,7 @@ crossterm.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
 hostname.workspace = true
-iota-core = { path = "../iota-core", features = ["kanban"] }
+iota-core = { package = "iota-sympantos-core", version = "0.1.0", path = "../iota-core", features = ["kanban"] }
 iota-kanban = { workspace = true }
 pulldown-cmark.workspace = true
 ratatui.workspace = true

@@ -1,14 +1,14 @@
-# iota-core
+# iota-sympantos-core
 
-`iota-core` is the reusable Rust runtime behind iota-sympantos. It provides ACP backend orchestration, configuration, context assembly, memory, skills, MCP support, daemon protocol types, storage, telemetry, and normalized runtime events without depending on the CLI, TUI, or desktop application.
+`iota-sympantos-core` is the publishable package for the reusable Rust runtime behind iota-sympantos. Its library target remains `iota_core`, so Rust source continues to import it with `use iota_core::...`. It provides ACP backend orchestration, configuration, context assembly, memory, skills, MCP support, daemon protocol types, storage, telemetry, and normalized runtime events without depending on the CLI, TUI, or desktop application.
 
 ## Add the dependency
 
-For a second-party consumer that uses this repository as a git dependency:
+Consume the independently versioned package from the registry while retaining the concise local dependency/import name:
 
 ```toml
 [dependencies]
-iota-core = { git = "<repository-url>", package = "iota-core" }
+iota-core = { package = "iota-sympantos-core", version = "0.1.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -16,15 +16,15 @@ Enable the optional Kanban MCP tools only when the consuming project also needs 
 
 ```toml
 [dependencies]
-iota-core = { git = "<repository-url>", package = "iota-core", features = ["kanban"] }
+iota-core = { package = "iota-sympantos-core", version = "0.1.0", features = ["kanban"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-For a local multi-crate project, use a path dependency instead:
+For development in a combined checkout, add a path while keeping the version and package contract explicit:
 
 ```toml
 [dependencies]
-iota-core = { path = "../iota-sympantos/crates/iota-core" }
+iota-core = { package = "iota-sympantos-core", version = "0.1.0", path = "../iota-sympantos/crates/iota-core" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

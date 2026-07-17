@@ -1,42 +1,47 @@
 [package]
-name = "iota-core"
+name = "iota-sympantos-core"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "Reusable ACP runtime, context, memory, skills, MCP, and storage library"
 readme = "README.md"
+license = "MIT"
+repository = "https://github.com/feuyeux/iota-sympantos"
+homepage = "https://github.com/feuyeux/iota-sympantos"
+keywords = ["acp", "agent", "llm", "mcp"]
+categories = ["asynchronous", "development-tools"]
 
 [features]
 default = []
 kanban = ["dep:iota-kanban"]
 
 [dependencies]
-anyhow = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0.102"
+chrono = { version = "0.4.44", features = ["serde"] }
 dirs = "6.0.0"
-futures-util = "0.3"
-hex = "0.4"
-hostname = "0.4"
-opentelemetry = "0.29"
-opentelemetry-appender-tracing = "0.29"
-opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "trace", "metrics", "logs"] }
-opentelemetry_sdk = { version = "0.29", features = ["rt-tokio"] }
+futures-util = "0.3.32"
+hex = "0.4.3"
+hostname = "0.4.2"
+opentelemetry = "0.29.1"
+opentelemetry-appender-tracing = "0.29.1"
+opentelemetry-otlp = { version = "0.29.0", features = ["grpc-tonic", "trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.29.0", features = ["rt-tokio"] }
 reqwest = { version = "0.13.3", features = ["json", "blocking"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
-sha2 = "0.10"
-tokio = { version = "1.0", features = ["full"] }
-tokio-util = "0.7"
-tracing = "0.1"
-tracing-opentelemetry = "0.30"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
-uuid = { version = "1.8", features = ["v4", "serde"] }
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+serde_yaml = "0.9.34"
+sha2 = "0.10.9"
+tokio = { version = "1.52.3", features = ["full"] }
+tokio-util = "0.7.18"
+tracing = "0.1.44"
+tracing-opentelemetry = "0.30.0"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "registry"] }
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
 iota-kanban = { version = "0.1.0", path = "../iota-kanban", optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [lib]
 name = "iota_core"

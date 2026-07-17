@@ -12,8 +12,9 @@ Usage: scripts/dev-desktop.sh [--stop-only] [--] [extra npm tauri args...]
 
 Stops existing iota daemon and desktop dev-server processes before starting the
 Tauri desktop dev app.
-The script builds the workspace iota CLI and exports IOTA_CLI_PATH so Tauri
-autostarts the matching daemon version.
+The script builds the workspace iota CLI, installs frontend dependencies if
+they are missing, and exports IOTA_CLI_PATH so Tauri autostarts the matching
+daemon version.
 
 Options:
   --stop-only   Stop daemon and desktop dev-server processes and exit.
@@ -126,6 +127,30 @@ iota_cli_path() {
   printf '%s\n' "$target_dir/debug/$exe_name"
 }
 
+ensure_frontend_deps() {
+  # A one-click dev entry point cannot assume `npm install` was already run.
+  # `node_modules/.bin/vite` is the concrete artifact `tauri dev`'s
+  # beforeDevCommand needs; its absence is what produces the confusing
+  # "vite: command not found" failure, so treat it as the install signal
+  # rather than only checking for the `node_modules` directory itself.
+  if [[ -x "$DESKTOP_DIR/node_modules/.bin/vite" ]]; then
+    return 0
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to install frontend dependencies but was not found in PATH" >&2
+    exit 1
+  fi
+
+  echo "frontend dependencies not found, running npm install in $DESKTOP_DIR..."
+  (cd "$DESKTOP_DIR" && npm install)
+
+  if [[ ! -x "$DESKTOP_DIR/node_modules/.bin/vite" ]]; then
+    echo "npm install completed but vite is still missing from $DESKTOP_DIR/node_modules/.bin" >&2
+    exit 1
+  fi
+}
+
 build_iota_cli() {
   echo "building current workspace iota CLI..."
   (cd "$ROOT_DIR" && cargo build -p iota-cli --bin iota)
@@ -173,6 +198,8 @@ if [[ "$STOP_ONLY" -eq 1 ]]; then
 fi
 
 build_iota_cli
+
+ensure_frontend_deps
 
 cd "$DESKTOP_DIR"
 exec npm run tauri -- dev ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}

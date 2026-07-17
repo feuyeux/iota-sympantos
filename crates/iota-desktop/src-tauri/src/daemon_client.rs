@@ -3,6 +3,10 @@ use iota_core::daemon::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, PROTOCOL_VERSION_MAX,
     PROTOCOL_VERSION_MIN, daemon_addr,
 };
+use iota_core::ipc_client::{
+    ConnectionState, HeartbeatConfig, ReconnectConfig, backoff_delay_ms,
+    next_backoff_delay_ms, time_jitter_factor,
+};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
@@ -13,40 +17,8 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 // ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-struct ReconnectConfig {
-    initial_delay_ms: u64,
-    max_delay_ms: u64,
-    jitter_percent: u8,
-    heartbeat_interval_secs: u64,
-    heartbeat_max_misses: u8,
-}
-
-impl Default for ReconnectConfig {
-    fn default() -> Self {
-        Self {
-            initial_delay_ms: 1000,
-            max_delay_ms: 30000,
-            jitter_percent: 20,
-            heartbeat_interval_secs: 30,
-            heartbeat_max_misses: 3,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Connection state
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionState {
-    Connected,
-    Reconnecting,
-    Disconnected,
-}
 
 struct DaemonConnection {
     ping_seq: AtomicU64,
@@ -185,32 +157,26 @@ pub async fn reconnect_with_backoff(app: Option<&tauri::AppHandle>) -> Result<Tc
     drop(guard);
 
     let config = ReconnectConfig::default();
-    let mut delay_ms = config.initial_delay_ms;
+    let mut current_delay_ms = config.initial_delay_ms;
 
     loop {
-        let jitter_range = delay_ms as f64 * (config.jitter_percent as f64 / 100.0);
-        let jitter = (pseudo_random_factor() * 2.0 - 1.0) * jitter_range;
-        let actual_delay = ((delay_ms as f64) + jitter).max(100.0) as u64;
+        let actual_delay = backoff_delay_ms(current_delay_ms, &config, time_jitter_factor());
+        current_delay_ms = next_backoff_delay_ms(current_delay_ms, &config);
 
         tokio::time::sleep(Duration::from_millis(actual_delay)).await;
 
         let addr = desktop_daemon_addr();
-        match connect_and_handshake(&addr).await {
-            Ok(stream) => {
-                let mut guard = conn.lock().await;
-                guard.state = ConnectionState::Connected;
-                guard.missed_pongs = 0;
-                if let Some(app) = app {
-                    let _ = app.emit("daemon-connection-state", &ConnectionState::Connected);
-                }
-                tokio::spawn(async {
-                    drain_pending_queue().await;
-                });
-                return Ok(stream);
+        if let Ok(stream) = connect_and_handshake(&addr).await {
+            let mut guard = conn.lock().await;
+            guard.state = ConnectionState::Connected;
+            guard.missed_pongs = 0;
+            if let Some(app) = app {
+                let _ = app.emit("daemon-connection-state", &ConnectionState::Connected);
             }
-            Err(_) => {
-                delay_ms = (delay_ms * 2).min(config.max_delay_ms);
-            }
+            tokio::spawn(async {
+                drain_pending_queue().await;
+            });
+            return Ok(stream);
         }
     }
 }
@@ -220,9 +186,9 @@ pub async fn reconnect_with_backoff(app: Option<&tauri::AppHandle>) -> Result<Tc
 // ---------------------------------------------------------------------------
 
 pub async fn start_heartbeat_loop(app: tauri::AppHandle) {
-    let config = ReconnectConfig::default();
-    let interval = Duration::from_secs(config.heartbeat_interval_secs);
-    let max_misses = config.heartbeat_max_misses;
+    let config = HeartbeatConfig::default();
+    let interval = Duration::from_secs(config.interval_secs);
+    let max_misses = config.max_misses;
 
     loop {
         tokio::time::sleep(interval).await;
@@ -472,32 +438,9 @@ async fn autostart_daemon(addr: &str) -> Result<()> {
 }
 
 fn locate_iota_cli() -> Result<std::path::PathBuf> {
-    if let Ok(path) = std::env::var("IOTA_CLI_PATH") {
-        let path = std::path::PathBuf::from(path);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
     let exe_name = if cfg!(windows) { "iota.exe" } else { "iota" };
-    let current = std::env::current_exe().context("Failed to locate current executable")?;
-    if let Some(dir) = current.parent() {
-        let sibling = dir.join(exe_name);
-        if sibling.exists() {
-            return Ok(sibling);
-        }
-    }
-
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            let candidate = dir.join(exe_name);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-    }
-
-    anyhow::bail!("set IOTA_CLI_PATH or install the iota CLI in PATH")
+    iota_core::ipc_client::locate_sidecar_binary("IOTA_CLI_PATH", exe_name)
+        .map_err(|err| anyhow!("{err}"))
 }
 
 async fn write_message(stream: &mut TcpStream, message: &DaemonClientMessage) -> Result<()> {
@@ -528,12 +471,4 @@ async fn wait_for_hello(stream: &mut TcpStream) -> Result<u32> {
         DaemonServerMessage::ProtocolError { message } => anyhow::bail!(message),
         other => anyhow::bail!("daemon returned unexpected handshake message: {:?}", other),
     }
-}
-
-fn pseudo_random_factor() -> f64 {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    (t as f64) / (u32::MAX as f64)
 }

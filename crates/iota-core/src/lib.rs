@@ -8,6 +8,7 @@ pub mod config;
 pub mod context;
 pub mod daemon;
 pub mod engine;
+pub mod ipc_client;
 pub mod mcp;
 pub mod memory;
 pub mod runtime_event;

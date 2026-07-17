@@ -2146,8 +2146,8 @@ dependencies = [
  "dirs",
  "futures-util",
  "hostname",
- "iota-core",
  "iota-kanban",
+ "iota-sympantos-core",
  "pulldown-cmark",
  "ratatui",
  "reqwest 0.13.3",
@@ -2162,43 +2162,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "iota-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "criterion",
- "dirs",
- "futures-util",
- "hex",
- "hostname",
- "iota-kanban",
- "opentelemetry",
- "opentelemetry-appender-tracing",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "reqwest 0.13.3",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "iota-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
- "iota-core",
  "iota-kanban",
+ "iota-sympantos-core",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2224,6 +2194,36 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "iota-sympantos-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "criterion",
+ "dirs",
+ "futures-util",
+ "hex",
+ "hostname",
+ "iota-kanban",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "reqwest 0.13.3",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "uuid",
 ]
 

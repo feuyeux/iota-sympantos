@@ -19,8 +19,9 @@ function usage() {
 
 Stops existing iota daemon and desktop dev-server processes before starting the
 Tauri desktop dev app.
-The script builds the workspace iota CLI and exports IOTA_CLI_PATH so Tauri
-autostarts the matching daemon version.
+The script builds the workspace iota CLI, installs frontend dependencies if
+they are missing, and exports IOTA_CLI_PATH so Tauri autostarts the matching
+daemon version.
 
 Options:
   --stop-only   Stop daemon and desktop dev-server processes and exit.
@@ -170,6 +171,11 @@ function iotaCliPath() {
   return path.join(targetDir, "debug", exeName);
 }
 
+function viteBinPath() {
+  const binName = process.platform === "win32" ? "vite.cmd" : "vite";
+  return path.join(DESKTOP_DIR, "node_modules", ".bin", binName);
+}
+
 function runChecked(command, args, options = {}) {
   const child = spawn(commandName(command), args, {
     cwd: options.cwd ?? ROOT_DIR,
@@ -209,6 +215,26 @@ async function buildIotaCli() {
   console.log(`using IOTA_CLI_PATH=${cliPath}`);
 }
 
+async function ensureFrontendDeps() {
+  // A one-click dev entry point cannot assume `npm install` was already
+  // run. The local `vite` binary is the concrete artifact `tauri dev`'s
+  // beforeDevCommand needs; its absence is what produces the confusing
+  // "vite: command not found" failure, so treat it as the install signal
+  // rather than only checking for the `node_modules` directory itself.
+  if (existsSync(viteBinPath())) {
+    return;
+  }
+
+  console.log(`frontend dependencies not found, running npm install in ${DESKTOP_DIR}...`);
+  await runChecked("npm", ["install"], { cwd: DESKTOP_DIR });
+
+  if (!existsSync(viteBinPath())) {
+    throw new Error(
+      `npm install completed but vite is still missing from ${path.join(DESKTOP_DIR, "node_modules", ".bin")}`,
+    );
+  }
+}
+
 async function main() {
   let stopOnly = process.env.npm_config_stop_only === "true";
   const extraArgs = [];
@@ -238,6 +264,7 @@ async function main() {
   }
 
   await buildIotaCli();
+  await ensureFrontendDeps();
   await runChecked("npm", ["run", "tauri", "--", "dev", ...extraArgs], {
     cwd: DESKTOP_DIR,
     env: process.env,
