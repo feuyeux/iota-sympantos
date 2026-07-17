@@ -481,7 +481,13 @@ async fn start_turn(
             engine.set_stream_output_sender(Some(stream_tx));
             engine.set_stream_event_sender(Some(event_tx));
             let result = engine
-                .run_cancellable(backend, cwd, &prompt, Some(&task_turn_id), Some(&task_cancel))
+                .run_cancellable(
+                    backend,
+                    cwd,
+                    &prompt,
+                    Some(&task_turn_id),
+                    Some(&task_cancel),
+                )
                 .await;
             engine.set_stream_output_sender(None);
             engine.set_stream_event_sender(None);

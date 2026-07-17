@@ -41,6 +41,24 @@ cargo run -p iota-cli --quiet -- run codex "ping" --timing
 cd crates/iota-desktop && npm run dev:clean
 ```
 
+## 可复用 crates
+
+Kanban 领域库已发布到 crates.io：
+
+```toml
+[dependencies]
+iota-kanban = "0.1.0"
+```
+
+核心 runtime 的包名是 `iota-sympantos-core`，Rust library target 仍为 `iota_core`。启用 `kanban` feature 时会使用已发布的 `iota-kanban`：
+
+```toml
+[dependencies]
+iota-core = { package = "iota-sympantos-core", version = "0.1.0", features = ["kanban"] }
+```
+
+详见 [`crates/iota-core/README.md`](crates/iota-core/README.md) 和 [`crates/iota-kanban/README.md`](crates/iota-kanban/README.md)。
+
 ### 配置文件
 
 `~/.i6/nimia.yaml`，每个后端的关键字段：
@@ -77,6 +95,8 @@ pip install 'hermes-agent[acp]'
 | [`docs/debugging.md`](docs/debugging.md) | 调试指南 |
 | [`docs/docker.md`](docs/docker.md) | Docker 与外部观测栈 |
 | [`docs/desktop-mvp-acceptance.md`](docs/desktop-mvp-acceptance.md) | Desktop MVP 验收标准 |
+| [`crates/iota-core/README.md`](crates/iota-core/README.md) | `iota-sympantos-core` 依赖方式、features 与最小示例 |
+| [`crates/iota-kanban/README.md`](crates/iota-kanban/README.md) | `iota-kanban` crate API 与依赖方式 |
 
 ---
 

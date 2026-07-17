@@ -83,8 +83,8 @@ iota-sympantos 包含四个 crate：
 | Crate | 类型 | 职责 |
 | :--- | :--- | :--- |
 | `iota-cli` | Binary crate | CLI 命令、TUI、daemon client、Kanban CLI、observability CLI |
-| `iota-core` | Library crate | ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
-| `iota-kanban` | Library crate | Event-sourced Kanban、状态机、Hermes worker、shadow DB、跨节点同步 |
+| `iota-core` | Library crate | Workspace 目录名；发布包名为 `iota-sympantos-core`，library target 为 `iota_core`。负责 ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
+| `iota-kanban` | Library crate | 已发布到 crates.io 的独立 crate，负责 Event-sourced Kanban、状态机、Hermes worker、shadow DB、跨节点同步 |
 | `iota-desktop/src-tauri` | Tauri crate | 桌面端 Rust 命令、daemon client、Kanban 命令绑定 |
 
 核心目录结构：
@@ -111,6 +111,8 @@ crates/
 ```
 
 `iota-core` 刻意不碰任何 UI，CLI、TUI、daemon、desktop 才能共用同一份 runtime，不会出现「同一件事四个地方各写一遍」；`iota-kanban` 单独成一个领域库，是因为不想让任务板的状态机逻辑和 ACP 编排搅在一起；`iota-cli` 和 `iota-desktop` 纯粹是两层不同的 presentation，谁也不该知道对方的存在。
+
+这两个库也有明确的发布边界。外部项目依赖 `iota-sympantos-core`；源码里的 crate 名仍是 `iota_core`。Kanban 作为独立包发布，core 默认不拉入它，只有启用 `kanban` feature 才增加 `iota-kanban` 依赖和对应 MCP tools。workspace 内部同时写 `version` 和 `path`：本地构建走源码目录，`cargo package` 后则从 registry 校验版本依赖。
 
 ## 运行时主线
 

@@ -81,8 +81,8 @@ Stores and observability
 | Crate | 职责 |
 | :--- | :--- |
 | `iota-cli` | 用户命令入口、TUI、daemon autostart、observability 查询、Kanban CLI |
-| `iota-core` | ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
-| `iota-kanban` | Kanban 领域模型、状态机、SQLite event sourcing、Hermes worker、shadow workspace、event sync |
+| `iota-core` | Workspace 目录名；registry 包名为 `iota-sympantos-core`，library target 为 `iota_core`。承载 ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
+| `iota-kanban` | 已发布的独立 library crate；承载 Kanban 领域模型、状态机、SQLite event sourcing、Hermes worker、shadow workspace、event sync |
 | `iota-desktop` | Tauri + React desktop，复用 daemon streaming protocol；提供 chat/config/inspector/memory/context UI，并在 Rust commands 中接入 Kanban store |
 
 ## 核心模块
@@ -228,6 +228,8 @@ Desktop 由 React + Tauri 组成，当前界面是一个 daemon-first 的本地�
 
 ## 依赖规则
 
+- 外部消费者通过 crates.io 使用 `iota-sympantos-core` 和 `iota-kanban`；workspace 内部依赖同时声明 `version` 与 `path`，本地开发走 path，发布产物按 version 从 registry 解析。
+- `iota-sympantos-core` 默认不依赖 Kanban；启用 `kanban` feature 后接入 `iota-kanban` 和 `iota_kanban_*` MCP tools。
 - `iota-core/src/acp/` 不依赖 CLI、TUI、desktop 或 daemon UI 层。
 - Store 模块只暴露 typed operations，不调用 UI、daemon、ACP client 或 MCP client。
 - Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngine` 或 daemon API。

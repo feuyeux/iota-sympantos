@@ -3,6 +3,13 @@ name = "iota-kanban"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+description = "Event-sourced Kanban task orchestration for AI coding agents"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/feuyeux/iota-sympantos"
+homepage = "https://github.com/feuyeux/iota-sympantos"
+keywords = ["kanban", "agent", "task", "event-sourcing"]
+categories = ["development-tools", "data-structures"]
 
 [dependencies]
 anyhow.workspace = true

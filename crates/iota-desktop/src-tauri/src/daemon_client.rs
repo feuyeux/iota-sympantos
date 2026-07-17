@@ -4,8 +4,8 @@ use iota_core::daemon::{
     PROTOCOL_VERSION_MIN, daemon_addr,
 };
 use iota_core::ipc_client::{
-    ConnectionState, HeartbeatConfig, ReconnectConfig, backoff_delay_ms,
-    next_backoff_delay_ms, time_jitter_factor,
+    ConnectionState, HeartbeatConfig, ReconnectConfig, backoff_delay_ms, next_backoff_delay_ms,
+    time_jitter_factor,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

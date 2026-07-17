@@ -377,6 +377,9 @@ fn my_test() { ... }
 - `store/observability_tests.rs`
 - `engine/tests.rs`
 - `mcp/client_tests.rs`
+- `ipc_client/autostart_tests.rs`
+- `ipc_client/backoff_tests.rs`
+- `ipc_client/version_tests.rs`
 - `runtime_event/tests.rs`
 - `utils/tests.rs`
 

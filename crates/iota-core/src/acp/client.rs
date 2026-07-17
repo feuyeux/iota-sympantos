@@ -156,7 +156,8 @@ impl AcpClient {
         prompt: &str,
         execution_id: Option<&str>,
     ) -> Result<AcpPromptOutput> {
-        self.execute_cancellable(cwd, prompt, execution_id, None).await
+        self.execute_cancellable(cwd, prompt, execution_id, None)
+            .await
     }
 
     /// Run a prompt that can be stopped early by an external cancellation signal.
