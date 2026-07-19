@@ -1,5 +1,7 @@
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::process::ChildStdin;
 use tokio::sync::mpsc;
@@ -30,6 +32,62 @@ pub(super) struct PromptReadOptions<'a> {
     pub(super) cancel: Option<&'a CancellationToken>,
     /// The backend-native session id, needed for the `session/cancel` notification.
     pub(super) session_id: &'a str,
+    pub(super) progress: Arc<Mutex<PromptProgress>>,
+}
+
+#[derive(Debug)]
+pub(super) struct PromptProgress {
+    started: Instant,
+    phase: &'static str,
+    line_count: usize,
+    update_count: usize,
+    tool_call_count: usize,
+    first_update_ms: Option<u64>,
+    first_tool_call_ms: Option<u64>,
+}
+
+#[derive(Debug)]
+pub(super) struct PromptProgressSnapshot {
+    pub(super) elapsed_ms: u64,
+    pub(super) phase: &'static str,
+    pub(super) line_count: usize,
+    pub(super) update_count: usize,
+    pub(super) tool_call_count: usize,
+    pub(super) first_update_ms: Option<u64>,
+    pub(super) first_tool_call_ms: Option<u64>,
+}
+
+impl PromptProgress {
+    pub(super) fn shared(started: Instant) -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self {
+            started,
+            phase: "starting",
+            line_count: 0,
+            update_count: 0,
+            tool_call_count: 0,
+            first_update_ms: None,
+            first_tool_call_ms: None,
+        }))
+    }
+
+    pub(super) fn set_phase(progress: &Arc<Mutex<Self>>, phase: &'static str) {
+        if let Ok(mut progress) = progress.lock() {
+            progress.phase = phase;
+        }
+    }
+
+    pub(super) fn snapshot(progress: &Arc<Mutex<Self>>) -> PromptProgressSnapshot {
+        let progress = progress.lock().unwrap_or_else(|error| error.into_inner());
+        PromptProgressSnapshot {
+            elapsed_ms: progress.started.elapsed().as_millis() as u64,
+            phase: progress.phase,
+            line_count: progress.line_count,
+            update_count: progress.update_count,
+            tool_call_count: progress.tool_call_count,
+            first_update_ms: progress.first_update_ms,
+            first_tool_call_ms: progress.first_tool_call_ms,
+        }
+    }
 }
 
 /// Outcome of one iteration of the read loop's race between the next backend line
@@ -61,6 +119,7 @@ where
         cwd,
         cancel,
         session_id,
+        progress,
     } = options;
     let mut output = String::new();
     let mut events = Vec::new();
@@ -111,6 +170,9 @@ where
         let Some(line) = line else {
             break;
         };
+        if let Ok(mut progress) = progress.lock() {
+            progress.line_count += 1;
+        }
         let message = parse_message_line(&line, show_native)?;
 
         if let Some(error) = &message.error {
@@ -132,6 +194,7 @@ where
                 push_event(&mut events, event_tx, RuntimeEvent::TokenUsage(usage));
             }
             if is_terminal_result(result) {
+                PromptProgress::set_phase(&progress, "terminal prompt response");
                 break;
             }
         }
@@ -146,6 +209,26 @@ where
 
         match method {
             "session/update" | "session_update" => {
+                let (first_update, first_update_ms) = if let Ok(mut progress) = progress.lock() {
+                    progress.update_count += 1;
+                    progress.phase = "receiving session/update";
+                    let first_update = progress.first_update_ms.is_none();
+                    if first_update {
+                        progress.first_update_ms =
+                            Some(progress.started.elapsed().as_millis() as u64);
+                    }
+                    (first_update, progress.first_update_ms)
+                } else {
+                    (false, None)
+                };
+                if first_update {
+                    tracing::info!(
+                        backend = %backend,
+                        execution_id = execution_id.unwrap_or("-"),
+                        first_update_ms,
+                        "acp.prompt.first_update"
+                    );
+                }
                 if let Some(text) = text_from_session_update(message.params.as_ref()) {
                     streamed = true;
                     output.push_str(&text);
@@ -155,6 +238,7 @@ where
                 }
             }
             "session/complete" | "session_complete" => {
+                PromptProgress::set_phase(&progress, "session/complete");
                 if !streamed
                     && let Some(text) = message.params.as_ref().and_then(extract_final_text)
                 {
@@ -188,13 +272,24 @@ where
                 ) {
                     let (tool_name, tool_arguments) = acp_tool_call_parts(message.params.as_ref());
                     let call_id = id.as_str().unwrap_or("tool-call").to_string();
+                    let first_tool_call_ms = if let Ok(mut progress) = progress.lock() {
+                        progress.tool_call_count += 1;
+                        progress.phase = "executing MCP tool";
+                        if progress.first_tool_call_ms.is_none() {
+                            progress.first_tool_call_ms =
+                                Some(progress.started.elapsed().as_millis() as u64);
+                        }
+                        progress.first_tool_call_ms
+                    } else {
+                        None
+                    };
                     tracing::info!(
                         backend = %backend,
                         execution_id = execution_id.unwrap_or("-"),
                         tool_call_id = %call_id,
                         tool_name = %tool_name,
-                        arguments = %tool_arguments,
-                        "ACP backend tool call intercepted"
+                        first_tool_call_ms,
+                        "acp.tool.call"
                     );
                     push_event(
                         &mut events,
@@ -216,8 +311,7 @@ where
                         tool_call_id = %call_id,
                         tool_name = %tool_name,
                         ok,
-                        result = %result,
-                        "ACP backend tool result returned"
+                        "acp.tool.result"
                     );
                     push_event(
                         &mut events,
@@ -230,6 +324,7 @@ where
                         }),
                     );
                     super::client::send_response(stdin, id, result).await?;
+                    PromptProgress::set_phase(&progress, "awaiting backend after MCP tool");
                     continue;
                 }
 

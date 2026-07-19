@@ -38,7 +38,7 @@ tracing = "0.1.44"
 tracing-opentelemetry = "0.30.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "registry"] }
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
-iota-kanban = { version = "0.1.0", path = "../iota-kanban", optional = true }
+iota-kanban = { package = "iota-sympantos-kanban", version = "0.1.0", path = "../iota-kanban", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

@@ -2,6 +2,7 @@ pub mod bridge;
 pub mod dispatcher;
 pub mod event_sourcing;
 pub mod event_sync;
+pub mod paths;
 pub mod shadow;
 pub mod sqlite_store;
 pub mod state_machine;

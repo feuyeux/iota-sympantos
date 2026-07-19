@@ -8,13 +8,25 @@ use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 
 use super::message::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
-use super::session::session_new_params_with_options;
-use super::stream_reader::read_prompt_events_for_id;
-use super::types::{AcpClientStartOptions, AcpSessionResolution};
+use super::session::{session_new_params_with_options, session_restore_params_with_options};
+use super::stream_reader::{PromptProgress, read_prompt_events_for_id};
+use super::types::{AcpAgentCapabilities, AcpClientStartOptions, AcpSessionResolution};
 use super::util::{elapsed_ms, should_forward_backend_stderr};
 use super::wire::{format_acp_error, is_response_id, parse_message_line, read_next_line};
 use super::{AcpClient, AcpPromptOutput};
 use crate::runtime_event::RuntimeEvent;
+
+fn agent_capabilities_from_initialize(value: &Value) -> AcpAgentCapabilities {
+    AcpAgentCapabilities {
+        load_session: value
+            .pointer("/agentCapabilities/loadSession")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        resume_session: value
+            .pointer("/agentCapabilities/sessionCapabilities/resume")
+            .is_some(),
+    }
+}
 
 impl AcpClient {
     pub async fn start(options: AcpClientStartOptions) -> Result<Self> {
@@ -104,26 +116,31 @@ impl AcpClient {
                 }),
             )
             .await?;
-            wait_for_response(&mut lines, "init-0", show_native, timeout_ms)
+            let response = wait_for_response(&mut lines, "init-0", show_native, timeout_ms)
                 .await
                 .context("ACP initialize failed")?;
-            Ok::<(), anyhow::Error>(())
+            Ok::<Value, anyhow::Error>(response)
         })
         .await
         .unwrap_or_else(|_| Err(anyhow!("ACP initialize timed out after {}ms", timeout_ms)));
         let init_ms = elapsed_ms(init_started);
         tracing::info!(backend = %backend, init_ms, "acp.init.done");
 
-        if let Err(err) = init_result {
-            let _ = stdin.shutdown().await;
-            terminate_child_tree(&mut child).await;
-            return Err(err);
-        }
+        let init_response = match init_result {
+            Ok(response) => response,
+            Err(err) => {
+                let _ = stdin.shutdown().await;
+                terminate_child_tree(&mut child).await;
+                return Err(err);
+            }
+        };
+        let agent_capabilities = agent_capabilities_from_initialize(&init_response);
 
         Ok(Self {
             backend,
             cwd,
             session_id: None,
+            agent_capabilities,
             stdin,
             lines,
             child,
@@ -179,11 +196,15 @@ impl AcpClient {
     ) -> Result<AcpPromptOutput> {
         let total_started = Instant::now();
         self.prompt_counter += 1;
+        let progress = PromptProgress::shared(total_started);
+        let turn_progress = progress.clone();
         let result = timeout(Duration::from_millis(self.timeout_ms), async {
+            PromptProgress::set_phase(&turn_progress, "session/new");
             let session = self.ensure_session_timed(cwd).await?;
             tracing::info!(backend = %self.backend, session_reused = session.reused, session_new_ms = session.session_new_ms, "acp.session.resolved");
             let id = format!("prompt:{}", self.prompt_counter);
             let prompt_started = Instant::now();
+            PromptProgress::set_phase(&turn_progress, "session/prompt send");
             send_request(
                 &mut self.stdin,
                 id.clone(),
@@ -194,6 +215,13 @@ impl AcpClient {
                 }),
             )
             .await?;
+            PromptProgress::set_phase(&turn_progress, "awaiting first session/update");
+            tracing::info!(
+                backend = %self.backend,
+                prompt_id = %id,
+                prompt_bytes = prompt.len(),
+                "acp.prompt.sent"
+            );
             let stream_tx = self.stream_tx.clone();
             let event_tx = self.event_tx.clone();
             let (text, events) = read_prompt_events_for_id(
@@ -211,6 +239,7 @@ impl AcpClient {
                     cwd: &self.cwd,
                     cancel,
                     session_id: &session.session_id,
+                    progress: turn_progress.clone(),
                 },
             )
             .await?;
@@ -224,8 +253,32 @@ impl AcpClient {
                 session.session_id,
             ))
         })
-        .await
-        .unwrap_or_else(|_| Err(anyhow!("ACP prompt timed out after {}ms", self.timeout_ms)))?;
+        .await;
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => {
+                let snapshot = PromptProgress::snapshot(&progress);
+                tracing::warn!(
+                    backend = %self.backend,
+                    elapsed_ms = snapshot.elapsed_ms,
+                    phase = snapshot.phase,
+                    line_count = snapshot.line_count,
+                    update_count = snapshot.update_count,
+                    tool_call_count = snapshot.tool_call_count,
+                    first_update_ms = snapshot.first_update_ms,
+                    first_tool_call_ms = snapshot.first_tool_call_ms,
+                    "acp.prompt.timeout"
+                );
+                Err(anyhow!(
+                    "ACP prompt timed out after {}ms (phase={}, lines={}, updates={}, tool_calls={})",
+                    self.timeout_ms,
+                    snapshot.phase,
+                    snapshot.line_count,
+                    snapshot.update_count,
+                    snapshot.tool_call_count
+                ))
+            }
+        }?;
         let (text, events, session_reused, session_new_ms, prompt_ms, backend_session_id) = result;
         Ok(AcpPromptOutput {
             text,
@@ -243,6 +296,64 @@ impl AcpClient {
                 total_ms: elapsed_ms(total_started),
             },
         })
+    }
+
+    /// Restore the exact backend-native ACP session in this newly started
+    /// transport. Prefer `session/resume` (no replay), otherwise use the v1
+    /// `session/load` flow and drain replay notifications until its response.
+    /// Missing capabilities fail closed: callers must not claim continuity by
+    /// silently creating a replacement session.
+    pub async fn restore_session(
+        &mut self,
+        cwd: &std::path::PathBuf,
+        session_id: &str,
+    ) -> Result<&'static str> {
+        if session_id.trim().is_empty() || session_id.len() > 1_024 {
+            bail!("ACP restore session id must contain 1..=1024 bytes");
+        }
+        if self.cwd != *cwd {
+            bail!("ACP restore cwd must match the client process cwd");
+        }
+        if let Some(active) = self.session_id.as_deref() {
+            if active == session_id {
+                return Ok("already-active");
+            }
+            bail!("ACP client already owns a different active session");
+        }
+        let (method, mode) = if self.agent_capabilities.resume_session {
+            ("session/resume", "resume")
+        } else if self.agent_capabilities.load_session {
+            ("session/load", "load")
+        } else {
+            bail!(
+                "ACP backend does not advertise sessionCapabilities.resume or loadSession; exact session restore is unavailable"
+            );
+        };
+        let request_id = format!("session:restore:{}", self.prompt_counter);
+        send_request(
+            &mut self.stdin,
+            request_id.clone(),
+            method,
+            session_restore_params_with_options(
+                self.backend,
+                session_id,
+                &self.cwd,
+                &self.mcp_servers,
+                self.session_options,
+            ),
+        )
+        .await?;
+        wait_for_response(
+            &mut self.lines,
+            &request_id,
+            self.show_native,
+            self.timeout_ms,
+        )
+        .await
+        .with_context(|| format!("ACP {method} failed for persisted backend session"))?;
+        self.session_id = Some(session_id.to_string());
+        tracing::info!(backend = %self.backend, session_id = %session_id, restore_mode = mode, "acp.session.restored");
+        Ok(mode)
     }
 
     async fn ensure_session_timed(
@@ -447,3 +558,7 @@ where
         expected_id
     ))
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

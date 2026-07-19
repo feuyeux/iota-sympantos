@@ -60,7 +60,7 @@ capsule 这种形式的最大好处是兼容：它对所有后端都是可读纯
 
 它不让后端绕过 iota 直接动 memory DB 或 Kanban DB，既不静默批准，也不静默拒绝。只要后端有能力悄悄写本地状态，runtime 的「事实来源」当场就塌了。把事件归一、把调用拦下来，UI、可观测性、ledger 看到的才是同一个世界——否则你永远在追查「数据库里这条记录到底是谁写的」。
 
-**长任务交给 Kanban，别交给对话历史。** *↔ 9 要素 #4（子智能体）#6（持久化与记忆）。* 凡是「一次 prompt 干不完」的活，都装进 `iota-kanban` 的事件溯源任务板，由状态机推着走 triage → todo → ready → running → done，再由 dispatcher 调度 Hermes worker 去执行。Hermes 只能透过 shadow DB 间接碰主库。
+**长任务交给 Kanban，别交给对话历史。** *↔ 9 要素 #4（子智能体）#6（持久化与记忆）。* 凡是「一次 prompt 干不完」的活，都装进 `iota-sympantos-kanban` 的事件溯源任务板，由状态机推着走 triage → todo → ready → running → done，再由 dispatcher 调度 Hermes worker 去执行。Hermes 只能透过 shadow DB 间接碰主库。
 
 这是从血的教训里来的：对话历史会被截断、被压缩、跨 session 直接丢掉，拿它当「待办清单」早晚出事。任务板才是结构化、能恢复、能同步的事实层。再加一层 shadow DB，外部 worker 崩了也脏不到 iota 主库。
 
@@ -84,7 +84,7 @@ iota-sympantos 包含四个 crate：
 | :--- | :--- | :--- |
 | `iota-cli` | Binary crate | CLI 命令、TUI、daemon client、Kanban CLI、observability CLI |
 | `iota-core` | Library crate | Workspace 目录名；发布包名为 `iota-sympantos-core`，library target 为 `iota_core`。负责 ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
-| `iota-kanban` | Library crate | 已发布到 crates.io 的独立 crate，负责 Event-sourced Kanban、状态机、Hermes worker、shadow DB、跨节点同步 |
+| `iota-sympantos-kanban` | Library crate | 已发布到 crates.io 的独立 crate，负责 Event-sourced Kanban、状态机、Hermes worker、shadow DB、跨节点同步 |
 | `iota-desktop/src-tauri` | Tauri crate | 桌面端 Rust 命令、daemon client、Kanban 命令绑定 |
 
 核心目录结构：
@@ -110,9 +110,9 @@ crates/
 └── iota-desktop/            # React frontend + Tauri backend
 ```
 
-`iota-core` 刻意不碰任何 UI，CLI、TUI、daemon、desktop 才能共用同一份 runtime，不会出现「同一件事四个地方各写一遍」；`iota-kanban` 单独成一个领域库，是因为不想让任务板的状态机逻辑和 ACP 编排搅在一起；`iota-cli` 和 `iota-desktop` 纯粹是两层不同的 presentation，谁也不该知道对方的存在。
+`iota-core` 刻意不碰任何 UI，CLI、TUI、daemon、desktop 才能共用同一份 runtime，不会出现「同一件事四个地方各写一遍」；`iota-sympantos-kanban` 单独成一个领域库，是因为不想让任务板的状态机逻辑和 ACP 编排搅在一起；`iota-cli` 和 `iota-desktop` 纯粹是两层不同的 presentation，谁也不该知道对方的存在。
 
-这两个库也有明确的发布边界。外部项目依赖 `iota-sympantos-core`；源码里的 crate 名仍是 `iota_core`。Kanban 作为独立包发布，core 默认不拉入它，只有启用 `kanban` feature 才增加 `iota-kanban` 依赖和对应 MCP tools。workspace 内部同时写 `version` 和 `path`：本地构建走源码目录，`cargo package` 后则从 registry 校验版本依赖。
+这两个库也有明确的发布边界。外部项目依赖 `iota-sympantos-core`；源码里的 crate 名仍是 `iota_core`。Kanban 作为独立包发布，core 默认不拉入它，只有启用 `kanban` feature 才增加 `iota-sympantos-kanban` 依赖和对应 MCP tools。workspace 内部同时写 `version` 和 `path`：本地构建走源码目录，`cargo package` 后则从 registry 校验版本依赖。
 
 ## 运行时主线
 
@@ -448,7 +448,7 @@ Desktop protocol v2 支持的消息类型包括 Hello、StartTurn、RespondAppro
 
 *图：Kanban 状态机与事件溯源——左侧 triage→todo→ready→running→done→archived（含 blocked）状态迁移，中间 append-only 事件存储与物化表，右侧 dispatcher / worker / shadow 执行管线。*
 
-`iota-kanban` 是一个 event-sourced task board。它的状态机不长，但覆盖了真实任务流转的几种核心情况：
+`iota-sympantos-kanban` 是一个 event-sourced task board。它的状态机不长，但覆盖了真实任务流转的几种核心情况：
 
 ```text
 triage -> todo -> ready -> running -> done -> archived

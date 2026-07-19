@@ -82,7 +82,7 @@ Stores and observability
 | :--- | :--- |
 | `iota-cli` | 用户命令入口、TUI、daemon autostart、observability 查询、Kanban CLI |
 | `iota-core` | Workspace 目录名；registry 包名为 `iota-sympantos-core`，library target 为 `iota_core`。承载 ACP/MCP/daemon/engine/config/context/memory/skill/store/telemetry 核心运行时 |
-| `iota-kanban` | 已发布的独立 library crate；承载 Kanban 领域模型、状态机、SQLite event sourcing、Hermes worker、shadow workspace、event sync |
+| `iota-sympantos-kanban` | 已发布的独立 library crate；承载 Kanban 领域模型、状态机、SQLite event sourcing、Hermes worker、shadow workspace、event sync |
 | `iota-desktop` | Tauri + React desktop，复用 daemon streaming protocol；提供 chat/config/inspector/memory/context UI，并在 Rust commands 中接入 Kanban store |
 
 ## 核心模块
@@ -91,7 +91,7 @@ Stores and observability
 | :--- | :--- |
 | `engine/` | 按 `(backend, cwd)` 复用 ACP client；处理 session ledger、handoff、memory recall/write、skill short-circuit、context capsule、ACP 调用、events 和 store 写回 |
 | `acp/` | 后端枚举、命令解析、子进程生命周期、`initialize/session/new/session/prompt`、stream reader、permission、wire parse |
-| `daemon/` | 默认 `127.0.0.1:47661` TCP daemon；legacy CLI request/response；desktop protocol v2；config、backend check、observability、memory/context snapshot |
+| `daemon/` | 默认 `127.0.0.1:47661` TCP daemon（回环地址，无鉴权，见「安全边界」）；legacy CLI request/response；desktop protocol v2；config、backend check、observability、memory/context snapshot |
 | `config/` | 唯一读取 `~/.i6/nimia.yaml`；生成 effective config、backend command/env、context options、MCP server 注入；包含 `effective.rs`（resolved config with defaults）、`helpers.rs`（path expansion, command normalization）、`paths.rs`（store path resolution） |
 | `context/` | 组装 `<iota-context>` capsule：session、memory tools、memory buckets、working memory、workspace、skills、handoff |
 | `memory/` | 六桶 memory taxonomy、FTS/LIKE、vector/hybrid search、embedding API 或 local trigram fallback |
@@ -175,6 +175,17 @@ React ChatWorkbench
 
 Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 
+### ACP 会话恢复能力协商
+
+`AcpClient::start()` 会从 `initialize` 响应中分别解析两类恢复能力：
+
+- `/agentCapabilities/sessionCapabilities/resume`：允许使用 `session/resume` 恢复后端原生会话；
+- `/agentCapabilities/loadSession`：允许回退到 ACP v1 的 `session/load` 流程。
+
+恢复时优先使用 `session/resume`，后端未声明该能力时才尝试 `session/load`。两项能力独立解析；字段缺失或响应形状不匹配时均视为不支持。此路径采用 fail-closed 语义：当后端没有明确声明任一能力时，`restore_session()` 返回错误，不会静默创建替代会话并宣称上下文连续。
+
+恢复请求还要求 session ID 为 1..=1024 字节、恢复 cwd 与 ACP client 进程 cwd 一致，且 client 当前未持有另一个活动 session。
+
 ## 配置模型
 
 配置只从 `~/.i6/nimia.yaml` 读取。顶层包含五个 backend section、`model`、`context_engine`、`context_engine_backend` 和 store/observability 相关配置。
@@ -204,7 +215,7 @@ Hermes 使用自己的默认 home，配置和 desktop 都不应覆盖 `HERMES_HO
 
 ## Kanban
 
-`iota-kanban` 提供：
+`iota-sympantos-kanban` 提供：
 
 - `Task`、`Board`、`Run`、`Comment`、`Link` 领域类型。
 - 状态机：`triage -> todo -> ready -> running -> done -> archived`，支持 `blocked`。
@@ -228,14 +239,21 @@ Desktop 由 React + Tauri 组成，当前界面是一个 daemon-first 的本地�
 
 ## 依赖规则
 
-- 外部消费者通过 crates.io 使用 `iota-sympantos-core` 和 `iota-kanban`；workspace 内部依赖同时声明 `version` 与 `path`，本地开发走 path，发布产物按 version 从 registry 解析。
-- `iota-sympantos-core` 默认不依赖 Kanban；启用 `kanban` feature 后接入 `iota-kanban` 和 `iota_kanban_*` MCP tools。
+- 外部消费者通过 crates.io 使用 `iota-sympantos-core` 和 `iota-sympantos-kanban`；workspace 内部依赖同时声明 `version` 与 `path`，本地开发走 path，发布产物按 version 从 registry 解析。
+- `iota-sympantos-core` 的 `LocalResources` 只接收宿主显式提供的本地 skill roots；标准 workspace 布局为 `<workspace>/skills` 与 `<workspace>/.iota/skills`。core 不下载项目资源，也不持有宿主的发布或凭证配置。
+- `iota-sympantos-core` 默认不依赖 Kanban；启用 `kanban` feature 后接入 `iota-sympantos-kanban` 和 `iota_kanban_*` MCP tools。
 - `iota-core/src/acp/` 不依赖 CLI、TUI、desktop 或 daemon UI 层。
 - Store 模块只暴露 typed operations，不调用 UI、daemon、ACP client 或 MCP client。
 - Presentation 层不直接拥有 ACP session；后端执行统一经过 `IotaEngine` 或 daemon API。
 - 外部进程、TCP、network、SQLite 边界必须显式。
 - 路径处理使用 `Path`/`PathBuf`，home 目录通过 `dirs::home_dir()`。
-- 测试必须放在独立 `*_tests.rs` 文件中，用 `#[path = "..."]` 引用，禁止内联 `mod tests`。
+- 测试必须放在与源模块同目录的独立 `<module>_tests.rs` 文件中；源文件使用 `#[cfg(test)]` 和 `#[path = "<module>_tests.rs"] mod tests;` 引入。
+- `*_tests.rs` 中的测试函数必须位于文件顶层，并通过 `crate::...` 绝对路径导入被测项；禁止内联 `mod tests` 和 `use super::*`。例如 ACP capability 测试位于 `acp/client_tests.rs`，本地资源测试位于 `resources_tests.rs`。
+
+## 安全边界
+
+- **daemon TCP 无鉴权（信任边界假设）**：`daemon/` 监听 `127.0.0.1:47661`（默认，可用 `IOTA_DAEMON_ADDR` 覆盖），协议是明文 JSON-line，**不做任何身份认证或授权检查**——任何能连接到该地址的本地进程都可以发起 prompt、读取 observability/memory/context snapshot、操作 approval。当前设计依赖两条隐含假设：(1) 绑定回环地址，网络上的其他主机无法直接连接；(2) 运行 daemon 的主机是单用户或所有本地进程都被视为同一信任域。**在多用户共享主机上，本机其他用户的进程可以连接该 daemon 并冒用其能力**（发起任意 prompt、读取该用户的 memory/context 数据）。这是当前架构的已知信任边界，不是需要立即修复的漏洞，但若部署到多用户主机或以更高权限运行 daemon，需要重新评估该假设。
+- 若未来需要加固，可选方向包括：daemon socket 增加 per-connection token 校验（类似桌面协议 `Hello` 消息可扩展携带凭证）、改用 Unix domain socket 并设置文件权限、或限制 daemon 只在容器/单用户环境中运行。
 
 ## 扩展点
 
@@ -248,4 +266,4 @@ Desktop 由 React + Tauri 组成，当前界面是一个 daemon-first 的本地�
 | 新 MCP 工具 | `mcp/tool_dispatch.rs`、`mcp/server.rs`、必要时 `mcp/router.rs` |
 | 新 memory 能力 | `memory/` 和 `mcp/tool_dispatch.rs` |
 | 新 desktop daemon 消息 | `daemon/proto.rs`、`daemon/desktop.rs`、`src-tauri/src/daemon_client.rs`、frontend reducer/types |
-| 新 Kanban 行为 | `iota-kanban` domain/store/state machine，CLI 和 desktop commands 按需接入 |
+| 新 Kanban 行为 | `iota-sympantos-kanban` domain/store/state machine，CLI 和 desktop commands 按需接入 |

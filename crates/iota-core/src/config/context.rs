@@ -81,6 +81,14 @@ impl ContextInjection {
     pub fn is_off(&self) -> bool {
         matches!(self, Self::Off)
     }
+
+    /// Whether the context fabric should be embedded in the ACP prompt.
+    ///
+    /// `Mcp` deliberately keeps the context service available as tools while
+    /// avoiding a second copy of the same material in every model request.
+    pub fn injects_prompt(&self) -> bool {
+        matches!(self, Self::Auto | Self::Prompt)
+    }
 }
 
 impl Serialize for ContextInjection {

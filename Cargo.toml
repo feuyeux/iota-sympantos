@@ -41,4 +41,4 @@ unicode-segmentation = "1.13.2"
 unicode-width = "0.2.0"
 urlencoding = "2.1.3"
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
-iota-kanban = { path = "crates/iota-kanban" }
+iota-kanban = { package = "iota-sympantos-kanban", path = "crates/iota-kanban" }

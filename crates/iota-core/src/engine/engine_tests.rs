@@ -390,3 +390,12 @@ fn recent_context_snapshot_ignores_memory_tools_when_parsing_memory_sections() {
     assert!(!memory_section.preview.contains("memory-tools"));
     assert!(!memory_section.preview.contains("iota_memory_write"));
 }
+
+#[test]
+fn ephemeral_session_disables_every_durable_store() {
+    let engine = IotaEngine::create_ephemeral_session(NimiaConfig::default(), false, 1_000);
+    assert!(engine.memory_store.is_none());
+    assert!(engine.cache_store.is_none());
+    assert!(engine.observability_store.is_none());
+    assert!(engine.session_ledger_store.is_none());
+}

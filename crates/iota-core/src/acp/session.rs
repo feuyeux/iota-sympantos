@@ -60,6 +60,23 @@ pub fn session_new_params_with_options(
     }
 }
 
+pub fn session_restore_params_with_options(
+    backend: AcpBackend,
+    session_id: &str,
+    cwd: &Path,
+    servers: &[AcpMcpServer],
+    options: AcpSessionOptions,
+) -> Value {
+    let mut params = session_new_params_with_options(backend, cwd, servers, options);
+    if let Some(object) = params.as_object_mut() {
+        object.insert(
+            "sessionId".to_string(),
+            Value::String(session_id.to_string()),
+        );
+    }
+    params
+}
+
 fn render_mcp_server(server: &AcpMcpServer, env_shape: AcpMcpEnvShape) -> Value {
     let env: Value = match env_shape {
         AcpMcpEnvShape::EnvVarArray => server

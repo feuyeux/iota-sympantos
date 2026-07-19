@@ -480,12 +480,16 @@ async fn add_comment(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::collapsible_if)]
 pub fn run() {
-    let home = dirs::home_dir().expect("could not find home directory");
-    let kanban_dir = home.join(".i6").join("kanban");
+    let store_path =
+        iota_core::config::paths::kanban_db_path().expect("could not find home directory");
+    let kanban_dir = store_path
+        .parent()
+        .expect("kanban_db_path always has a parent directory")
+        .to_path_buf();
     std::fs::create_dir_all(&kanban_dir).expect("failed to create kanban directory");
 
-    let store_path = kanban_dir.join("iota.db");
-    let shadows_dir = kanban_dir.join("shadows");
+    let shadows_dir =
+        iota_core::config::paths::kanban_shadows_dir().expect("could not find home directory");
     std::fs::create_dir_all(&shadows_dir).expect("failed to create shadows directory");
 
     let store = SqliteKanbanStore::open(&store_path).expect("failed to open sqlite store");

@@ -3,6 +3,7 @@ use anyhow::Result;
 use iota_core::acp;
 use iota_core::config;
 use iota_core::engine::IotaEngine;
+use iota_core::resources::LocalResources;
 
 pub(super) async fn run_direct(options: &acp::AcpRunOptions) -> Result<()> {
     let config = config::read_config()?;
@@ -13,9 +14,14 @@ pub(super) async fn run_direct(options: &acp::AcpRunOptions) -> Result<()> {
         for backend in acp::ALL_BACKENDS {
             let backend_name = backend.to_string();
             let config = config.clone();
-            let mut engine =
-                IotaEngine::create_session(config, options.show_native, options.timeout_ms, None);
             let cwd = options.cwd.clone();
+            let mut engine = IotaEngine::create_session_with_resources(
+                config,
+                LocalResources::from_workspace(cwd.clone()),
+                options.show_native,
+                options.timeout_ms,
+                None,
+            );
             let prompt = options.prompt.clone();
             let timing = options.timing;
             handles.push(spawn(async move {
@@ -44,8 +50,13 @@ pub(super) async fn run_direct(options: &acp::AcpRunOptions) -> Result<()> {
             }
         }
     } else {
-        let mut engine =
-            IotaEngine::create_session(config, options.show_native, options.timeout_ms, None);
+        let mut engine = IotaEngine::create_session_with_resources(
+            config,
+            LocalResources::from_workspace(options.cwd.clone()),
+            options.show_native,
+            options.timeout_ms,
+            None,
+        );
         let result = engine
             .run_with_timing(options.backend, options.cwd.clone(), &options.prompt)
             .await;

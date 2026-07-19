@@ -28,3 +28,20 @@ impl StorePaths {
         self.root.join("store.sqlite")
     }
 }
+
+/// The default `SqliteKanbanStore` database path (`~/.i6/kanban/iota.db`).
+///
+/// Kept alongside `StorePaths` so every `~/.i6`-rooted path this crate
+/// resolves goes through one module instead of each caller re-deriving
+/// `dirs::home_dir().join(".i6")...` independently. `iota-kanban` is a
+/// separate, dependency-free published crate and cannot use this helper
+/// directly; it resolves the same path with its own local
+/// `crate::paths::default_shadows_dir` for that reason.
+pub fn kanban_db_path() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".i6").join("kanban").join("iota.db"))
+}
+
+/// The default Kanban shadow-workspace directory (`~/.i6/kanban/shadows`).
+pub fn kanban_shadows_dir() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".i6").join("kanban").join("shadows"))
+}

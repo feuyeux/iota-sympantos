@@ -1,4 +1,25 @@
+use crate::config::{ContextEngineConfig, ContextInjection};
 use crate::context::*;
+
+#[test]
+fn mcp_injection_does_not_embed_context_in_the_prompt() {
+    let engine = ContextEngine::from_config(Some(&ContextEngineConfig {
+        injection: ContextInjection::Mcp,
+        ..ContextEngineConfig::default()
+    }));
+
+    assert!(!engine.enabled);
+}
+
+#[test]
+fn prompt_injection_embeds_context_in_the_prompt() {
+    let engine = ContextEngine::from_config(Some(&ContextEngineConfig {
+        injection: ContextInjection::Prompt,
+        ..ContextEngineConfig::default()
+    }));
+
+    assert!(engine.enabled);
+}
 
 #[test]
 fn disabled_context_returns_prompt_unchanged() {

@@ -157,3 +157,21 @@ fn env_shape_parse_recognizes_variants() {
     }
     assert!(AcpMcpEnvShape::parse("unknown").is_none());
 }
+
+#[test]
+fn restore_params_include_exact_session_cwd_and_full_mcp_set() {
+    let options = AcpSessionOptions {
+        always_send_empty_mcp_servers: true,
+        mcp_env_shape: AcpMcpEnvShape::default(),
+    };
+    let params = session_restore_params_with_options(
+        AcpBackend::Hermes,
+        "backend-session-opaque-7",
+        &PathBuf::from("/workspace/project"),
+        &[server()],
+        options,
+    );
+    assert_eq!(params["sessionId"], "backend-session-opaque-7");
+    assert_eq!(params["cwd"], "/workspace/project");
+    assert_eq!(params["mcpServers"][0]["name"], "iota-context");
+}

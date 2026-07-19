@@ -1,14 +1,14 @@
-# iota-kanban
+# iota-sympantos-kanban
 
-`iota-kanban` is the event-sourced Kanban task orchestration library used by iota-sympantos. It provides task and board domain types, SQLite persistence, lifecycle validation, dispatcher and worker coordination, shadow workspaces, advanced task decomposition, and cross-node event synchronization.
+`iota-sympantos-kanban` is the event-sourced Kanban task orchestration library used by iota-sympantos. It provides task and board domain types, SQLite persistence, lifecycle validation, dispatcher and worker coordination, shadow workspaces, advanced task decomposition, and cross-node event synchronization.
 
-Published package: [crates.io](https://crates.io/crates/iota-kanban) · [docs.rs](https://docs.rs/iota-kanban/0.1.0)
+Published package: [crates.io](https://crates.io/crates/iota-sympantos-kanban) · [docs.rs](https://docs.rs/iota-sympantos-kanban/0.1.0)
 
 ## Add the dependency
 
 ```toml
 [dependencies]
-iota-kanban = "0.1.0"
+iota-kanban = { package = "iota-sympantos-kanban", version = "0.1.0" }
 ```
 
 ## Core API

@@ -85,11 +85,13 @@ impl IotaEngine {
         tracing::Span::current().record("request.hash", &request_hash);
         tracing::info!("prompt.requested");
 
-        let skills = SkillRegistry::load_cached(
-            &cwd,
-            self.effective_config.skill_roots(),
-            &mut self.skill_registry_cache,
-        );
+        let mut skill_roots = self.effective_config.skill_roots().to_vec();
+        for root in &self.resource_skill_roots {
+            if !skill_roots.contains(root) {
+                skill_roots.push(root.clone());
+            }
+        }
+        let skills = SkillRegistry::load_cached(&cwd, &skill_roots, &mut self.skill_registry_cache);
         let matched_skill = skills.match_skill(backend, prompt);
         let model = self
             .effective_config
@@ -306,8 +308,19 @@ impl IotaEngine {
             mcp_tools_available,
             workspace: Some(&workspace_str),
         });
+        let context_injected = effective_prompt.contains("<iota-context>");
+        let context_config = self.effective_config.context_engine();
+        tracing::info!(
+            backend = %backend,
+            raw_prompt_bytes = prompt.len(),
+            effective_prompt_bytes = effective_prompt.len(),
+            context_injected,
+            context_injection = context_config.injection.as_str(),
+            mcp_server_count = self.effective_config.context_mcp_servers(backend).len(),
+            "prompt.composed"
+        );
 
-        if effective_prompt.contains("<iota-context>") {
+        if context_injected {
             self.capture_runtime_context_snapshot(
                 execution_id
                     .clone()

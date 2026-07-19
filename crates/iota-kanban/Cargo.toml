@@ -1,5 +1,5 @@
 [package]
-name = "iota-kanban"
+name = "iota-sympantos-kanban"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

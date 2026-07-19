@@ -8,10 +8,9 @@ use crate::config::{
     normalized_acp_command,
 };
 use crate::context::{ContextEngine, WorkingMemoryBuffer};
-use crate::daemon::{
-    DesktopContextBudgetsSnapshot, DesktopContextSection, DesktopRuntimeContextSnapshot,
-};
 use crate::memory::MemoryStore;
+use crate::resources::LocalResources;
+use crate::runtime_snapshot::{ContextBudgetsSnapshot, ContextSection, RuntimeContextSnapshot};
 use crate::skill::SkillCache;
 use crate::store::cache::CacheStore;
 use crate::store::ledger::SessionLedger;
@@ -63,12 +62,14 @@ pub struct IotaEngine {
     last_used_backend: Option<AcpBackend>,
     /// In-memory cache for loaded skill manifests to avoid repeated filesystem scans.
     skill_registry_cache: SkillCache,
+    /// Explicit local resources supplied by the application embedding this crate.
+    resource_skill_roots: Vec<PathBuf>,
     /// Optional live text stream sender used by TUI/desktop turns.
     stream_output_sender: Option<tokio::sync::mpsc::Sender<String>>,
     /// Optional live runtime event sender used by desktop inspectors.
     stream_event_sender: Option<tokio::sync::mpsc::Sender<crate::runtime_event::RuntimeEvent>>,
     /// Last actual context capsule sent to a backend in this process. Not persisted.
-    pub recent_runtime_context: Option<DesktopRuntimeContextSnapshot>,
+    pub recent_runtime_context: Option<RuntimeContextSnapshot>,
 }
 
 impl IotaEngine {
@@ -78,28 +79,65 @@ impl IotaEngine {
         Self::create_session(config, show_native, timeout_ms, session_cwd.as_deref())
     }
 
-    /// Build an engine and optionally reuse the latest ledger session for `session_cwd`.
+    /// Build a normal durable engine and optionally reuse the latest ledger session.
     pub fn create_session(
         config: NimiaConfig,
         show_native: bool,
         timeout_ms: u64,
         session_cwd: Option<&std::path::Path>,
     ) -> Self {
+        Self::create_session_internal(config, show_native, timeout_ms, session_cwd, true)
+    }
+
+    /// Build an isolated engine with all memory, cache, observability, and
+    /// session-ledger stores disabled. Intended for private one-shot model
+    /// evaluations whose prompts must not enter local durable context.
+    pub fn create_ephemeral_session(
+        config: NimiaConfig,
+        show_native: bool,
+        timeout_ms: u64,
+    ) -> Self {
+        Self::create_session_internal(config, show_native, timeout_ms, None, false)
+    }
+
+    fn create_session_internal(
+        config: NimiaConfig,
+        show_native: bool,
+        timeout_ms: u64,
+        session_cwd: Option<&std::path::Path>,
+        persistent: bool,
+    ) -> Self {
         let effective_config = EffectiveConfig::from_config(&config);
         let context_engine = ContextEngine::from_config(Some(effective_config.context_engine()));
         let embedding_cfg = effective_config.embedding_config();
-        let memory_store = effective_config
-            .memory_db_path()
-            .and_then(|path| MemoryStore::open_with_embedding(path, embedding_cfg).ok());
-        let cache_store = CacheStore::default_path()
-            .ok()
-            .and_then(|path| CacheStore::open(&path).ok());
-        let observability_store = ObservabilityStore::default_path()
-            .ok()
-            .and_then(|path| ObservabilityStore::open(&path).ok());
-        let session_ledger_store = SessionLedger::default_path()
-            .ok()
-            .and_then(|path| SessionLedger::open(&path).ok());
+        let memory_store = persistent
+            .then(|| {
+                effective_config
+                    .memory_db_path()
+                    .and_then(|path| MemoryStore::open_with_embedding(path, embedding_cfg).ok())
+            })
+            .flatten();
+        let cache_store = persistent
+            .then(|| {
+                CacheStore::default_path()
+                    .ok()
+                    .and_then(|path| CacheStore::open(&path).ok())
+            })
+            .flatten();
+        let observability_store = persistent
+            .then(|| {
+                ObservabilityStore::default_path()
+                    .ok()
+                    .and_then(|path| ObservabilityStore::open(&path).ok())
+            })
+            .flatten();
+        let session_ledger_store = persistent
+            .then(|| {
+                SessionLedger::default_path()
+                    .ok()
+                    .and_then(|path| SessionLedger::open(&path).ok())
+            })
+            .flatten();
         // Reuse the latest session for this cwd when available so daemon/TUI restarts preserve
         // continuity; otherwise create a fresh session id.
         let mut engine = Self {
@@ -116,11 +154,26 @@ impl IotaEngine {
             session_ledger_store,
             last_used_backend: None,
             skill_registry_cache: SkillCache::default(),
+            resource_skill_roots: Vec::new(),
             stream_output_sender: None,
             stream_event_sender: None,
             recent_runtime_context: None,
         };
         engine.resume_session_state(session_cwd);
+        engine
+    }
+
+    /// Build an engine using local project resources supplied by the host
+    /// application. No resource is fetched from the network by this crate.
+    pub fn create_session_with_resources(
+        config: NimiaConfig,
+        resources: LocalResources,
+        show_native: bool,
+        timeout_ms: u64,
+        session_cwd: Option<&std::path::Path>,
+    ) -> Self {
+        let mut engine = Self::create_session(config, show_native, timeout_ms, session_cwd);
+        engine.resource_skill_roots = resources.skill_roots().to_vec();
         engine
     }
 
@@ -300,6 +353,27 @@ impl IotaEngine {
         self.ensure_acp_client(backend, cwd).await
     }
 
+    /// Reattach a newly started ACP transport to one exact backend-native
+    /// session. The backend must advertise `session/resume` or `loadSession`;
+    /// no fresh-session fallback is performed.
+    pub async fn restore_backend_session(
+        &mut self,
+        backend: AcpBackend,
+        cwd: PathBuf,
+        backend_session_id: &str,
+    ) -> Result<&'static str> {
+        self.ensure_acp_client(backend, cwd.clone()).await?;
+        let key = AcpClientKey {
+            backend,
+            cwd: cwd.clone(),
+        };
+        self.acp_clients
+            .get_mut(&key)
+            .context("ACP client missing after warm")?
+            .restore_session(&cwd, backend_session_id)
+            .await
+    }
+
     /// Consume the engine and shut down every open ACP child process.
     pub async fn shutdown(mut self) {
         while let Some((_, client)) = self.acp_clients.pop_first() {
@@ -420,7 +494,7 @@ impl IotaEngine {
         // Keep this as a single hook for future OTel UpDownCounter session tracking.
     }
 
-    pub fn recent_runtime_context_snapshot(&self) -> Option<DesktopRuntimeContextSnapshot> {
+    pub fn recent_runtime_context_snapshot(&self) -> Option<RuntimeContextSnapshot> {
         self.recent_runtime_context.clone()
     }
 
@@ -440,7 +514,7 @@ impl IotaEngine {
         model: Option<String>,
         capsule_text: String,
     ) {
-        self.recent_runtime_context = Some(DesktopRuntimeContextSnapshot {
+        self.recent_runtime_context = Some(RuntimeContextSnapshot {
             turn_id,
             backend: backend.to_string(),
             cwd,
@@ -449,12 +523,12 @@ impl IotaEngine {
             created_at: crate::utils::now_ts(),
             sections: parse_context_sections(&capsule_text),
             capsule_text,
-            budgets: DesktopContextBudgetsSnapshot::from(self.context_engine.budgets()),
+            budgets: ContextBudgetsSnapshot::from(self.context_engine.budgets()),
         });
     }
 }
 
-impl From<crate::context::ContextBudgets> for DesktopContextBudgetsSnapshot {
+impl From<crate::context::ContextBudgets> for ContextBudgetsSnapshot {
     fn from(value: crate::context::ContextBudgets) -> Self {
         Self {
             memory_chars: value.memory_chars,
@@ -466,7 +540,7 @@ impl From<crate::context::ContextBudgets> for DesktopContextBudgetsSnapshot {
     }
 }
 
-fn parse_context_sections(capsule: &str) -> Vec<DesktopContextSection> {
+fn parse_context_sections(capsule: &str) -> Vec<ContextSection> {
     let Some(start) = capsule.find("<iota-context>") else {
         return Vec::new();
     };
@@ -491,7 +565,7 @@ fn parse_context_sections(capsule: &str) -> Vec<DesktopContextSection> {
             let section_start = body.find(&open)? + open.len();
             let section_end = body[section_start..].find(&close)? + section_start;
             let text = body[section_start..section_end].trim();
-            Some(DesktopContextSection {
+            Some(ContextSection {
                 name: (*name).to_string(),
                 chars: text.len(),
                 preview: crate::utils::summarize(text, 180),
@@ -504,7 +578,7 @@ fn parse_context_sections(capsule: &str) -> Vec<DesktopContextSection> {
     sections
 }
 
-fn parse_memory_context_section(body: &str) -> Option<DesktopContextSection> {
+fn parse_memory_context_section(body: &str) -> Option<ContextSection> {
     let mut rest = body;
     let mut content = Vec::new();
     while let Some(open_start) = rest.find("<memory") {
@@ -533,7 +607,7 @@ fn parse_memory_context_section(body: &str) -> Option<DesktopContextSection> {
         return None;
     }
     let joined = content.join("\n\n");
-    Some(DesktopContextSection {
+    Some(ContextSection {
         name: "memory".to_string(),
         chars: joined.len(),
         preview: crate::utils::summarize(&joined, 180),

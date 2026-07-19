@@ -12,7 +12,7 @@ iota-core = { package = "iota-sympantos-core", version = "0.1.0" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Enable the optional Kanban MCP tools when the consuming project needs the iota Kanban integration. This feature uses the separately published [`iota-kanban`](https://crates.io/crates/iota-kanban) crate:
+Enable the optional Kanban MCP tools when the consuming project needs the iota Kanban integration. This feature uses the separately published [`iota-sympantos-kanban`](https://crates.io/crates/iota-sympantos-kanban) crate:
 
 ```toml
 [dependencies]
@@ -32,14 +32,16 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ```rust,no_run
 use iota_core::config::read_config;
-use iota_core::{AcpBackend, IotaEngine, DEFAULT_TIMEOUT_MS};
+use iota_core::{AcpBackend, IotaEngine, LocalResources, DEFAULT_TIMEOUT_MS};
 use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = read_config()?;
-    let mut engine = IotaEngine::create_session(
+    let workspace = PathBuf::from(".");
+    let mut engine = IotaEngine::create_session_with_resources(
         config,
+        LocalResources::from_workspace(workspace.clone()),
         false,
         DEFAULT_TIMEOUT_MS,
         None,
@@ -47,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = engine
         .run_with_timing(
             AcpBackend::Codex,
-            PathBuf::from("."),
+            workspace,
             "Summarize this project",
         )
         .await?;
@@ -56,13 +58,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The configuration loader intentionally reads `~/.i6/nimia.yaml`, matching the iota runtime. Consumers that need explicit configuration can construct `NimiaConfig` directly and pass it to `IotaEngine::create_session`.
+The configuration loader intentionally reads `~/.i6/nimia.yaml`, matching the iota runtime. Consumers that need explicit configuration can construct `NimiaConfig` directly. Each application supplies its own local resources through `LocalResources`; the registry crate does not download project content or credentials.
 
 ## Features
 
 | Feature | Default | Effect |
 | :------ | :------ | :----- |
-| `kanban` | No | Enables `iota-kanban` and the `iota_kanban_*` MCP tools. |
+| `kanban` | No | Enables `iota-sympantos-kanban` and the `iota_kanban_*` MCP tools. |
 
 ## Compatibility
 
@@ -70,5 +72,5 @@ The crate supports Windows, macOS, and Linux. It requires Rust 1.95.0 or newer a
 
 ## Related crates
 
-- [`iota-kanban`](https://crates.io/crates/iota-kanban) provides the event-sourced task board, dispatcher, workers, shadow workspaces, and event synchronization.
+- [`iota-sympantos-kanban`](https://crates.io/crates/iota-sympantos-kanban) provides the event-sourced task board, dispatcher, workers, shadow workspaces, and event synchronization.
 - [`iota-sympantos`](https://github.com/feuyeux/iota-sympantos) provides the CLI, TUI, daemon, and desktop applications built on this runtime.

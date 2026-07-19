@@ -2146,8 +2146,8 @@ dependencies = [
  "dirs",
  "futures-util",
  "hostname",
- "iota-kanban",
  "iota-sympantos-core",
+ "iota-sympantos-kanban",
  "pulldown-cmark",
  "ratatui",
  "reqwest 0.13.3",
@@ -2167,8 +2167,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
- "iota-kanban",
  "iota-sympantos-core",
+ "iota-sympantos-kanban",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2176,24 +2176,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tokio",
- "uuid",
-]
-
-[[package]]
-name = "iota-kanban"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dirs",
- "futures-util",
- "hostname",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
- "tracing",
  "uuid",
 ]
 
@@ -2208,7 +2190,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hostname",
- "iota-kanban",
+ "iota-sympantos-kanban",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -2224,6 +2206,24 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "iota-sympantos-kanban"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "hostname",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "uuid",
 ]
 

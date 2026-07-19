@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::config::NimiaConfig;
 use crate::engine::IotaEngine;
+use crate::resources::LocalResources;
 
 /// Composite key used to bucket engines by working directory.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -44,8 +45,9 @@ impl EnginePool {
         self.engines
             .entry(key)
             .or_insert_with(|| {
-                Arc::new(Mutex::new(IotaEngine::create_session(
+                Arc::new(Mutex::new(IotaEngine::create_session_with_resources(
                     self.config.clone(),
+                    LocalResources::from_workspace(cwd.clone()),
                     self.show_native,
                     timeout_ms,
                     Some(&cwd),

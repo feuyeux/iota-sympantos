@@ -57,7 +57,9 @@ pub struct ComposeInput<'a> {
 impl ContextEngine {
     pub fn from_config(config: Option<&ContextEngineConfig>) -> Self {
         let enabled = config.map(|cfg| cfg.enabled).unwrap_or(true)
-            && config.map(|cfg| !cfg.injection.is_off()).unwrap_or(true);
+            && config
+                .map(|cfg| cfg.injection.injects_prompt())
+                .unwrap_or(true);
         let budgets = config.and_then(|cfg| cfg.budgets).unwrap_or_default();
         Self { enabled, budgets }
     }

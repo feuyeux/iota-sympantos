@@ -147,7 +147,7 @@ impl BackendAdapter for GeminiAdapter {
 pub struct HermesAdapter;
 impl BackendAdapter for HermesAdapter {
     fn home_env_key(&self) -> Option<&'static str> {
-        None
+        Some("HERMES_HOME")
     }
     fn acp_command(&self) -> (&'static str, Vec<&'static str>) {
         ("hermes", vec!["acp"])

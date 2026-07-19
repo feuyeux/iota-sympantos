@@ -1,5 +1,23 @@
 use crate::acp::AcpBackend;
-use crate::config::{BackendConfig, CommandConfig, ModelConfig, NimiaConfig, backend_readiness};
+use crate::config::{
+    BackendConfig, CommandConfig, ModelConfig, NimiaConfig, backend_process_env_with_context,
+    backend_readiness,
+};
+
+#[test]
+fn hermes_home_is_forwarded_to_the_acp_process() {
+    let config = BackendConfig {
+        home: Some("~/.hermes/profiles/iota-cockpit".to_string()),
+        ..Default::default()
+    };
+
+    let env = backend_process_env_with_context(AcpBackend::Hermes, &config, None);
+
+    assert_eq!(
+        env.get("HERMES_HOME"),
+        Some(&crate::config::expand_home_path("~/.hermes/profiles/iota-cockpit").unwrap())
+    );
+}
 
 #[test]
 fn backend_readiness_fails_for_missing_section() {

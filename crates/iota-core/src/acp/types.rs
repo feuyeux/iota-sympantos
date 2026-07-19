@@ -67,6 +67,12 @@ pub(super) struct AcpSessionResolution {
     pub(super) session_new_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct AcpAgentCapabilities {
+    pub(super) load_session: bool,
+    pub(super) resume_session: bool,
+}
+
 pub struct AcpClientStartOptions {
     pub backend: AcpBackend,
     pub cwd: PathBuf,
@@ -83,6 +89,7 @@ pub struct AcpClient {
     pub(super) backend: AcpBackend,
     pub(super) cwd: PathBuf,
     pub(super) session_id: Option<String>,
+    pub(super) agent_capabilities: AcpAgentCapabilities,
     pub(super) stdin: ChildStdin,
     pub(super) lines: tokio::io::Lines<BufReader<ChildStdout>>,
     pub(super) child: Child,

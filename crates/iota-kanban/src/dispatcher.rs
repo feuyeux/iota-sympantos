@@ -7,6 +7,7 @@ use super::shadow::{ShadowMaterializer, ShadowWatcher};
 use super::store::KanbanStore;
 use super::types::*;
 use super::worker::{WorkerConfig, WorkerEnv, WorkerHandle};
+use crate::paths::default_shadows_dir;
 
 // ---------------------------------------------------------------------------
 // DispatcherConfig
@@ -41,9 +42,7 @@ impl Default for DispatcherConfig {
             claim_ttl: Duration::from_secs(900),         // 15 min
             heartbeat_timeout: Duration::from_secs(300), // 5 min — hermes -z runs can take >90s
             hermes_bin: PathBuf::from("hermes"),
-            shadows_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".i6/kanban/shadows"),
+            shadows_dir: default_shadows_dir(),
             extra_env: std::collections::BTreeMap::new(),
             task_id_filter: None,
             max_failures: 3,

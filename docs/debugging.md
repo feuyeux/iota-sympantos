@@ -19,6 +19,27 @@ cargo run -p iota-cli -- run --daemon hermes "ping"
 cd crates/iota-desktop && npm test && npm run build
 ```
 
+## iota-core 单元测试布局
+
+`crates/iota-core` 不使用源文件内联测试模块。新增或迁移测试时：
+
+1. 在源模块同目录创建 `<module>_tests.rs`；
+2. 在源文件中使用 `#[cfg(test)]`、`#[path = "<module>_tests.rs"]` 和 `mod tests;` 引入；
+3. 测试文件只使用 `crate::...` 绝对导入，不使用 `use super::*`；
+4. `#[test]` 函数直接位于测试文件顶层，不再嵌套第二层模块。
+
+当前可参考：
+
+- `src/acp/client_tests.rs`：分别覆盖 `loadSession`、`sessionCapabilities.resume` 解析，并验证缺失能力时 fail closed；
+- `src/resources_tests.rs`：覆盖显式本地 skill root 与标准 workspace 本地资源路径。
+
+定向排查可运行：
+
+```bash
+cargo test -p iota-sympantos-core parses_load_and_resume_capabilities_independently
+cargo test -p iota-sympantos-core workspace_resources_are_derived_without_network_configuration
+```
+
 ## 断点入口
 
 | 场景 | 文件 |

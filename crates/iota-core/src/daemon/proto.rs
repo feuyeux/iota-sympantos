@@ -209,34 +209,17 @@ pub struct DesktopMemorySummary {
     pub episodic: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct DesktopContextBudgetsSnapshot {
-    pub memory_chars: usize,
-    pub skills_chars: usize,
-    pub working_memory_chars: usize,
-    pub workspace_chars: usize,
-    pub handoff_chars: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DesktopContextSection {
-    pub name: String,
-    pub chars: usize,
-    pub preview: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DesktopRuntimeContextSnapshot {
-    pub turn_id: String,
-    pub backend: String,
-    pub cwd: PathBuf,
-    pub session_id: String,
-    pub model: Option<String>,
-    pub created_at: i64,
-    pub capsule_text: String,
-    pub sections: Vec<DesktopContextSection>,
-    pub budgets: DesktopContextBudgetsSnapshot,
-}
+// `DesktopContextBudgetsSnapshot`, `DesktopContextSection`, and
+// `DesktopRuntimeContextSnapshot` used to be defined here, but `engine`
+// needed the same types without depending on `daemon` (see
+// `crate::runtime_snapshot` for the rationale). They now live in the
+// neutral `runtime_snapshot` module and are re-exported under their
+// original desktop-protocol names so the wire format is unchanged.
+pub use crate::runtime_snapshot::{
+    ContextBudgetsSnapshot as DesktopContextBudgetsSnapshot,
+    ContextSection as DesktopContextSection,
+    RuntimeContextSnapshot as DesktopRuntimeContextSnapshot,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DesktopContextEngineSnapshot {

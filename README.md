@@ -18,7 +18,7 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 ```bash
 rustup install 1.95.0
 rustup default 1.95.0 && rustup toolchain uninstall stable
-cargo build -p iota-cli -p iota-core -p iota-kanban
+cargo build -p iota-cli -p iota-core -p iota-sympantos-kanban
 
 iota                                    # 交互式 TUI
 iota run codex "ping"                   # 单次 prompt
@@ -47,10 +47,10 @@ Kanban 领域库已发布到 crates.io：
 
 ```toml
 [dependencies]
-iota-kanban = "0.1.0"
+iota-kanban = { package = "iota-sympantos-kanban", version = "0.1.0" }
 ```
 
-核心 runtime 的包名是 `iota-sympantos-core`，Rust library target 仍为 `iota_core`。启用 `kanban` feature 时会使用已发布的 `iota-kanban`：
+核心 runtime 的包名是 `iota-sympantos-core`，Rust library target 仍为 `iota_core`。启用 `kanban` feature 时会使用已发布的 `iota-sympantos-kanban`（Rust import 仍为 `iota_kanban`）：
 
 ```toml
 [dependencies]
@@ -58,6 +58,16 @@ iota-core = { package = "iota-sympantos-core", version = "0.1.0", features = ["k
 ```
 
 详见 [`crates/iota-core/README.md`](crates/iota-core/README.md) 和 [`crates/iota-kanban/README.md`](crates/iota-kanban/README.md)。
+
+## 发布
+
+`iota-sympantos-kanban` 必须先于启用其可选 feature 的 `iota-sympantos-core` 发布。发布前先运行：
+
+```powershell
+.\scripts\publish-crates.ps1 -DryRun
+```
+
+确认 crates.io token 已通过 `cargo login` 或 `CARGO_REGISTRY_TOKEN` 配置后，移除 `-DryRun` 执行正式发布。macOS/Linux 使用 `./scripts/publish-crates.sh --dry-run`。
 
 ### 配置文件
 
@@ -96,7 +106,7 @@ pip install 'hermes-agent[acp]'
 | [`docs/docker.md`](docs/docker.md) | Docker 与外部观测栈 |
 | [`docs/desktop-mvp-acceptance.md`](docs/desktop-mvp-acceptance.md) | Desktop MVP 验收标准 |
 | [`crates/iota-core/README.md`](crates/iota-core/README.md) | `iota-sympantos-core` 依赖方式、features 与最小示例 |
-| [`crates/iota-kanban/README.md`](crates/iota-kanban/README.md) | `iota-kanban` crate API 与依赖方式 |
+| [`crates/iota-kanban/README.md`](crates/iota-kanban/README.md) | `iota-sympantos-kanban` crate API 与依赖方式 |
 
 ---
 

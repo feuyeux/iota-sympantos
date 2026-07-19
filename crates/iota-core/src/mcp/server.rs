@@ -183,7 +183,7 @@ fn emit_route_log(level: &str, event: &str, fields: Value) {
 
 #[cfg(feature = "kanban")]
 fn default_kanban_store() -> Option<SqliteKanbanStore> {
-    let path = dirs::home_dir()?.join(".i6").join("kanban").join("iota.db");
+    let path = crate::config::paths::kanban_db_path()?;
     SqliteKanbanStore::open(&path).ok()
 }
 

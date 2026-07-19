@@ -6,6 +6,22 @@
 //! `IOTA_DAEMON_ADDR`).  Each connection carries exactly one request line and
 //! receives exactly one response line before the connection is closed.
 //!
+//! # Security / trust boundary
+//! This listener performs **no authentication or authorization**: any local
+//! process that can open a TCP connection to the bound address can submit
+//! prompts, read observability/memory/context snapshots, and drive
+//! approvals. The design relies on two implicit assumptions: (1) the
+//! listener is bound to loopback only, so remote hosts cannot connect
+//! directly; (2) the host is treated as a single trust domain — every local
+//! process is assumed to belong to the same user/operator as the daemon. On
+//! a multi-user host, another local user's process can connect to this
+//! daemon and act with its capabilities (arbitrary prompts, reading this
+//! user's memory/context data). This is a known, accepted trust boundary
+//! rather than a defect; do not deploy this daemon on a multi-user or
+//! otherwise untrusted-local-process host without adding connection
+//! authentication (e.g. a per-connection token, or a Unix domain socket
+//! with file permissions instead of a TCP loopback socket).
+//!
 //! Sub-modules:
 //! - [`pool`]  — [`EnginePool`] / [`EngineKey`]: backend×cwd engine buckets
 //! - [`proto`] — wire types: [`DaemonPromptRequest`], [`DaemonPromptResponse`],
@@ -51,12 +67,60 @@ pub fn daemon_addr() -> String {
         .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
 }
 
+/// Reject binding this unauthenticated daemon to a non-loopback address
+/// unless the operator has explicitly opted in via
+/// `IOTA_DAEMON_ALLOW_NON_LOOPBACK=1`.
+///
+/// The daemon performs no per-connection authentication (see the module
+/// docs above): any process that can open a TCP connection to the bound
+/// address can submit prompts and read memory/context/observability data.
+/// Binding to loopback keeps that risk scoped to local processes on this
+/// host; binding to `0.0.0.0`, a LAN interface, or any other non-loopback
+/// address would expose the same unauthenticated surface to the network.
+/// This is a fail-closed guard, not a full fix: it does not add
+/// authentication, it only prevents the most severe accidental
+/// misconfiguration (widening the trust boundary from "local processes" to
+/// "the network") from happening silently.
+fn guard_daemon_bind_addr(addr: &str) -> Result<()> {
+    let allow_non_loopback = std::env::var("IOTA_DAEMON_ALLOW_NON_LOOPBACK")
+        .map(|value| value.trim() == "1")
+        .unwrap_or(false);
+    if allow_non_loopback {
+        eprintln!(
+            "WARNING: IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 set; binding daemon to {addr} without \
+             authentication. Any process that can reach this address on the network can submit \
+             prompts and read this user's memory/context data. Only do this on a trusted, \
+             isolated network."
+        );
+        return Ok(());
+    }
+    let is_loopback = addr
+        .rsplit_once(':')
+        .map(|(host, _port)| host.trim_start_matches('[').trim_end_matches(']'))
+        .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+        .map(|ip| ip.is_loopback())
+        // An address that fails to parse as `host:port` (e.g. a bare
+        // hostname) is not verifiably loopback; treat it the same as a
+        // non-loopback address rather than assuming it is safe.
+        .unwrap_or(false);
+    anyhow::ensure!(
+        is_loopback,
+        "refusing to bind the unauthenticated iota daemon to non-loopback address '{addr}'. \
+         This daemon has no per-connection authentication (see crate::daemon module docs); \
+         binding it to a non-loopback address exposes prompt submission and memory/context \
+         reads to the network. Use a loopback address (e.g. 127.0.0.1:47661), or set \
+         IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 to proceed anyway on a trusted, isolated network."
+    );
+    Ok(())
+}
+
 pub async fn run_daemon(
     config: NimiaConfig,
     addr: &str,
     timeout_ms: u64,
     warm_on_start: bool,
 ) -> Result<()> {
+    guard_daemon_bind_addr(addr)?;
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let engine_pool = Arc::new(Mutex::new(EnginePool::new(config, false, timeout_ms)));
     if warm_on_start {
@@ -68,6 +132,11 @@ pub async fn run_daemon(
         .await
         .with_context(|| format!("Failed to bind daemon at {}", addr))?;
     eprintln!("iota agent daemon listening on {}", addr);
+    eprintln!(
+        "SECURITY NOTE: this daemon accepts unauthenticated local connections; any process \
+         that can reach {addr} can submit prompts and read memory/context/observability data. \
+         See crate::daemon module docs for the accepted trust boundary."
+    );
     eprintln!("Press Ctrl+C to shut down gracefully");
 
     let concurrency = Arc::new(Semaphore::new(8));
