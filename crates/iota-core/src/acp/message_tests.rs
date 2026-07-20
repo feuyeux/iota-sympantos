@@ -80,6 +80,21 @@ fn extract_final_text_falls_back_to_extract_text() {
 }
 
 #[test]
+fn terminal_result_text_is_used_without_stream_updates() {
+    let result = json!({"stopReason": "end_turn", "content": "final text"});
+    assert_eq!(
+        text_from_terminal_result(&result, false),
+        Some("final text".to_string())
+    );
+}
+
+#[test]
+fn terminal_result_text_is_not_appended_after_stream_updates() {
+    let result = json!({"stopReason": "end_turn", "content": "complete echoed prompt"});
+    assert_eq!(text_from_terminal_result(&result, true), None);
+}
+
+#[test]
 fn is_terminal_result_with_stop_reason() {
     assert!(is_terminal_result(&json!({"stopReason": "end_turn"})));
 }

@@ -211,6 +211,22 @@ fn test_engine() -> IotaEngine {
     IotaEngine::create_session(NimiaConfig::default(), false, 30_000, None)
 }
 
+/// A fresh engine has never warmed a backend, so `has_warm_client` must report
+/// no warm client for any `(backend, cwd)`. This also pins the self-healing
+/// signature: the probe takes `&mut self` so it can evict a client whose
+/// process has exited rather than reporting a dead pool entry as warm.
+#[test]
+fn has_warm_client_is_false_on_a_cold_engine() {
+    let mut engine = test_engine();
+    let cwd = std::env::current_dir().unwrap();
+    for backend in acp::ALL_BACKENDS {
+        assert!(
+            !engine.has_warm_client(backend, &cwd),
+            "a cold engine must not report a warm client for {backend}"
+        );
+    }
+}
+
 // ── prepare_backend_handoff tests ────────────────────────────────────────────
 
 /// When the active backend switches, `prepare_backend_handoff` must call

@@ -2146,8 +2146,8 @@ dependencies = [
  "dirs",
  "futures-util",
  "hostname",
- "iota-sympantos-core",
- "iota-sympantos-kanban",
+ "iota-sympantos-core 0.1.1",
+ "iota-sympantos-kanban 0.1.0",
  "pulldown-cmark",
  "ratatui",
  "reqwest 0.13.3",
@@ -2167,8 +2167,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs",
- "iota-sympantos-core",
- "iota-sympantos-kanban",
+ "iota-sympantos-core 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "iota-sympantos-kanban 0.1.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -2181,7 +2181,7 @@ dependencies = [
 
 [[package]]
 name = "iota-sympantos-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2190,7 +2190,38 @@ dependencies = [
  "futures-util",
  "hex",
  "hostname",
- "iota-sympantos-kanban",
+ "iota-sympantos-kanban 0.1.0",
+ "opentelemetry",
+ "opentelemetry-appender-tracing",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "reqwest 0.13.3",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "iota-sympantos-core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3cb6d76736b47938121b6fb6dd37bc071a8ce24d3292f9068951fea6aa9a434"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "hex",
+ "hostname",
+ "iota-sympantos-kanban 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -2212,6 +2243,26 @@ dependencies = [
 [[package]]
 name = "iota-sympantos-kanban"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "hostname",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "iota-sympantos-kanban"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b43888709e8bc5900c7b9efa9acec6b2bbca8729454e1a4d01e5d247aa3f005b"
 dependencies = [
  "anyhow",
  "chrono",

@@ -99,6 +99,10 @@ pub fn extract_text(value: &Value) -> Option<String> {
     None
 }
 
+pub(super) fn text_from_terminal_result(result: &Value, streamed: bool) -> Option<String> {
+    if streamed { None } else { extract_text(result) }
+}
+
 pub(super) fn is_terminal_result(result: &Value) -> bool {
     result.get("stopReason").and_then(Value::as_str).is_some() || extract_text(result).is_some()
 }

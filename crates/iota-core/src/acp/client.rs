@@ -28,6 +28,25 @@ fn agent_capabilities_from_initialize(value: &Value) -> AcpAgentCapabilities {
     }
 }
 
+fn session_restore_route(
+    capabilities: AcpAgentCapabilities,
+    active_session_id: Option<&str>,
+    target_session_id: &str,
+) -> Result<Option<(&'static str, &'static str)>> {
+    if active_session_id == Some(target_session_id) {
+        return Ok(None);
+    }
+    if capabilities.resume_session {
+        Ok(Some(("session/resume", "resume")))
+    } else if capabilities.load_session {
+        Ok(Some(("session/load", "load")))
+    } else {
+        bail!(
+            "ACP backend does not advertise sessionCapabilities.resume or loadSession; exact session restore is unavailable"
+        )
+    }
+}
+
 impl AcpClient {
     pub async fn start(options: AcpClientStartOptions) -> Result<Self> {
         let AcpClientStartOptions {
@@ -298,11 +317,10 @@ impl AcpClient {
         })
     }
 
-    /// Restore the exact backend-native ACP session in this newly started
-    /// transport. Prefer `session/resume` (no replay), otherwise use the v1
-    /// `session/load` flow and drain replay notifications until its response.
-    /// Missing capabilities fail closed: callers must not claim continuity by
-    /// silently creating a replacement session.
+    /// Select one exact backend-native ACP session on this transport. Prefer
+    /// `session/resume` (no replay), otherwise use the v1 `session/load` flow.
+    /// This also supports switching between sessions already owned by the same
+    /// backend process. Missing capabilities fail closed.
     pub async fn restore_session(
         &mut self,
         cwd: &std::path::PathBuf,
@@ -314,20 +332,13 @@ impl AcpClient {
         if self.cwd != *cwd {
             bail!("ACP restore cwd must match the client process cwd");
         }
-        if let Some(active) = self.session_id.as_deref() {
-            if active == session_id {
-                return Ok("already-active");
-            }
-            bail!("ACP client already owns a different active session");
-        }
-        let (method, mode) = if self.agent_capabilities.resume_session {
-            ("session/resume", "resume")
-        } else if self.agent_capabilities.load_session {
-            ("session/load", "load")
-        } else {
-            bail!(
-                "ACP backend does not advertise sessionCapabilities.resume or loadSession; exact session restore is unavailable"
-            );
+        let Some((method, mode)) = session_restore_route(
+            self.agent_capabilities,
+            self.session_id.as_deref(),
+            session_id,
+        )?
+        else {
+            return Ok("already-active");
         };
         let request_id = format!("session:restore:{}", self.prompt_counter);
         send_request(
@@ -412,6 +423,25 @@ impl AcpClient {
 
     pub fn startup_timing(&self) -> super::AcpStartupTiming {
         self.startup_timing.clone()
+    }
+
+    /// Make the next prompt create a new backend-native session while keeping
+    /// the already initialized ACP process alive. Previously created sessions
+    /// remain owned by the backend process and can be selected again through
+    /// `restore_session`.
+    pub fn begin_fresh_session(&mut self) {
+        self.session_id = None;
+    }
+
+    /// Whether the backend child process is still running.
+    ///
+    /// A non-blocking `try_wait`: `Ok(None)` means the process has not exited
+    /// and the client is usable; any exit status, or an error querying the
+    /// child, means the process is gone and the client must not be reused.
+    /// This lets the pool evict a dead client so the next turn respawns instead
+    /// of stalling against a closed stdin/stdout until its timeout.
+    pub fn is_process_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
     }
 
     pub fn set_timeout_ms(&mut self, timeout_ms: u64) {

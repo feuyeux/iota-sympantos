@@ -12,8 +12,8 @@ use crate::runtime_event::{self, RuntimeEvent, ToolCallEvent, ToolResultEvent};
 
 use super::AcpBackend;
 use super::message::{
-    TurnCancelled, acp_tool_call_parts, extract_final_text, extract_text, is_terminal_result,
-    permission_request_id, text_from_session_update,
+    TurnCancelled, acp_tool_call_parts, extract_final_text, is_terminal_result,
+    permission_request_id, text_from_session_update, text_from_terminal_result,
 };
 use super::permission as acp_permission;
 use super::wire::{format_acp_error, is_response_id, parse_message_line, read_next_line};
@@ -187,7 +187,7 @@ where
         if is_response_id(&message, expected_prompt_id)
             && let Some(result) = &message.result
         {
-            if let Some(text) = extract_text(result) {
+            if let Some(text) = text_from_terminal_result(result, streamed) {
                 output.push_str(&text);
             }
             if let Some(usage) = runtime_event::token_usage_from_value(result) {

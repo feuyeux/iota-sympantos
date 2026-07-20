@@ -92,7 +92,21 @@ impl IotaEngine {
             }
         }
         let skills = SkillRegistry::load_cached(&cwd, &skill_roots, &mut self.skill_registry_cache);
-        let matched_skill = skills.match_skill(backend, prompt);
+        // Native MCP turns must reach the ACP backend. A matching local skill
+        // is an offline engine handler and would otherwise short-circuit the
+        // backend, attempting to start the skill's MCP server itself.
+        let native_mcp_available = !self
+            .effective_config
+            .context_mcp_servers(backend)
+            .is_empty();
+        // Cockpit's textual compatibility transport still carries the local
+        // skill instructions in the user prompt. It must reach Hermes rather
+        // than be mistaken for an iota-core engine skill and echoed locally.
+        let cockpit_text_transport =
+            backend == AcpBackend::Hermes && prompt.contains("cockpit world simulation");
+        let matched_skill = (!native_mcp_available && !cockpit_text_transport)
+            .then(|| skills.match_skill(backend, prompt))
+            .flatten();
         let model = self
             .effective_config
             .backend_config(backend)

@@ -22,6 +22,5 @@ tokio.workspace = true
 dirs.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
-iota-core = { package = "iota-sympantos-core", version = "0.1.0", path = "../../iota-core", features = ["kanban"] }
+iota-core = { package = "iota-sympantos-core", version = "0.1.1", features = ["kanban"] }
 iota-kanban = { package = "iota-sympantos-kanban", path = "../../iota-kanban" }
-

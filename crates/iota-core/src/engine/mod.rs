@@ -177,6 +177,26 @@ impl IotaEngine {
         engine
     }
 
+    /// Ephemeral counterpart to [`create_session_with_resources`]: local project
+    /// resources are attached, but all durable stores (memory, execution cache,
+    /// observability, session ledger) are disabled.
+    ///
+    /// Intended for isolated, one-shot turn drivers whose prompts must not enter
+    /// local durable context and, crucially, must not dedup against the
+    /// machine-global execution ledger — a shared `running` row from an earlier
+    /// interrupted process would otherwise block a new turn with the same
+    /// `(backend, cwd, prompt)` hash until that ledger's TTL expires.
+    pub fn create_ephemeral_session_with_resources(
+        config: NimiaConfig,
+        resources: LocalResources,
+        show_native: bool,
+        timeout_ms: u64,
+    ) -> Self {
+        let mut engine = Self::create_ephemeral_session(config, show_native, timeout_ms);
+        engine.resource_skill_roots = resources.skill_roots().to_vec();
+        engine
+    }
+
     /// Load the resumed session active backend and memory turns into the engine.
     pub fn resume_session_state(&mut self, session_cwd: Option<&Path>) {
         let mut is_resumed = false;
@@ -338,12 +358,37 @@ impl IotaEngine {
         Ok(self.acp_clients.len())
     }
 
-    /// Return whether this engine already has a warm ACP client for `(backend, cwd)`.
-    pub fn has_warm_client(&self, backend: AcpBackend, cwd: &Path) -> bool {
-        self.acp_clients.contains_key(&AcpClientKey {
+    /// Return whether this engine already has a warm, live ACP client for
+    /// `(backend, cwd)`.
+    ///
+    /// "Warm" means both present in the pool and backed by a running child
+    /// process. A pooled client whose process has since exited is not warm: it
+    /// is evicted here so a later turn respawns instead of stalling against a
+    /// dead pipe until its timeout. Takes `&mut self` because probing child
+    /// liveness (`try_wait`) requires mutable access to the process handle.
+    pub fn has_warm_client(&mut self, backend: AcpBackend, cwd: &Path) -> bool {
+        let key = AcpClientKey {
             backend,
             cwd: cwd.to_path_buf(),
-        })
+        };
+        self.evict_if_dead(&key);
+        self.acp_clients.contains_key(&key)
+    }
+
+    /// Drop a pooled ACP client whose backend process is no longer running.
+    ///
+    /// Shared by the liveness probe (`has_warm_client`) and the dispatch path
+    /// (`ensure_acp_client`) so both agree that a dead client is not reusable,
+    /// rather than one path trusting mere pool membership.
+    fn evict_if_dead(&mut self, key: &AcpClientKey) {
+        let dead = self
+            .acp_clients
+            .get_mut(key)
+            .is_some_and(|client| !client.is_process_alive());
+        if dead {
+            self.acp_clients.remove(key);
+            self.record_active_sessions();
+        }
     }
 
     /// Start one backend client for `cwd` if it is not already present.
@@ -387,6 +432,31 @@ impl IotaEngine {
         self.acp_clients.len()
     }
 
+    /// Whether this engine runs without durable stores (memory, execution
+    /// cache, observability, session ledger). Ephemeral engines never dedup a
+    /// turn against the machine-global execution ledger, so a stale `running`
+    /// row from an earlier process cannot block a new turn with the same
+    /// request hash. Callers that require this isolation can assert it here.
+    pub fn is_ephemeral(&self) -> bool {
+        self.cache_store.is_none()
+            && self.memory_store.is_none()
+            && self.observability_store.is_none()
+            && self.session_ledger_store.is_none()
+    }
+
+    /// Keep the warm ACP process but make its next prompt allocate a fresh
+    /// backend-native session. If the process has not started yet, its first
+    /// prompt already has this behavior.
+    pub fn begin_fresh_backend_session(&mut self, backend: AcpBackend, cwd: &Path) {
+        let key = AcpClientKey {
+            backend,
+            cwd: cwd.to_path_buf(),
+        };
+        if let Some(client) = self.acp_clients.get_mut(&key) {
+            client.begin_fresh_session();
+        }
+    }
+
     /// Update the ACP timeout for this engine and all already running clients.
     pub fn set_acp_timeout_ms(&mut self, timeout_ms: u64) {
         self.acp_timeout_ms = timeout_ms;
@@ -425,6 +495,9 @@ impl IotaEngine {
             backend,
             cwd: cwd.clone(),
         };
+        // A pooled client whose process has exited must be replaced, not reused:
+        // dispatching to it would block on a dead pipe until the turn timeout.
+        self.evict_if_dead(&key);
         if self.acp_clients.contains_key(&key) {
             return Ok(false);
         }
