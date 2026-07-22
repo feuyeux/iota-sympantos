@@ -6,6 +6,10 @@ use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 pub const TOOLS: [(&str, &str); 7] = [
@@ -17,6 +21,7 @@ pub const TOOLS: [(&str, &str); 7] = [
     ("fun.cpp", "C++"),
     ("fun.zig", "Zig"),
 ];
+const MAX_COMMAND_OUTPUT_BYTES: usize = 64 * 1024;
 
 pub fn run_stdio() -> Result<()> {
     let stdin = io::stdin();
@@ -337,20 +342,11 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
 
     let mut stdout = child.stdout.take().context("tool stdout was not piped")?;
     let mut stderr = child.stderr.take().context("tool stderr was not piped")?;
-    let stdout_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        stdout
-            .read_to_end(&mut buf)
-            .map(|_| buf)
-            .map_err(Into::into)
-    });
-    let stderr_handle = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        stderr
-            .read_to_end(&mut buf)
-            .map(|_| buf)
-            .map_err(Into::into)
-    });
+    let output_limit_exceeded = Arc::new(AtomicBool::new(false));
+    let stdout_limit = Arc::clone(&output_limit_exceeded);
+    let stdout_handle = std::thread::spawn(move || read_limited_output(&mut stdout, stdout_limit));
+    let stderr_limit = Arc::clone(&output_limit_exceeded);
+    let stderr_handle = std::thread::spawn(move || read_limited_output(&mut stderr, stderr_limit));
 
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let status = loop {
@@ -367,17 +363,50 @@ fn run_command<S: AsRef<std::ffi::OsStr>>(
             drop(stderr_handle);
             return Err(anyhow!("tool timed out after {}ms", timeout_ms));
         }
+        if output_limit_exceeded.load(Ordering::Relaxed) {
+            kill_child_tree(&mut child);
+            let _ = child.wait();
+            let _ = join_output(stdout_handle, "stdout");
+            let _ = join_output(stderr_handle, "stderr");
+            return Err(anyhow!(
+                "tool output exceeded {} bytes per stream",
+                MAX_COMMAND_OUTPUT_BYTES
+            ));
+        }
         std::thread::sleep(Duration::from_millis(10));
     };
 
     let stdout = join_output(stdout_handle, "stdout")?;
     let stderr = join_output(stderr_handle, "stderr")?;
+    if output_limit_exceeded.load(Ordering::Relaxed) {
+        return Err(anyhow!(
+            "tool output exceeded {} bytes per stream",
+            MAX_COMMAND_OUTPUT_BYTES
+        ));
+    }
     let mut text = String::from_utf8_lossy(&stdout).to_string();
     text.push_str(&String::from_utf8_lossy(&stderr));
     if status.success() {
         Ok(trim_output(&text))
     } else {
         Err(anyhow!(trim_output(&text)))
+    }
+}
+
+fn read_limited_output(reader: &mut impl Read, limit_exceeded: Arc<AtomicBool>) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut chunk = [0_u8; 8 * 1024];
+    loop {
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            return Ok(output);
+        }
+        let remaining = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(output.len());
+        let retained = remaining.min(read);
+        output.extend_from_slice(&chunk[..retained]);
+        if retained < read {
+            limit_exceeded.store(true, Ordering::Relaxed);
+        }
     }
 }
 
