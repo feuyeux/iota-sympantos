@@ -1,9 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+:root {
+  --primary-100: #4CAF50;
+  --primary-200: #2a9235;
+  --primary-300: #005100;
+  --accent-100: #FFC107;
+  --accent-200: #916400;
+  --text-100: #333333;
+  --text-200: #5c5c5c;
+  --bg-100: #F5F5F5;
+  --bg-200: #ebebeb;
+  --bg-300: #c2c2c2;
+}
+
 @theme {
-  --color-primary: hsl(16, 100%, 61%);
-  --color-primary-hover: hsl(16, 100%, 53%);
+  --color-primary-100: var(--primary-100);
+  --color-primary-200: var(--primary-200);
+  --color-primary-300: var(--primary-300);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-text-100: var(--text-100);
+  --color-text-200: var(--text-200);
+  --color-bg-100: var(--bg-100);
+  --color-bg-200: var(--bg-200);
+  --color-bg-300: var(--bg-300);
+  --color-primary: var(--primary-100);
+  --color-primary-hover: var(--primary-200);
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'Fira Code', ui-monospace, monospace;
 }
