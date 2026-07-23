@@ -212,6 +212,15 @@ select option {
   box-shadow: 0 8px 24px var(--app-shadow);
 }
 
+@media (min-width: 1024px) {
+  .theme-toggle {
+    position: fixed;
+    top: 12px;
+    right: 16px;
+    z-index: 50;
+  }
+}
+
 @keyframes iota-pulse {
   0%, 100% {
     transform: scale(1);
@@ -272,4 +281,3 @@ select option {
     animation-iteration-count: 1 !important;
   }
 }
-
