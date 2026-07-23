@@ -337,7 +337,7 @@ export function KanbanWorkspace() {
   );
 
   return (
-    <div className="flex h-full flex-col bg-[#0d1220]">
+    <div className="flex h-full flex-col bg-app-surface">
       <div className="border-b border-slate-800/80 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -518,7 +518,7 @@ export function KanbanWorkspace() {
         </main>
 
         {selectedTaskId !== null ? (
-          <aside className="flex w-[390px] shrink-0 flex-col border-l border-slate-800/80 bg-[#101422]">
+          <aside className="flex w-[390px] shrink-0 flex-col border-l border-slate-800/80 bg-app-surface-raised">
             <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 p-4">
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-primary/90">Task Drawer</div>

@@ -17,6 +17,71 @@ pub struct AppState {
     pub shadows_dir: PathBuf,
 }
 
+/// Structured startup failures for the pre-Tauri-runtime bootstrap sequence
+/// in [`run`] (result.md S-06). Each variant carries enough context to
+/// print an actionable diagnostic; callers must not `.expect()`/panic on
+/// these — [`run`] classifies every recoverable startup failure into one of
+/// these variants and exits cleanly via [`StartupError::report_and_exit`]
+/// instead of unwinding with an opaque panic message.
+#[derive(Debug)]
+enum StartupError {
+    /// The user's home directory (and therefore `~/.i6/...`) could not be
+    /// resolved — typically a misconfigured or minimal environment (e.g. a
+    /// container without `HOME` set).
+    HomeDirectoryUnresolved { detail: String },
+    /// A required local directory (kanban db dir, shadows dir) could not be
+    /// created — usually a permissions or disk-space issue.
+    DirectoryCreationFailed { path: PathBuf, source: String },
+    /// The Kanban SQLite store could not be opened — could be permissions,
+    /// disk corruption, or another process holding an incompatible lock.
+    StoreOpenFailed { path: PathBuf, source: String },
+}
+
+impl StartupError {
+    fn category(&self) -> &'static str {
+        match self {
+            StartupError::HomeDirectoryUnresolved { .. } => "configuration",
+            StartupError::DirectoryCreationFailed { .. } => "permission_or_filesystem",
+            StartupError::StoreOpenFailed { .. } => "data_corruption_or_lock_conflict",
+        }
+    }
+
+    fn diagnostic_message(&self) -> String {
+        match self {
+            StartupError::HomeDirectoryUnresolved { detail } => format!(
+                "Could not resolve the user's home directory, so iota-desktop cannot locate its \
+                 local data under ~/.i6. Detail: {detail}"
+            ),
+            StartupError::DirectoryCreationFailed { path, source } => format!(
+                "Failed to create required directory '{}'. This is usually a filesystem \
+                 permission problem or insufficient disk space. Detail: {source}",
+                path.display()
+            ),
+            StartupError::StoreOpenFailed { path, source } => format!(
+                "Failed to open the local Kanban database at '{}'. This can happen if the file \
+                 is corrupted, another process is holding an incompatible lock on it, or \
+                 permissions were changed unexpectedly. Detail: {source}",
+                path.display()
+            ),
+        }
+    }
+
+    /// Prints a structured, categorized diagnostic to stderr and exits the
+    /// process with a non-zero status. This is the only place [`run`]'s
+    /// startup sequence terminates the process on error — every other
+    /// startup failure path returns a `StartupError` up to [`run`] instead
+    /// of calling `.expect()`/`panic!` directly, so the process always
+    /// exits through this single, consistent, non-panicking path.
+    fn report_and_exit(self) -> ! {
+        eprintln!(
+            "iota-desktop failed to start [{}]: {}",
+            self.category(),
+            self.diagnostic_message()
+        );
+        std::process::exit(1);
+    }
+}
+
 #[derive(Debug, serde::Serialize, Clone)]
 struct DesktopKanbanDispatchReport {
     spawned: usize,
@@ -477,27 +542,63 @@ async fn add_comment(
         .map_err(|e| e.to_string())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-#[allow(clippy::collapsible_if)]
-pub fn run() {
-    let store_path =
-        iota_core::config::paths::kanban_db_path().expect("could not find home directory");
+/// Resolves and prepares the local Kanban store/dispatcher/shadows
+/// directory, classifying every recoverable failure into a
+/// [`StartupError`] instead of panicking (result.md S-06 / AC10.1-AC10.3).
+/// Split out of [`run`] so the fallible bootstrap sequence can use `?`
+/// internally and `run` only has one place (`report_and_exit`) that ever
+/// terminates the process on a startup error.
+fn bootstrap_kanban_state() -> Result<(SqliteKanbanStore, Dispatcher, PathBuf), StartupError> {
+    let store_path = iota_core::config::paths::kanban_db_path().ok_or_else(|| {
+        StartupError::HomeDirectoryUnresolved {
+            detail: "kanban_db_path() returned None (dirs::home_dir() failed)".to_string(),
+        }
+    })?;
     let kanban_dir = store_path
         .parent()
-        .expect("kanban_db_path always has a parent directory")
+        .ok_or_else(|| StartupError::HomeDirectoryUnresolved {
+            detail: format!(
+                "resolved kanban db path '{}' unexpectedly has no parent directory",
+                store_path.display()
+            ),
+        })?
         .to_path_buf();
-    std::fs::create_dir_all(&kanban_dir).expect("failed to create kanban directory");
+    std::fs::create_dir_all(&kanban_dir).map_err(|err| StartupError::DirectoryCreationFailed {
+        path: kanban_dir.clone(),
+        source: err.to_string(),
+    })?;
 
-    let shadows_dir =
-        iota_core::config::paths::kanban_shadows_dir().expect("could not find home directory");
-    std::fs::create_dir_all(&shadows_dir).expect("failed to create shadows directory");
+    let shadows_dir = iota_core::config::paths::kanban_shadows_dir().ok_or_else(|| {
+        StartupError::HomeDirectoryUnresolved {
+            detail: "kanban_shadows_dir() returned None (dirs::home_dir() failed)".to_string(),
+        }
+    })?;
+    std::fs::create_dir_all(&shadows_dir).map_err(|err| StartupError::DirectoryCreationFailed {
+        path: shadows_dir.clone(),
+        source: err.to_string(),
+    })?;
 
-    let store = SqliteKanbanStore::open(&store_path).expect("failed to open sqlite store");
+    let store =
+        SqliteKanbanStore::open(&store_path).map_err(|err| StartupError::StoreOpenFailed {
+            path: store_path.clone(),
+            source: err.to_string(),
+        })?;
     let dispatcher = Dispatcher::new(DispatcherConfig {
         shadows_dir: shadows_dir.clone(),
         extra_env: hermes_worker_env(),
         ..Default::default()
     });
+
+    Ok((store, dispatcher, shadows_dir))
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[allow(clippy::collapsible_if)]
+pub fn run() {
+    let (store, dispatcher, shadows_dir) = match bootstrap_kanban_state() {
+        Ok(state) => state,
+        Err(err) => err.report_and_exit(),
+    };
 
     // Seed initial board and tasks if database is empty
     if let Ok(true) = store.list_boards().map(|b| b.is_empty()) {
@@ -556,7 +657,7 @@ pub fn run() {
         }
     }
 
-    tauri::Builder::default()
+    if let Err(error) = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             kanban_store: Arc::new(Mutex::new(store)),
@@ -629,7 +730,11 @@ pub fn run() {
             add_comment,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    {
+        eprintln!(
+            "iota-desktop runtime terminated with an initialization error: {error}"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -165,10 +165,12 @@ Client:
 ```text
 iota run --daemon [backend] <prompt>
   -> daemon_cmd::run_prompt_via_daemon()
+       -> daemon::auth::load_or_create_token()  # owner-only CSPRNG token
+       -> DaemonPromptRequest { auth_token, ... }
   -> send_prompt_autostart_daemon()
        -> daemon::send_prompt(addr, DaemonPromptRequest)
-            -> TCP connect
-            -> write one JSON line
+            -> loopback TCP connect
+            -> write one authenticated JSON line
             -> read one JSON line DaemonPromptResponse
        -> if connect failed:
             -> start_daemon_silently()
@@ -279,7 +281,7 @@ ChatWorkbench
   -> listenDaemonMessages()
   -> listenDaemonClientErrors()
   -> render Chat / Config central view
-  -> render RightInspector tabs: Observability / Memory / Context
+  -> render RightInspector tabs: Observability / Kanban / Memory / Context
 ```
 
 Prompt:
@@ -291,6 +293,8 @@ User submits prompt
   -> daemon_client::start_turn(window, turn_id, cwd, backend, prompt)
        -> connect_or_start()
             -> connect_and_handshake(primary daemon addr)
+                 -> send Hello { protocol version, auth_token }
+                 -> daemon validates the owner-only CSPRNG token
             -> fallback IOTA_DESKTOP_DAEMON_ADDR or 127.0.0.1:47662
             -> autostart_daemon(fallback)
        -> write DaemonClientMessage::StartTurn
@@ -305,7 +309,7 @@ Daemon desktop protocol:
 
 ```text
 DaemonClientMessage:
-  Hello
+  Hello { protocol version, auth_token }
   StartTurn
   RespondApproval
   CancelTurn
@@ -356,7 +360,7 @@ RightInspector tab Memory or Context
        -> snapshot errors
 ```
 
-Kanban desktop commands use Tauri commands in `src-tauri/src/lib.rs` and `SqliteKanbanStore` under `~/.i6/kanban/iota.db`. The current React workbench does not mount a Kanban board yet.
+KanbanWorkspace is mounted in the RightInspector Kanban tab. It uses Tauri commands in `src-tauri/src/lib.rs` and `SqliteKanbanStore` under `~/.i6/kanban/iota.db` to refresh boards, tasks, comments, links, and runs.
 
 ## 链路 6：Context Fabric
 
@@ -619,6 +623,6 @@ iota trace <trace_id>
 | `skill::fun::run_stdio()` | stdio server | backend/skill | iota-fun | function tools |
 | `skill::fun` runners | child process | iota-fun | language runtimes | execute snippets |
 | `context::render_workspace()` | child process | context engine | `git` | workspace summary |
-| `skill::cache::pull_skill()` | network/filesystem | CLI | HTTP(S)/path | skill install |
+| `skill::cache::pull_skill()` | network/filesystem | CLI | HTTPS/local path | size- and timeout-bounded skill install with optional SHA-256 verification |
 | `EmbeddingEngine::embed_api()` | network | memory store | Ollama-compatible API | embeddings |
 | SQLite stores | filesystem | engine/MCP/CLI/desktop | `~/.i6/**/*.sqlite` | persistence |

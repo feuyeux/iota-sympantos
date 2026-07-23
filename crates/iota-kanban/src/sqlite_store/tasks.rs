@@ -11,7 +11,7 @@ use crate::utils::now_ts;
 use super::SqliteKanbanStore;
 
 impl SqliteKanbanStore {
-    pub(super) fn create_task_impl(&self, req: CreateTaskRequest) -> Result<TaskId> {
+    pub(super) fn create_task_on_conn(conn: &rusqlite::Connection, req: CreateTaskRequest) -> Result<TaskId> {
         let now = now_ts();
         let status = req.status.unwrap_or(Status::Triage).as_str();
         let priority = req.priority.unwrap_or(0);
@@ -20,7 +20,6 @@ impl SqliteKanbanStore {
             .workspace_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
-        let conn = self.lock_conn();
         conn.execute(
             "INSERT INTO tasks
              (board_id, title, body, status, assignee, priority, tags,
@@ -58,7 +57,11 @@ impl SqliteKanbanStore {
         })
     }
 
-    pub(super) fn update_task_impl(&self, id: TaskId, patch: TaskPatch) -> Result<()> {
+    pub(super) fn update_task_on_conn(
+        conn: &rusqlite::Connection,
+        id: TaskId,
+        patch: TaskPatch,
+    ) -> Result<()> {
         use rusqlite::types::Value;
 
         let mut parts: Vec<String> = Vec::new();
@@ -119,7 +122,6 @@ impl SqliteKanbanStore {
         );
         values.push(Value::Integer(id as i64));
 
-        let conn = self.lock_conn();
         if let Some(to) = status_patch {
             let current_str: String = conn
                 .query_row(
@@ -190,8 +192,7 @@ impl SqliteKanbanStore {
         Ok(out)
     }
 
-    pub(super) fn delete_task_impl(&self, id: TaskId) -> Result<()> {
-        let conn = self.lock_conn();
+    pub(super) fn delete_task_on_conn(conn: &rusqlite::Connection, id: TaskId) -> Result<()> {
         let rows = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id as i64])?;
         if rows == 0 {
             bail!("task {} not found", id);
@@ -199,8 +200,7 @@ impl SqliteKanbanStore {
         Ok(())
     }
 
-    pub(super) fn transition_impl(&self, id: TaskId, to: Status) -> Result<()> {
-        let conn = self.lock_conn();
+    pub(super) fn transition_on_conn(conn: &rusqlite::Connection, id: TaskId, to: Status) -> Result<()> {
         let current_str: String = conn
             .query_row(
                 "SELECT status FROM tasks WHERE id = ?1",

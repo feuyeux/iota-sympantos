@@ -8,8 +8,12 @@ use crate::types::{Link, LinkKind, TaskId};
 use super::SqliteKanbanStore;
 
 impl SqliteKanbanStore {
-    pub(super) fn create_link_impl(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
-        let conn = self.lock_conn();
+    pub(super) fn create_link_on_conn(
+        conn: &rusqlite::Connection,
+        from: TaskId,
+        to: TaskId,
+        kind: LinkKind,
+    ) -> Result<()> {
         conn.execute(
             "INSERT OR IGNORE INTO links (from_id, to_id, kind) VALUES (?1, ?2, ?3)",
             params![from as i64, to as i64, kind.as_str()],
@@ -17,8 +21,12 @@ impl SqliteKanbanStore {
         Ok(())
     }
 
-    pub(super) fn remove_link_impl(&self, from: TaskId, to: TaskId, kind: LinkKind) -> Result<()> {
-        let conn = self.lock_conn();
+    pub(super) fn remove_link_on_conn(
+        conn: &rusqlite::Connection,
+        from: TaskId,
+        to: TaskId,
+        kind: LinkKind,
+    ) -> Result<()> {
         conn.execute(
             "DELETE FROM links WHERE from_id = ?1 AND to_id = ?2 AND kind = ?3",
             params![from as i64, to as i64, kind.as_str()],

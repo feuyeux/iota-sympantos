@@ -15,8 +15,16 @@ use super::SqliteKanbanStore;
 
 impl SqliteKanbanStore {
     pub(super) fn append_event_impl(&self, event_type: &str, payload: &str) -> Result<EventId> {
-        let now = now_ts();
         let conn = self.lock_conn();
+        Self::append_event_on_conn(&conn, event_type, payload)
+    }
+
+    pub(super) fn append_event_on_conn(
+        conn: &rusqlite::Connection,
+        event_type: &str,
+        payload: &str,
+    ) -> Result<EventId> {
+        let now = now_ts();
         conn.execute(
             "INSERT INTO events (event_type, payload, created_at) VALUES (?1, ?2, ?3)",
             params![event_type, payload, now],

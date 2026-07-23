@@ -26,12 +26,14 @@ opentelemetry = "0.29.1"
 opentelemetry-appender-tracing = "0.29.1"
 opentelemetry-otlp = { version = "0.29.0", features = ["grpc-tonic", "trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.29.0", features = ["rt-tokio"] }
-reqwest = { version = "0.13.3", features = ["json", "blocking"] }
+rand = "0.9.4"
+reqwest = { version = "0.13.3", features = ["json", "blocking", "stream"] }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 serde_yaml = "0.9.34"
 sha2 = "0.10.9"
+subtle = "2.6.1"
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7.18"
 tracing = "0.1.44"
@@ -39,6 +41,9 @@ tracing-opentelemetry = "0.30.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "registry"] }
 uuid = { version = "1.23.1", features = ["v4", "serde"] }
 iota-kanban = { package = "iota-sympantos-kanban", version = "0.1.0", path = "../iota-kanban", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.186"
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

@@ -164,19 +164,19 @@ Expected:
 - Runtime context preview shows section names, character counts, budgets, and capsule text when available.
 - Snapshot errors are visible without crashing the app.
 
-### 10. Kanban Desktop Commands
+### 10. Kanban Workspace
 
 Steps:
 
-1. Call or exercise the Kanban Tauri commands if a local test harness or future UI exposes them.
-2. Transition a task to a legal status.
-3. Add a comment.
+1. Open the right inspector and select the **Kanban** tab.
+2. Create or select a board, then create a task.
+3. Transition the task through a legal status, add a comment, and refresh the workspace.
 
 Expected:
 
+- `RightInspector` mounts `KanbanWorkspace`, which reads and refreshes boards, task details, links, runs, and comments through Tauri commands.
 - Tauri commands use `SqliteKanbanStore` under `~/.i6/kanban/iota.db`.
-- State transitions obey the Kanban state machine.
-- The current React workbench does not yet mount a Kanban board; UI refresh expectations apply only after a Kanban frontend is added.
+- State transitions obey the Kanban state machine and the refreshed UI shows the resulting state.
 
 ### 11. CLI Compatibility
 

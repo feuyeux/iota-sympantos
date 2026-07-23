@@ -9,8 +9,8 @@ Cross-platform Rust CLI/TUI，将 prompt 路由到五个 ACP 后端（claude-cod
 | **跨后端记忆** | SQLite 存储（SHA-256 去重、FTS5、6 召回桶），任一后端写入的记忆可在其他后端召回注入 |
 | **确定性技能** | YAML 声明，由 Rust 引擎分发；触发匹配与输出模板与后端无关 |
 | **iota-fun** | 7 语言片段运行器（C++ / TypeScript / Rust / Zig / Java / Python / Go），含编译缓存与 `parallel: true` |
-| **Kanban** | 内置任务看板：状态机、Dispatcher、Shadow 工作区、Event Sourcing、HTTP 同步 |
-| **Daemon 热路径** | 可选 TCP daemon 保持 ACP 客户端预热，`--daemon/-d` 路由 |
+| **Kanban** | 内置任务看板：状态机、Dispatcher、Shadow 工作区、Event Sourcing、事件包同步 |
+| **Daemon 热路径** | 仅 loopback 的 TCP daemon 保持 ACP 客户端预热；敏感请求以 owner-only CSPRNG token 鉴权并审计，`--daemon/-d` 路由 |
 | **TUI** | ratatui 内联视图，多行编辑器、Markdown 渲染、流式输出、Ctrl+C 双击退出 |
 
 ## 快速开始
@@ -34,7 +34,7 @@ cargo check --offline
 RUST_LOG=debug cargo run -p iota-cli --quiet
 cargo run -p iota-cli --quiet -- run codex "ping" --timing
 
-# 启动桌面端开发模式 (Tauri) 
+# 启动桌面端开发模式 (Tauri)
 # npm install -D @tauri-apps/cli@latest
 ## ubuntu
 # sudo apt-get update && sudo apt-get install -y libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
@@ -93,7 +93,7 @@ codex:
 ```bash
 pip install 'hermes-agent[acp]'
 ```
-  
+
 ## 文档
 
 | 文档 | 说明 |

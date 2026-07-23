@@ -9,14 +9,13 @@ use crate::utils::now_ts;
 use super::SqliteKanbanStore;
 
 impl SqliteKanbanStore {
-    pub(super) fn add_comment_impl(
-        &self,
+    pub(super) fn add_comment_on_conn(
+        conn: &rusqlite::Connection,
         task_id: TaskId,
         author: &str,
         body: &str,
     ) -> Result<CommentId> {
         let now = now_ts();
-        let conn = self.lock_conn();
         conn.execute(
             "INSERT INTO comments (task_id, author, body, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![task_id as i64, author, body, now],

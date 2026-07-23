@@ -91,7 +91,7 @@ Stores and observability
 | :--- | :--- |
 | `engine/` | 按 `(backend, cwd)` 复用 ACP client；处理 session ledger、handoff、memory recall/write、skill short-circuit、context capsule、ACP 调用、events 和 store 写回 |
 | `acp/` | 后端枚举、命令解析、子进程生命周期、`initialize/session/new/session/prompt`、stream reader、permission、wire parse |
-| `daemon/` | 默认 `127.0.0.1:47661` TCP daemon（回环地址，无鉴权，见「安全边界」）；legacy CLI request/response；desktop protocol v2；config、backend check、observability、memory/context snapshot |
+| `daemon/` | 默认 `127.0.0.1:47661` TCP daemon；敏感 legacy/desktop 请求使用 CSPRNG owner-only token 认证，Unix 还支持 owner-only UDS 与同 UID peer credential 校验；config、backend check、observability、memory/context snapshot |
 | `config/` | 唯一读取 `~/.i6/nimia.yaml`；生成 effective config、backend command/env、context options、MCP server 注入；包含 `effective.rs`（resolved config with defaults）、`helpers.rs`（path expansion, command normalization）、`paths.rs`（store path resolution） |
 | `context/` | 组装 `<iota-context>` capsule：session、memory tools、memory buckets、working memory、workspace、skills、handoff |
 | `memory/` | 六桶 memory taxonomy、FTS/LIKE、vector/hybrid search、embedding API 或 local trigram fallback |
@@ -235,7 +235,7 @@ Desktop 由 React + Tauri 组成，当前界面是一个 daemon-first 的本地�
 - Tauri commands：config、prompt、approval、cancel、backend check、observability summary、memory/context snapshot、current workspace、Kanban CRUD。
 - Daemon protocol：`DESKTOP_PROTOCOL_VERSION = 2`，使用 `DaemonClientMessage` 和 `DaemonServerMessage` tagged enum。
 - Daemon autostart：优先连接默认 daemon；失败时尝试 desktop fallback address；再通过 `IOTA_CLI_PATH`、sibling binary 或 `PATH` 启动 `iota __daemon`。
-- Kanban：Rust commands 直接打开 `~/.i6/kanban/iota.db`；当前 React workbench 尚未暴露 Kanban board UI。
+- Kanban：`RightInspector` 的 Kanban tab 已挂载 `KanbanWorkspace`；它通过 Rust commands 读写并刷新 `~/.i6/kanban/iota.db` 中的 board、task、comment、link 和 run。
 
 ## 依赖规则
 
@@ -252,8 +252,8 @@ Desktop 由 React + Tauri 组成，当前界面是一个 daemon-first 的本地�
 
 ## 安全边界
 
-- **daemon TCP 无鉴权（信任边界假设）**：`daemon/` 监听 `127.0.0.1:47661`（默认，可用 `IOTA_DAEMON_ADDR` 覆盖），协议是明文 JSON-line，**不做任何身份认证或授权检查**——任何能连接到该地址的本地进程都可以发起 prompt、读取 observability/memory/context snapshot、操作 approval。当前设计依赖两条隐含假设：(1) 绑定回环地址，网络上的其他主机无法直接连接；(2) 运行 daemon 的主机是单用户或所有本地进程都被视为同一信任域。**在多用户共享主机上，本机其他用户的进程可以连接该 daemon 并冒用其能力**（发起任意 prompt、读取该用户的 memory/context 数据）。这是当前架构的已知信任边界，不是需要立即修复的漏洞，但若部署到多用户主机或以更高权限运行 daemon，需要重新评估该假设。
-- 若未来需要加固，可选方向包括：daemon socket 增加 per-connection token 校验（类似桌面协议 `Hello` 消息可扩展携带凭证）、改用 Unix domain socket 并设置文件权限、或限制 daemon 只在容器/单用户环境中运行。
+- **Daemon 本机认证**：敏感 legacy/desktop 请求必须提供 `~/.i6/daemon.token` 中的 CSPRNG token；文件以 owner-only、原子方式创建并以恒定时间比较。Unix UDS 还会把 socket 收紧为 `0600` 并校验 peer UID。`hello`/`ping` 只用于协商和存活检查，不返回敏感数据。
+- **网络边界**：TCP 仍是明文 JSON-line，因此认证并不等于传输加密。默认应保持 loopback；跨主机部署必须由受控容器网络或加密代理提供额外传输保护，且不得复制 token 到日志或镜像。
 
 ## 扩展点
 

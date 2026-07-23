@@ -24,13 +24,15 @@ TCP server on `127.0.0.1:47661` that keeps `IotaEngine` instances alive across C
 
 ## Security / trust boundary
 
-The TCP listener performs **no authentication or authorization**. It relies
-on binding to loopback (`127.0.0.1`) and on treating the whole host as one
-trust domain. Any local process able to open a connection to the daemon can
-submit prompts and read observability/memory/context data — including
-another local user's process on a shared, multi-user host. This is an
-accepted design assumption, not an oversight; do not run this daemon on an
-untrusted-multi-user host without adding connection-level authentication.
+The TCP listener is loopback-only and authenticates all sensitive requests with
+an owner-only, CSPRNG-generated token from `~/.i6/daemon.token`. Legacy
+prompt/warm requests carry the token; desktop clients present it in the `Hello`
+handshake, which authenticates the connection before any sensitive message is
+processed. Tokens are compared in constant time, and authentication failures
+plus sensitive operations are emitted through structured audit logging without
+including token values. TCP JSON lines are not transport encryption: keep the
+endpoint on loopback, and use an additional controlled encrypted transport if
+an operator deliberately exposes it beyond the host.
 
 ## Sub-modules
 

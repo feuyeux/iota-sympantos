@@ -10,6 +10,7 @@ fn legacy_prompt_request_still_roundtrips() {
         execution_id: Some("exec-1".to_string()),
         timeout_ms: Some(1000),
         timing: true,
+        auth_token: None,
     };
 
     let json = serde_json::to_string(&request).unwrap();
@@ -134,6 +135,7 @@ fn version_negotiation_v2_client_without_range_succeeds() {
         protocol_version: DESKTOP_PROTOCOL_VERSION,
         min_version: None,
         max_version: None,
+        auth_token: None,
     };
     let json = serde_json::to_string(&hello).unwrap();
     assert!(!json.contains("min_version"));
@@ -150,6 +152,7 @@ fn version_negotiation_v3_client_with_range_succeeds() {
         protocol_version: DESKTOP_PROTOCOL_VERSION,
         min_version: Some(2),
         max_version: Some(3),
+        auth_token: None,
     };
     let json = serde_json::to_string(&hello).unwrap();
     assert!(json.contains("\"min_version\":2"));

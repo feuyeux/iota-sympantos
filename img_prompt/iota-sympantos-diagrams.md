@@ -54,18 +54,20 @@ The diagram is divided vertically into four distinct boxes representing layers w
 
 1. Layer 1: "Presentation (cli & tui)" - outlined in deep navy blue
    - Blocks: "crates/iota-cli/src/main.rs", "cli/mod.rs", "tui/mod.rs (render/loop/input/state/status_bar/theme)"
-   
+
 2. Layer 2: "Orchestration & Kanban" - outlined in muted forest green
    - Large block: "IotaEngine (crates/iota-core/src/engine/mod.rs)"
-   - Block: "daemon/mod.rs & pool.rs (EnginePool)"
+   - Block: "daemon/mod.rs & pool.rs (EnginePool) & auth.rs (CSPRNG token / UDS peer credentials) & audit.rs"
    - Block: "runtime_event/mod.rs (RuntimeEvent normalization)"
+   - Block: "runtime_snapshot (RuntimeContextSnapshot, ContextBudgetsSnapshot)"
    - Block: "crates/iota-kanban/src/ (dispatcher, worker, shadow system, bridge)"
-   
+
 3. Layer 3: "Protocol & Tools" - outlined in terracotta orange
-   - Blocks: "AcpClient (crates/iota-core/src/acp/mod.rs)", "acp::permission", "acp::session", "acp::wire"
-   - Blocks: "mcp::router", "mcp::client"
+   - Blocks: "AcpClient (crates/iota-core/src/acp/mod.rs)", "acp::permission", "acp::session", "acp::wire", "acp::stream_reader"
+   - Blocks: "mcp::router", "mcp::client", "mcp::server", "mcp::tool_dispatch"
    - Blocks: "context::ContextEngine", "skill::SkillRegistry", "skill::runner (execution)"
-   
+   - Blocks: "ipc_client (autostart, backoff, version negotiation)", "fs_secure (atomic write, constant-time compare)"
+
 4. Layer 4: "External Boundaries" - outlined in dark charcoal gray
    - Block: "Backend Subprocesses" (Claude Code, Codex, Gemini CLI, Hermes, OpenCode)
    - Block: "MCP Sidecars" (iota-context, iota-fun)
@@ -78,7 +80,7 @@ Connections and Flows:
 - Dual connection between "tui" and "IotaEngine":
   - Blue arrow labeled "mpsc (streams output chunks)"
   - Red arrow labeled "oneshot (TUI approval decision)"
-- Dark gray socket line between "cli/mod.rs" and "daemon" labeled "TCP 127.0.0.1:47661"
+- Dark gray socket line between "cli/mod.rs" and "daemon" labeled "TCP 127.0.0.1:47661 + CSPRNG token auth"
 - Blue pipe lines between "AcpClient" and "Backend Subprocesses" labeled "Stdio (stdin/stdout/stderr)"
 
 Style instructions:
@@ -134,29 +136,39 @@ Show:
 - TUI background engine task, streaming output, approval overlay, pager/help/quit overlays, prompt queue while engine running
 
 Column 2: Daemon TCP Plane
-Files: crates/iota-core/src/daemon/mod.rs, crates/iota-core/src/daemon/pool.rs, crates/iota-core/src/daemon/proto.rs
+Files: crates/iota-core/src/daemon/mod.rs, crates/iota-core/src/daemon/pool.rs, crates/iota-core/src/daemon/proto.rs, crates/iota-core/src/daemon/auth.rs, crates/iota-core/src/daemon/audit.rs, crates/iota-core/src/daemon/desktop.rs, crates/iota-core/src/ipc_client/ (autostart.rs, backoff.rs, version.rs), crates/iota-core/src/fs_secure.rs
 Show:
 - iota run --daemon
 - Local TCP daemon at 127.0.0.1:47661 (overridable by IOTA_DAEMON_ADDR)
 - Daemon auto-start through current_exe __daemon
 - JSON line request/response
+- Per-user CSPRNG-generated token authentication (32-byte hex, constant-time compare)
+- Unix domain socket + SO_PEERCRED / LOCAL_PEERCRED UID verification (preferred)
+- Structured daemon audit logging for auth failures and sensitive operations
+- Loopback-only bind guard (IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 to override)
 - EnginePool reuses IotaEngine per cwd
 - 8 connection concurrency limit, 10 MiB request cap
+- Protocol version negotiation (PROTOCOL_VERSION_MIN / MAX)
+- ipc_client: generic sidecar autostart, exponential-backoff-with-jitter reconnect, heartbeat
+- fs_secure: atomic_write_secure, ensure_dir_owner_only, generate_csprng_token_hex
 - Graceful Ctrl+C shutdown
 
 Column 3: Engine Core
-Files: crates/iota-core/src/engine/mod.rs, crates/iota-core/src/engine/prompt.rs, crates/iota-core/src/runtime_event/mod.rs
+Files: crates/iota-core/src/engine/mod.rs, crates/iota-core/src/engine/prompt.rs, crates/iota-core/src/engine/memory_ops.rs, crates/iota-core/src/engine/telemetry.rs, crates/iota-core/src/runtime_event/mod.rs, crates/iota-core/src/runtime_snapshot/mod.rs, crates/iota-core/src/resources/mod.rs
 Show:
 - IotaEngine
-- ACP client pool keyed by (backend, cwd)
+- ACP client pool keyed by (backend, cwd) with dead-process eviction
 - Concurrency fencing/locking via cache_executions table UNIQUE index
-- Session ledger and handoff
+- Ephemeral sessions (create_ephemeral_session) with all durable stores disabled
+- Session ledger and handoff with resume_session_state
 - Memory extraction / deterministic memory answer
 - Skill match and optional engine-run MCP skill
 - Memory recall, context capsule composition
-- ACP invocation
+- ACP invocation with warm_all_enabled_backends concurrent startup
 - OTel metrics/logs/spans
-- Normalized RuntimeEvent
+- Normalized RuntimeEvent stream
+- RuntimeContextSnapshot with ContextBudgetsSnapshot and ContextSection parsing
+- LocalResources for host-supplied skill roots
 
 Column 4: Context Fabric & Memory Store
 Files: crates/iota-core/src/context/mod.rs, crates/iota-core/src/memory/store.rs, crates/iota-core/src/memory/embedding.rs
@@ -173,11 +185,13 @@ Show:
 - Ollama embeddings if configured, fallback 128-dimension local trigram embedding
 
 Column 5: ACP Adapter
-Files: crates/iota-core/src/acp/mod.rs, crates/iota-core/src/acp/wire.rs, crates/iota-core/src/acp/session.rs, crates/iota-core/src/acp/permission.rs
+Files: crates/iota-core/src/acp/mod.rs, crates/iota-core/src/acp/wire.rs, crates/iota-core/src/acp/session.rs, crates/iota-core/src/acp/permission.rs, crates/iota-core/src/acp/stream_reader.rs, crates/iota-core/src/acp/client.rs
 Show:
 - AcpClient owns backend child process stdin/stdout
 - JSON-RPC 2.0 newline-delimited protocol
-- initialize, session/new, session/prompt, streaming session/update, session/request_permission, session/complete
+- initialize, session/new, session/prompt, streaming session/update, session/request_permission, session/complete, session/cancel
+- CancellationToken for cooperative turn cancellation (sends session/cancel to backend)
+- PromptProgress tracking: line_count, update_count, tool_call_count, first_update_ms, first_tool_call_ms
 - Session id reuse, mcpServers rendering
 - Supports empty mcpServers, string_array and object env shapes
 - Permission handling: auto-approve iota_*, mcp__iota-*, backend whitelist hits; otherwise route to TUI or stdin
@@ -205,7 +219,8 @@ Show:
 - SkillRunner, execution.mode = mcp, sequential or parallel MCP tool calls, simple placeholder rendering
 - MCP client, ACP-side MCP router
 - Intercept methods: tools/call, mcp/tools/call, mcp/tool_call
-- Route iota memory/skill/session/handoff/fun tools, reject external tools
+- Route iota memory/skill/session/handoff/kanban tools (kanban behind feature flag), reject external tools
+- tool_dispatch submodules: memory (search/write), skill (search/load), session (summary), handoff (publish/read), kanban (create_task/list_tasks/ready_task)
 - iota-fun MCP stdio server
 - Seven Fn runners: Python, TypeScript, Rust, Go, Java, C++, Zig
 
@@ -256,7 +271,7 @@ Visual style:
 - The image must look like an updated version of a reference architecture diagram, not a new unrelated poster
 
 Negative prompt:
-Unreadable tiny text, random fake file paths, obsolete modules, src/store/events.rs, single context.db, Promtail, project-level config discovery, Hermes home override, excessive decorative art, messy arrows, 3D render, dark background, neon cyberpunk, stock cloud icons, blurry labels, incorrect backend names, Korean text, non-Chinese non-English labels
+Unreadable tiny text, random fake file paths, obsolete modules, src/store/events.rs, single context.db, Promtail, project-level config discovery, Hermes home override, unauthenticated daemon, excessive decorative art, messy arrows, 3D render, dark background, neon cyberpunk, stock cloud icons, blurry labels, incorrect backend names, Korean text, non-Chinese non-English labels
 ```
 
 ---
@@ -314,6 +329,7 @@ Create a technical execution flowchart representing the core prompt sequence of 
 
 Left Column: "Initialization & Concurrency Locking" (outlined in navy blue)
 - Start Node: "TuiApp / CLI" triggers submit(prompt) and calls IotaEngine::run_with_timing()
+- "Ephemeral Check" block (gray): if engine is_ephemeral() (create_ephemeral_session), skip all durable stores and concurrency dedup
 - "request_hash" block (forest green): calculates SHA256 of backend + null-byte + cwd + null-byte + prompt as concurrency & fencing key
 - Decision Diamond (terracotta orange): "Is matched skill execution mode == MCP?"
   - If YES: route (orange arrow) to skill::runner::run_engine_skill() which spawns stdio MCP server (iota-fun/iota-context), bypasses ACP backend and exit
@@ -332,6 +348,7 @@ Right Column: "Execution & Completion" (outlined in forest green)
   - If session/request_permission -> check tool_whitelist or request confirmation in TUI overlay (red line)
   - If tools/call -> call mcp::router::try_intercept_tool_call() to execute memory search/write locally (purple line), then write JSON-RPC result back to stdin
   - If session/complete -> exit loop
+  - If CancellationToken fired -> send session/cancel to backend stdin, return TurnCancelled
 - End Node: calls MemoryStore::insert(episodic), writes CacheStore::finish_execution() setting status to completed/failed, records ledger turn, and returns prompt output
 
 Connections:
@@ -383,10 +400,10 @@ Daemon route shows:
 - Warm engine pooling (EnginePool keyed by cwd)
 - Response returning to the user
 
-Composition: wide landscape poster, 16:9 ratio. 
-Arrange the call chain as a large board-game-like path with numbered stations and arrows. 
-Put "initialize -> session/new -> session/prompt -> session/update -> session/complete" as a clear ribbon across the middle. 
-Show external boundaries as illustrated gates: git subprocess, ACP child process, MCP stdio sidecar, SQLite files, and TCP socket. 
+Composition: wide landscape poster, 16:9 ratio.
+Arrange the call chain as a large board-game-like path with numbered stations and arrows.
+Put "initialize -> session/new -> session/prompt -> session/update -> session/complete" as a clear ribbon across the middle.
+Show external boundaries as illustrated gates: git subprocess, ACP child process, MCP stdio sidecar, SQLite files, and TCP socket.
 Add the title "Code Call Chains" at the top and a small subtitle "from entry point to runtime boundary".
 
 Style: follow the story poster rules and palette stated at the top of this prompt. Keep crisp contour lines, readable miniature labels, and light magenta accents only on the active message capsule and protocol ribbon. Keep the journey metaphor technically accurate and structured.
@@ -930,10 +947,13 @@ Shows the Rust backend commands exposed to frontend:
 Center-Right Section: "Daemon Client" (outlined in orange)
 Shows the daemon communication layer:
 - DaemonClient:
-  - connect_or_start() → auto-start daemon if not running
+  - connect_or_start() → auto-start daemon if not running via ipc_client::autostart
+  - CSPRNG token authentication on Hello (constant-time compare)
+  - Protocol version negotiation (PROTOCOL_VERSION_MIN / MAX)
   - start_turn(window, turn_id, cwd, backend, prompt)
   - cancel_turn(turn_id)
   - respond_approval(turn_id, decision)
+  - Exponential-backoff-with-jitter reconnect (ipc_client::backoff)
 
 - Protocol:
   - TCP connection to 127.0.0.1:47661
@@ -945,6 +965,7 @@ Shows the daemon communication layer:
   - Tracks pending approvals per turn
   - Routes approval responses to correct turn
   - Timeout handling for stale approvals
+  - deny_for_turn() cancels all pending approvals on turn cancel
 
 Right Section: "Daemon & Engine" (outlined in forest green)
 Shows the backend execution:
@@ -1149,9 +1170,9 @@ Shows the skill loading hierarchy:
   - Additional files: scripts, data, documentation
 
 - Skill cache:
-  - iota skill pull <source> [name]
-  - Downloads from HTTP(S) or copies from local path
-  - Extracts to ~/.i6/skills/<name>
+  - iota skill pull <source> [name] [--sha256 <hex-digest>]
+  - Copies from a local path or downloads only from HTTPS; plain HTTP is rejected
+  - Applies a size limit and timeout, optionally verifies SHA-256, then atomically writes the cache file and provenance metadata
 
 Center-Left Section: "Trigger Matching" (outlined in forest green)
 Shows the skill matching logic:

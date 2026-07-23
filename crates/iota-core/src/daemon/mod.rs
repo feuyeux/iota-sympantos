@@ -7,20 +7,14 @@
 //! receives exactly one response line before the connection is closed.
 //!
 //! # Security / trust boundary
-//! This listener performs **no authentication or authorization**: any local
-//! process that can open a TCP connection to the bound address can submit
-//! prompts, read observability/memory/context snapshots, and drive
-//! approvals. The design relies on two implicit assumptions: (1) the
-//! listener is bound to loopback only, so remote hosts cannot connect
-//! directly; (2) the host is treated as a single trust domain — every local
-//! process is assumed to belong to the same user/operator as the daemon. On
-//! a multi-user host, another local user's process can connect to this
-//! daemon and act with its capabilities (arbitrary prompts, reading this
-//! user's memory/context data). This is a known, accepted trust boundary
-//! rather than a defect; do not deploy this daemon on a multi-user or
-//! otherwise untrusted-local-process host without adding connection
-//! authentication (e.g. a per-connection token, or a Unix domain socket
-//! with file permissions instead of a TCP loopback socket).
+//! Every TCP connection must authenticate with a per-user, CSPRNG-generated
+//! token before any execution, configuration, memory, context, approval, or
+//! observability operation is processed. The token is stored through the
+//! owner-only secure-file layer and compared in constant time. The listener
+//! is always restricted to loopback; authentication failures and sensitive
+//! operations are emitted through the structured daemon audit target.
+//! `Hello` performs protocol negotiation and authenticates the whole desktop
+//! connection; legacy prompt/warm requests carry the token per request.
 //!
 //! Sub-modules:
 //! - [`pool`]  — [`EnginePool`] / [`EngineKey`]: backend×cwd engine buckets
@@ -28,6 +22,8 @@
 //!   [`DaemonWarmRequest`]
 
 mod desktop;
+pub mod audit;
+pub mod auth;
 mod pool;
 mod proto;
 
@@ -67,30 +63,23 @@ pub fn daemon_addr() -> String {
         .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_string())
 }
 
-/// Reject binding this unauthenticated daemon to a non-loopback address
-/// unless the operator has explicitly opted in via
-/// `IOTA_DAEMON_ALLOW_NON_LOOPBACK=1`.
+/// Reject a non-loopback daemon binding unless the operator explicitly opts in
+/// through `IOTA_DAEMON_ALLOW_NON_LOOPBACK=1`.
 ///
-/// The daemon performs no per-connection authentication (see the module
-/// docs above): any process that can open a TCP connection to the bound
-/// address can submit prompts and read memory/context/observability data.
-/// Binding to loopback keeps that risk scoped to local processes on this
-/// host; binding to `0.0.0.0`, a LAN interface, or any other non-loopback
-/// address would expose the same unauthenticated surface to the network.
-/// This is a fail-closed guard, not a full fix: it does not add
-/// authentication, it only prevents the most severe accidental
-/// misconfiguration (widening the trust boundary from "local processes" to
-/// "the network") from happening silently.
+/// Sensitive requests still require the daemon token, but TCP JSON lines are
+/// not transport-encrypted. Keeping the endpoint on loopback prevents an
+/// accidental network exposure; a deliberate remote deployment must add an
+/// appropriate encrypted, access-controlled transport around this endpoint.
 fn guard_daemon_bind_addr(addr: &str) -> Result<()> {
     let allow_non_loopback = std::env::var("IOTA_DAEMON_ALLOW_NON_LOOPBACK")
         .map(|value| value.trim() == "1")
         .unwrap_or(false);
     if allow_non_loopback {
         eprintln!(
-            "WARNING: IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 set; binding daemon to {addr} without \
-             authentication. Any process that can reach this address on the network can submit \
-             prompts and read this user's memory/context data. Only do this on a trusted, \
-             isolated network."
+            "WARNING: IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 set; binding daemon to {addr} beyond \
+             loopback. Sensitive requests still require the daemon token, but TCP JSON lines \
+             are not transport-encrypted. Use only with a trusted encrypted transport and do \
+             not expose the token in logs or configuration."
         );
         return Ok(());
     }
@@ -105,11 +94,10 @@ fn guard_daemon_bind_addr(addr: &str) -> Result<()> {
         .unwrap_or(false);
     anyhow::ensure!(
         is_loopback,
-        "refusing to bind the unauthenticated iota daemon to non-loopback address '{addr}'. \
-         This daemon has no per-connection authentication (see crate::daemon module docs); \
-         binding it to a non-loopback address exposes prompt submission and memory/context \
-         reads to the network. Use a loopback address (e.g. 127.0.0.1:47661), or set \
-         IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 to proceed anyway on a trusted, isolated network."
+        "refusing to bind iota daemon to non-loopback address '{addr}'. Sensitive requests \
+         require a daemon token, but the TCP JSON-line transport is not encrypted. Use a \
+         loopback address (e.g. 127.0.0.1:47661), or set IOTA_DAEMON_ALLOW_NON_LOOPBACK=1 \
+         only behind a trusted encrypted transport."
     );
     Ok(())
 }
@@ -133,9 +121,8 @@ pub async fn run_daemon(
         .with_context(|| format!("Failed to bind daemon at {}", addr))?;
     eprintln!("iota agent daemon listening on {}", addr);
     eprintln!(
-        "SECURITY NOTE: this daemon accepts unauthenticated local connections; any process \
-         that can reach {addr} can submit prompts and read memory/context/observability data. \
-         See crate::daemon module docs for the accepted trust boundary."
+        "SECURITY: daemon is loopback-only and requires the owner-only session token for all \
+         sensitive requests; authentication decisions are audit logged."
     );
     eprintln!("Press Ctrl+C to shut down gracefully");
 
@@ -176,6 +163,7 @@ pub async fn run_daemon(
             }
             accept_result = listener.accept() => {
                 let (stream, _) = accept_result?;
+                crate::daemon::audit::log_connection_established("tcp-loopback");
                 let engine_pool = Arc::clone(&engine_pool);
                 let permit = Arc::clone(&concurrency);
                 let desktop_approvals = desktop_approvals.clone();
@@ -297,7 +285,44 @@ async fn handle_connection(
         return Ok(());
     }
 
-    let response = if request.get("type").and_then(serde_json::Value::as_str) == Some("warm") {
+    let request_type = request
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let is_warm = request_type == "warm";
+    let presented_token = request
+        .get("auth_token")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let auth_outcome = authenticate_legacy_request(&request_type, presented_token.as_deref());
+    if !auth_outcome.is_authenticated() {
+        crate::daemon::audit::log_auth_rejected(
+            &request_type,
+            match &auth_outcome {
+                crate::daemon::auth::AuthOutcome::Rejected(reason) => reason.as_str(),
+                crate::daemon::auth::AuthOutcome::Authenticated => unreachable!(),
+            },
+        );
+        let response = DaemonPromptResponse {
+            ok: false,
+            text: None,
+            error: Some("unauthenticated: missing or invalid auth_token".to_string()),
+            timing: None,
+            execution_id: None,
+            warmed: None,
+            events: Vec::new(),
+        };
+        let mut line = serde_json::to_vec(&response).context("Failed to encode daemon response")?;
+        line.push(b'\n');
+        write_half.write_all(&line).await?;
+        write_half.flush().await?;
+        return Ok(());
+    }
+    crate::daemon::audit::log_auth_accepted(&request_type);
+    crate::daemon::audit::log_sensitive_operation(&request_type, true);
+
+    let response = if is_warm {
         let request: DaemonWarmRequest =
             serde_json::from_value(request).context("Failed to decode daemon warm request")?;
         handle_warm(request, engine_pool).await
@@ -311,6 +336,32 @@ async fn handle_connection(
     write_half.write_all(&line).await?;
     write_half.flush().await?;
     Ok(())
+}
+
+/// Authenticates a legacy (non-desktop-protocol) `warm`/prompt request
+/// against the daemon's CSPRNG token (see `daemon::auth`). Both
+/// `DaemonPromptRequest` and `DaemonWarmRequest` are always sensitive (they
+/// submit prompts or pre-start backends), so this is called unconditionally
+/// for every request reaching this branch.
+fn authenticate_legacy_request(
+    request_type: &str,
+    presented_token: Option<&str>,
+) -> crate::daemon::auth::AuthOutcome {
+    use crate::daemon::auth::{self, AuthOutcome};
+
+    let Some(presented) = presented_token else {
+        return AuthOutcome::Rejected(format!(
+            "request '{}' requires auth_token but none was provided",
+            request_type
+        ));
+    };
+    let expected = match auth::load_or_create_token() {
+        Ok(token) => token,
+        Err(err) => {
+            return AuthOutcome::Rejected(format!("failed to load daemon auth token: {}", err));
+        }
+    };
+    auth::verify_token(presented, &expected)
 }
 
 pub(crate) async fn read_limited_line<R>(

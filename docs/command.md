@@ -16,7 +16,7 @@
 | `iota mcp <context|fun>` | 启动 MCP stdio server |
 | `iota context-mcp` | 兼容命令，启动 iota-context MCP |
 | `iota fun-mcp` | 兼容命令，启动 iota-fun MCP |
-| `iota skill pull <source> [name]` | 从本地路径或 HTTP(S) 拉取 skill 到 `~/.i6/skills` |
+| `iota skill pull <source> [name] [--sha256 <hex-digest>]` | 从本地路径或 HTTPS URL 拉取 skill；网络源拒绝 HTTP，可选校验 SHA-256 后原子发布到 `~/.i6/skills/registry-cache` |
 | `iota observability <logging|tokens|metrics|logs|trace> ...` | 查询本地 token usage、Prometheus 文本指标、Loki 日志或 Jaeger trace |
 | `iota logs <execution_id>` | `iota observability logs` 的顶层别名 |
 | `iota trace <trace_id>` | `iota observability trace` 的顶层别名 |

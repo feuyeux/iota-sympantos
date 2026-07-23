@@ -20,6 +20,7 @@ async fn hello_handshake_v2_client_succeeds() {
         protocol_version: DESKTOP_PROTOCOL_VERSION,
         min_version: None,
         max_version: None,
+        auth_token: None,
     };
     let json = serde_json::to_string(&hello).unwrap();
     let decoded: DaemonClientMessage = serde_json::from_str(&json).unwrap();
@@ -39,6 +40,7 @@ async fn hello_handshake_v3_client_sends_range() {
         protocol_version: DESKTOP_PROTOCOL_VERSION,
         min_version: Some(PROTOCOL_VERSION_MIN),
         max_version: Some(PROTOCOL_VERSION_MAX),
+        auth_token: None,
     };
     let json = serde_json::to_string(&hello).unwrap();
     assert!(json.contains("\"min_version\":2"));

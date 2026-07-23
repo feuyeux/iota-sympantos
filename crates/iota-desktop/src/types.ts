@@ -1,23 +1,64 @@
 export type TurnStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 
+/// Timing breakdown for a completed ACP prompt, mirroring
+/// `iota_core::acp::AcpPromptTiming` (Rust) exactly so this stays a
+/// concrete, checked type rather than `any` (result.md S-07 / AC11.1).
+export type AcpPromptTiming = {
+  client_started: boolean;
+  process_spawned: boolean;
+  process_spawn_ms?: number;
+  init_ms?: number;
+  session_reused: boolean;
+  session_new_ms?: number;
+  prompt_ms: number;
+  total_ms: number;
+};
+
+/// Token usage payload carried by a `TokenUsage` runtime event, mirroring
+/// `iota_core::runtime_event::TokenUsageEvent` (Rust).
+export type TokenUsage = {
+  provider?: string;
+  backend?: string;
+  execution_id?: string;
+  session_id?: string;
+  source?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  normalized_total_tokens?: number;
+};
+
+/// Runtime event payloads are inherently free-form JSON on the wire (ACP
+/// backends and MCP tool arguments/results are not schema-constrained at
+/// this layer in Rust either — see `serde_json::Value` fields on
+/// `RuntimeEvent` variants). Rather than widen this back to `any`, model it
+/// as `unknown` so every access site is forced through an explicit runtime
+/// check (see `isObject`/narrowing helpers in `turnReducer.ts`) instead of
+/// silently type-checking as anything. This is the deliberate boundary
+/// documented in result.md S-07 / AC11.2 for the one place a static shape
+/// genuinely cannot be assigned.
 export type RuntimeEventView = {
   kind: string;
-  data: any;
+  data: unknown;
 };
 
 export type ApprovalView = {
   id: string;
   toolName: string;
-  params: any;
+  /// Free-form ACP `session/request_permission` params — see
+  /// `RuntimeEventView.data` doc above for why this is `unknown` rather
+  /// than a concrete type or `any`.
+  params: unknown;
   status: "pending" | "approved" | "denied";
 };
 
 export type ToolCallView = {
   id: string;
   name: string;
-  arguments: any;
+  /// Tool call arguments/results are arbitrary JSON defined by whichever
+  /// MCP tool was invoked; see `RuntimeEventView.data` doc above.
+  arguments: unknown;
   ok?: boolean;
-  result?: any;
+  result?: unknown;
 };
 
 export type DesktopTurn = {
@@ -30,8 +71,8 @@ export type DesktopTurn = {
   events: RuntimeEventView[];
   toolCalls: ToolCallView[];
   approvals: ApprovalView[];
-  timing?: any;
-  usage?: any;
+  timing?: AcpPromptTiming;
+  usage?: TokenUsage;
   error?: string;
 };
 
@@ -43,14 +84,14 @@ export type DaemonServerMessage =
   | { type: "turn_started"; turn_id: string }
   | { type: "text_chunk"; turn_id: string; chunk: string }
   | { type: "turn_event"; turn_id: string; event: RuntimeEventView }
-  | { type: "approval_requested"; turn_id: string; approval_id: string; tool_name: string; params: any }
+  | { type: "approval_requested"; turn_id: string; approval_id: string; tool_name: string; params: unknown }
   | { type: "approval_responded"; approval_id: string; accepted: boolean }
-  | { type: "turn_completed"; turn_id: string; text: string; timing: any }
+  | { type: "turn_completed"; turn_id: string; text: string; timing: AcpPromptTiming }
   | { type: "turn_failed"; turn_id: string; error: string }
   | { type: "turn_cancelled"; turn_id: string; accepted: boolean }
   | { type: "config_snapshot"; config: DesktopConfigSnapshot }
   | { type: "backend_check_result"; backend: string; ok: boolean; details: string }
-  | { type: "observability_summary"; summary: any }
+  | { type: "observability_summary"; summary: ObservabilitySummary }
   | { type: "memory_context_snapshot"; snapshot: DesktopMemoryContextSnapshot }
   | { type: "pong"; seq: number };
 

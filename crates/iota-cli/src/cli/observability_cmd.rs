@@ -162,6 +162,7 @@ async fn try_daemon_observability_summary() -> Result<ObservabilitySummaryRespon
         protocol_version: iota_core::daemon::DESKTOP_PROTOCOL_VERSION,
         min_version: Some(iota_core::daemon::PROTOCOL_VERSION_MIN),
         max_version: Some(iota_core::daemon::PROTOCOL_VERSION_MAX),
+        auth_token: iota_core::daemon::auth::load_or_create_token().ok(),
     };
     let mut line = serde_json::to_vec(&hello)?;
     line.push(b'\n');

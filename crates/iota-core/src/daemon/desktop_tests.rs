@@ -121,6 +121,131 @@ async fn desktop_connection_rejects_message_before_hello() {
     server.await.unwrap();
 }
 
+#[tokio::test]
+async fn desktop_connection_rejects_hello_without_auth_token() {
+    let _env_lock = crate::daemon::auth::test_token_path_env_lock();
+    let dir = std::env::temp_dir().join(format!("iota-daemon-auth-test-{}", uuid::Uuid::new_v4()));
+    let token_path = dir.join("daemon.token");
+    unsafe {
+        std::env::set_var("IOTA_DAEMON_TOKEN_PATH", &token_path);
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let stream = listener.accept().await.unwrap().0;
+        let pool = Arc::new(Mutex::new(EnginePool::new(
+            NimiaConfig::default(),
+            false,
+            1000,
+        )));
+        let (read_half, write_half) = stream.into_split();
+        let mut reader = BufReader::new(read_half);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let message: DaemonClientMessage = serde_json::from_str(line.trim()).unwrap();
+        handle_desktop_connection(
+            message,
+            reader,
+            write_half,
+            pool,
+            ApprovalRegistry::default(),
+            TurnRegistry::default(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let message = DaemonClientMessage::Hello {
+        client_name: "test".to_string(),
+        protocol_version: crate::daemon::DESKTOP_PROTOCOL_VERSION,
+        min_version: None,
+        max_version: None,
+        auth_token: None,
+    };
+    let mut line = serde_json::to_vec(&message).unwrap();
+    line.push(b'\n');
+    client.write_all(&line).await.unwrap();
+    let mut reader = BufReader::new(client);
+    let mut response = String::new();
+    reader.read_line(&mut response).await.unwrap();
+    let response: DaemonServerMessage = serde_json::from_str(response.trim()).unwrap();
+
+    assert!(matches!(
+        response,
+        DaemonServerMessage::ProtocolError { .. }
+    ));
+    server.await.unwrap();
+    unsafe {
+        std::env::remove_var("IOTA_DAEMON_TOKEN_PATH");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn desktop_connection_accepts_hello_with_valid_auth_token() {
+    let _env_lock = crate::daemon::auth::test_token_path_env_lock();
+    let dir = std::env::temp_dir().join(format!("iota-daemon-auth-test-{}", uuid::Uuid::new_v4()));
+    let token_path = dir.join("daemon.token");
+    unsafe {
+        std::env::set_var("IOTA_DAEMON_TOKEN_PATH", &token_path);
+    }
+    let token = crate::daemon::auth::load_or_create_token().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let stream = listener.accept().await.unwrap().0;
+        let pool = Arc::new(Mutex::new(EnginePool::new(
+            NimiaConfig::default(),
+            false,
+            1000,
+        )));
+        let (read_half, write_half) = stream.into_split();
+        let mut reader = BufReader::new(read_half);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let message: DaemonClientMessage = serde_json::from_str(line.trim()).unwrap();
+        handle_desktop_connection(
+            message,
+            reader,
+            write_half,
+            pool,
+            ApprovalRegistry::default(),
+            TurnRegistry::default(),
+        )
+        .await
+        .unwrap();
+    });
+
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let message = DaemonClientMessage::Hello {
+        client_name: "test".to_string(),
+        protocol_version: crate::daemon::DESKTOP_PROTOCOL_VERSION,
+        min_version: None,
+        max_version: None,
+        auth_token: Some(token),
+    };
+    let mut line = serde_json::to_vec(&message).unwrap();
+    line.push(b'\n');
+    client.write_all(&line).await.unwrap();
+    let mut reader = BufReader::new(client);
+    let mut response = String::new();
+    reader.read_line(&mut response).await.unwrap();
+    let response: DaemonServerMessage = serde_json::from_str(response.trim()).unwrap();
+
+    assert!(matches!(
+        response,
+        DaemonServerMessage::HelloAccepted { .. }
+    ));
+    server.await.unwrap();
+    unsafe {
+        std::env::remove_var("IOTA_DAEMON_TOKEN_PATH");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn memory_summary_counts_bucket_lengths() {
     let mut buckets = DesktopMemoryBuckets::default();
@@ -211,6 +336,7 @@ fn negotiate_version_v2_client_without_range() {
         protocol_version: 2,
         min_version: None,
         max_version: None,
+        auth_token: None,
     };
     let result = negotiate_version(&hello).unwrap();
     assert_eq!(result, 2);
@@ -223,6 +349,7 @@ fn negotiate_version_v3_client_with_range() {
         protocol_version: 2,
         min_version: Some(2),
         max_version: Some(3),
+        auth_token: None,
     };
     let result = negotiate_version(&hello).unwrap();
     assert_eq!(result, 3);
@@ -235,6 +362,7 @@ fn negotiate_version_incompatible_client() {
         protocol_version: 99,
         min_version: Some(99),
         max_version: Some(100),
+        auth_token: None,
     };
     let result = negotiate_version(&hello);
     assert!(result.is_err());

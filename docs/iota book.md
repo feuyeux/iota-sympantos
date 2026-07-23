@@ -44,7 +44,7 @@ iota 的每一处实现，背面都站着一组明确的取舍。这些立场不
 
 这些工具本身就是成熟的 coding agent，重造一遍只会很快过时。iota 只在它们暴露出来的 ACP 边界上做拦截、归一和编排，把推理这件事整个交还给后端，自己专心做 runtime 该做的事。
 
-**本地优先，干脆就按单用户单机来设计。** *↔ 9 要素 #5（内置原语）#9（权限与安全）。* 所有持久化落 SQLite，所有配置只读 `~/.i6/nimia.yaml`，daemon 默认监听 `127.0.0.1:47661`，可观测数据双写本地 SQLite 和可选的 OpenTelemetry 栈。不要求外部数据库、消息队列或中央配置服务，不假设多租户，也不内建网络鉴权。
+**本地优先，干脆就按单用户单机来设计。** *↔ 9 要素 #5（内置原语）#9（权限与安全）。* 所有持久化落 SQLite，所有配置只读 `~/.i6/nimia.yaml`，daemon 默认监听 `127.0.0.1:47661`，可观测数据双写本地 SQLite 和可选的 OpenTelemetry 栈。不要求外部数据库、消息队列或中央配置服务，也不假设多租户；但本机控制面不是无鉴权的：敏感 daemon 请求必须通过 owner-only CSPRNG token 认证，并写入不含 token 的审计事件。
 
 agent runtime 干的活天然是「贴着机器」的——直接读写本地源码、调本地 shell、起外部进程。本地优先换来三件实在事：部署就一行命令，备份就拷一个目录，调试就直接打开 sqlite。至于多用户、多租户，那是调用方在 iota 之上自己该搭的，不该让 runtime 背这个包袱。
 
@@ -504,7 +504,7 @@ React ChatWorkbench
 
 前端主要组件：`ChatWorkbench.tsx` 是主 shell，管后端选择、prompt form、Chat/Config 视图、daemon 状态和 inspector 宽度；`ConfigPanel.tsx` 负责后端模型配置编辑（API key 打码显示）；`RightInspector.tsx` 承载 turn 详情、approval、cancel、observability、memory/context 各 tab；`MemoryContextWorkspace.tsx` 提供只读 memory bucket 和 runtime context capsule 浏览；`turnReducer.ts` 折叠 daemon stream message 与 RuntimeEvent；`api.ts` 封装 Tauri invoke/listen。
 
-Tauri command 分两类：daemon-backed 的命令走 `get_config`、`save_backend_model`、`submit_prompt`、`cancel_turn`、`handle_approval` 等，direct Kanban 的命令走 `list_boards`、`list_tasks`、`create_task`、`transition_task` 等。当前 React workbench 还没挂载 Kanban board UI，但 Rust command surface 已经接入 `SqliteKanbanStore`，数据库在 `~/.i6/kanban/iota.db`。
+Tauri command 分两类：daemon-backed 的命令走 `get_config`、`save_backend_model`、`submit_prompt`、`cancel_turn`、`handle_approval` 等，direct Kanban 的命令走 `list_boards`、`list_tasks`、`create_task`、`transition_task` 等。当前 React workbench 已在 `RightInspector` 的 Kanban tab 挂载 `KanbanWorkspace`，可通过这些 Tauri commands 刷新 board、task、comment、link 和 run；数据库在 `~/.i6/kanban/iota.db`。
 
 Desktop 选择走 daemon 而不是直接创建 `IotaEngine`，是因为 daemon 能把热路径、配置保存、approval registry、turn cancel、runtime event streaming 全部捏在一处。Tauri 只当个本地 UI bridge 就好，不该变成第二套 runtime——一个系统里两套 runtime，早晚要在状态上对不齐。
 

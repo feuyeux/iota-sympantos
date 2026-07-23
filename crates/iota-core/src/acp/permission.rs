@@ -71,14 +71,32 @@ pub async fn answer_permission_request(
     tool_whitelist: &[String],
     cwd: Option<&std::path::Path>,
 ) -> Result<ApprovalDecisionEvent> {
-    let tool_name = params
+    // SECURITY: the identity used for auto-approval decisions (`is_iota_tool`,
+    // `tool_is_whitelisted`) must come only from fields the ACP backend uses
+    // to identify *which tool it is calling* (`toolName`/`name`/`tool`),
+    // never from `toolCall.title`, which is a free-text, human-readable
+    // label the backend can set to anything (including something that looks
+    // like a trusted/internal tool name) independent of which tool is
+    // actually being invoked. Falling back to `title` for the auto-approval
+    // identity check was the root cause of result.md S-02: a malicious or
+    // buggy backend could name an arbitrary/dangerous tool call with a
+    // spoofed title such as "iota_memory_write" and have it silently
+    // auto-approved. `display_name` keeps `title` only for the
+    // human-facing prompt/log text, where spoofing has no security effect.
+    let identity_name = params
         .get("toolName")
         .or_else(|| params.get("name"))
         .or_else(|| params.get("tool"))
-        .or_else(|| params.get("toolCall").and_then(|tc| tc.get("title")))
         .and_then(Value::as_str)
-        .unwrap_or("tool")
-        .to_string();
+        .map(str::to_string);
+    let display_name = identity_name.clone().unwrap_or_else(|| {
+        params
+            .get("toolCall")
+            .and_then(|tc| tc.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or("tool")
+            .to_string()
+    });
 
     // Read the channel once to avoid holding the lock across .await points and
     // to prevent double-locking (tokio::sync::RwLock is not reentrant).
@@ -99,10 +117,17 @@ pub async fn answer_permission_request(
 
     // iota's own MCP tools are internal infrastructure — auto-approve without prompting.
     // Tool names may arrive as "iota_memory_write" or "mcp__iota-context__iota_memory_write".
-    let is_iota_tool = tool_name.starts_with("iota_")
-        || tool_name.contains("__iota_")
-        || tool_name.starts_with("mcp__iota-");
-    let whitelist_hit = tool_is_whitelisted(&tool_name, tool_whitelist);
+    // Fail closed if no verifiable identity field was present: `identity_name.is_none()`
+    // means we only have an untrusted `title` to go on, which must never grant
+    // auto-approval (see comment above).
+    let is_iota_tool = identity_name
+        .as_deref()
+        .map(is_internal_iota_tool_name)
+        .unwrap_or(false);
+    let whitelist_hit = identity_name
+        .as_deref()
+        .map(|name| tool_is_whitelisted(name, tool_whitelist))
+        .unwrap_or(false);
     if is_iota_tool || whitelist_hit {
         send_approved_response(stdin, id.clone(), &params).await?;
         return Ok(ApprovalDecisionEvent {
@@ -119,6 +144,7 @@ pub async fn answer_permission_request(
         });
     }
 
+    let tool_name = display_name;
     let approved = if let Some(tx) = tui_tx.clone() {
         let (reply_tx, reply_rx) = oneshot::channel();
         let req = ApprovalRequest {
@@ -174,6 +200,40 @@ pub async fn answer_permission_request(
             "interactive user decision".to_string()
         }),
     })
+}
+
+/// Returns whether `tool_name` identifies one of iota's own internal MCP
+/// tools, using exact canonical-name comparison rather than
+/// substring/prefix checks, cross-checked against the actual dispatch
+/// registry (`mcp::tool_dispatch::REGISTRY`) rather than a hand-maintained
+/// duplicate list — so a name can only be treated as internal if the
+/// dispatcher would actually recognize and route it (AC2.1/AC2.2: no
+/// auto-approval without an exact registry hit).
+fn is_internal_iota_tool_name(tool_name: &str) -> bool {
+    if !is_ascii_canonical(tool_name) || tool_name.trim() != tool_name {
+        return false;
+    }
+    // Internal identity is intentionally *not* normalized: case, dashes,
+    // whitespace, Unicode lookalikes, and arbitrary MCP server prefixes are
+    // all different identities and must fail closed. Accept only an exact
+    // registry name or the one canonical server-qualified representation
+    // emitted for this process' iota-context MCP server.
+    if crate::mcp::tool_dispatch::REGISTRY.is_known_tool(tool_name) {
+        return true;
+    }
+    tool_name
+        .strip_prefix("mcp__iota-context__")
+        .filter(|tail| !tail.contains("__"))
+        .is_some_and(|tail| crate::mcp::tool_dispatch::REGISTRY.is_known_tool(tail))
+}
+
+/// Rejects names containing non-ASCII characters, so Unicode confusables
+/// (e.g. Cyrillic "а" standing in for Latin "a") cannot be used to craft a
+/// visually similar but distinct tool name that would otherwise canonicalize
+/// differently than a trusted name and slip past exact-match checks in an
+/// unexpected way, or be visually confused with a trusted name in logs/UI.
+fn is_ascii_canonical(value: &str) -> bool {
+    value.is_ascii()
 }
 
 async fn send_response(stdin: &mut ChildStdin, id: Value, result: Value) -> Result<()> {
@@ -264,6 +324,14 @@ fn tool_rule_match(tool_name: &str, rule: &str) -> bool {
     if rule.is_empty() {
         return false;
     }
+    // SECURITY (result.md S-02): Unicode confusables (e.g. Cyrillic "а")
+    // could otherwise be used to craft a tool name that is visually
+    // identical to a trusted name but bypasses the checks below in
+    // unexpected ways once passed through case-folding; reject anything
+    // non-ASCII outright rather than trying to normalize it.
+    if !is_ascii_canonical(&rule) || !is_ascii_canonical(tool_name) {
+        return false;
+    }
     if rule == "*" {
         return true;
     }
@@ -271,9 +339,17 @@ fn tool_rule_match(tool_name: &str, rule: &str) -> bool {
     let tool = canonical_tool_name(tool_name);
     let tool_tail = tool.split("__").last().unwrap_or(tool.as_str());
 
-    wildcard_match(&tool, &rule)
-        || wildcard_match(tool_tail, &rule)
-        || wildcard_match(&tool, &format!("*__{}", rule))
+    // A bare, non-glob rule (e.g. "iota_memory_write") matches the tool's
+    // exact full name or its exact tail after the last "__" server
+    // separator — never a substring/prefix of either. This closes the
+    // S-02 bypass where a crafted server name like
+    // "mcp__iota_memory_write_evil__actually_dangerous_tool" or a nested
+    // "__"-delimited segment could satisfy a naive substring check.
+    // Callers that legitimately want prefix/suffix matching must say so
+    // explicitly with a trailing/leading "*", which only administrators
+    // configure via `tool_whitelist` — this input is not attacker
+    // controlled, unlike the ACP backend's reported tool name.
+    wildcard_match(&tool, &rule) || wildcard_match(tool_tail, &rule)
 }
 
 fn wildcard_match(text: &str, pattern: &str) -> bool {

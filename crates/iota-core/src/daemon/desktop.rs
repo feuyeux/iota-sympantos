@@ -169,6 +169,30 @@ where
     if negotiate_version(&first_message).is_ok() {
         handshake_ok = true;
     }
+    // Authenticate the whole connection from the Hello message's
+    // `auth_token`. This is a one-time check per connection rather than
+    // per-message: once a connection has proven it can read the daemon's
+    // token file (i.e. it runs as the same local OS user as the daemon),
+    // every subsequent message on that same TCP connection is trusted. A
+    // new connection must present the token again.
+    let authenticated = match &first_message {
+        DaemonClientMessage::Hello { auth_token, .. } => {
+            authenticate_desktop_connection(auth_token.as_deref())
+        }
+        _ => false,
+    };
+    if !authenticated {
+        crate::daemon::audit::log_auth_rejected("hello", "missing or invalid auth_token");
+        send_message(
+            &writer,
+            &DaemonServerMessage::ProtocolError {
+                message: "unauthenticated: missing or invalid auth_token".to_string(),
+            },
+        )
+        .await?;
+        return Ok(());
+    }
+    crate::daemon::audit::log_auth_accepted("hello");
     handle_message(
         first_message,
         Arc::clone(&writer),
@@ -218,6 +242,24 @@ where
     Ok(())
 }
 
+/// Authenticates a desktop-protocol connection using the token presented in
+/// its `Hello` message, against the daemon's CSPRNG token (`daemon::auth`).
+/// The entire desktop protocol is treated as sensitive (it can start turns,
+/// read config, read memory/context/observability snapshots, and approve
+/// tool calls), so every connection must authenticate at handshake time.
+fn authenticate_desktop_connection(presented_token: Option<&str>) -> bool {
+    use crate::daemon::auth;
+
+    let Some(presented) = presented_token else {
+        return false;
+    };
+    let expected = match auth::load_or_create_token() {
+        Ok(token) => token,
+        Err(_) => return false,
+    };
+    auth::verify_token(presented, &expected).is_authenticated()
+}
+
 async fn handle_message(
     message: DaemonClientMessage,
     writer: Arc<Mutex<OwnedWriteHalf>>,
@@ -226,6 +268,21 @@ async fn handle_message(
     turns: TurnRegistry,
     connection_turns: Arc<Mutex<Vec<String>>>,
 ) -> Result<()> {
+    let request_type = match &message {
+        DaemonClientMessage::Hello { .. } => "hello",
+        DaemonClientMessage::StartTurn { .. } => "start_turn",
+        DaemonClientMessage::RespondApproval { .. } => "respond_approval",
+        DaemonClientMessage::CancelTurn { .. } => "cancel_turn",
+        DaemonClientMessage::GetConfig => "get_config",
+        DaemonClientMessage::SaveBackendModel { .. } => "save_backend_model",
+        DaemonClientMessage::CheckBackend { .. } => "check_backend",
+        DaemonClientMessage::GetObservabilitySummary { .. } => "get_observability_summary",
+        DaemonClientMessage::GetMemoryContextSnapshot { .. } => "get_memory_context_snapshot",
+        DaemonClientMessage::Ping { .. } => "ping",
+    };
+    if crate::daemon::auth::is_sensitive_request(request_type) || request_type == "check_backend" {
+        crate::daemon::audit::log_sensitive_operation(request_type, true);
+    }
     match message {
         DaemonClientMessage::Hello { .. } => match negotiate_version(&message) {
             Ok(negotiated) => {

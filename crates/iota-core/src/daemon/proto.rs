@@ -20,6 +20,11 @@ pub struct DaemonPromptRequest {
     pub timeout_ms: Option<u64>,
     #[serde(default)]
     pub timing: bool,
+    /// Local-machine auth token proving the caller can read the daemon's
+    /// token file (`~/.i6/daemon.token`), i.e. is the same OS user as the
+    /// daemon. Required for this request type; see `daemon::auth`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
 }
 
 /// Response to both prompt and warm requests.
@@ -48,6 +53,9 @@ pub struct DaemonWarmRequest {
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backends: Vec<String>,
+    /// See [`DaemonPromptRequest::auth_token`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
 }
 
 use std::collections::BTreeMap;
@@ -130,6 +138,11 @@ pub enum DaemonClientMessage {
         min_version: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max_version: Option<u32>,
+        /// See [`DaemonPromptRequest::auth_token`]. Authenticates the whole
+        /// desktop connection: once accepted, subsequent sensitive messages
+        /// on this connection do not need to repeat the token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auth_token: Option<String>,
     },
     StartTurn {
         turn_id: String,

@@ -10,10 +10,13 @@ use crate::utils::now_ts;
 use super::SqliteKanbanStore;
 
 impl SqliteKanbanStore {
-    pub(super) fn create_run_impl(&self, task_id: TaskId, profile: &str) -> Result<RunId> {
+    pub(super) fn create_run_on_conn(
+        conn: &rusqlite::Connection,
+        task_id: TaskId,
+        profile: &str,
+    ) -> Result<RunId> {
         let id = Uuid::new_v4().to_string();
         let now = now_ts();
-        let conn = self.lock_conn();
         conn.execute(
             "INSERT INTO runs (id, task_id, profile, status, started_at, last_heartbeat)
              VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
@@ -22,14 +25,13 @@ impl SqliteKanbanStore {
         Ok(id)
     }
 
-    pub(super) fn complete_run_impl(
-        &self,
+    pub(super) fn complete_run_on_conn(
+        conn: &rusqlite::Connection,
         run_id: &str,
         status: RunStatus,
         exit_code: Option<i32>,
     ) -> Result<()> {
         let now = now_ts();
-        let conn = self.lock_conn();
         let rows = conn.execute(
             "UPDATE runs SET status = ?1, finished_at = ?2, exit_code = ?3 WHERE id = ?4",
             params![status.as_str(), now, exit_code, run_id],

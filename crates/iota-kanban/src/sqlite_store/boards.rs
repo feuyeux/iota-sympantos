@@ -3,22 +3,11 @@
 use anyhow::Result;
 use rusqlite::params;
 
-use crate::types::{Board, BoardId};
-use crate::utils::now_ts;
+use crate::types::Board;
 
 use super::SqliteKanbanStore;
 
 impl SqliteKanbanStore {
-    pub(super) fn create_board_impl(&self, slug: &str, name: &str) -> Result<BoardId> {
-        let now = now_ts();
-        let conn = self.lock_conn();
-        conn.execute(
-            "INSERT INTO boards (slug, name, created_at) VALUES (?1, ?2, ?3)",
-            params![slug, name, now],
-        )?;
-        Ok(conn.last_insert_rowid() as u64)
-    }
-
     pub(super) fn list_boards_impl(&self) -> Result<Vec<Board>> {
         let conn = self.lock_conn();
         let mut stmt =

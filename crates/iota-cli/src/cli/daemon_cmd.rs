@@ -14,6 +14,7 @@ pub(super) async fn run_prompt_via_daemon(options: &acp::AcpRunOptions) -> Resul
         execution_id: None,
         timeout_ms: Some(options.timeout_ms),
         timing: options.timing,
+        auth_token: iota_core::daemon::auth::load_or_create_token().ok(),
     };
     let daemon_addr = daemon::daemon_addr();
     let response = send_prompt_autostart_daemon(&daemon_addr, &request).await?;
@@ -64,6 +65,7 @@ pub(super) async fn warm_daemon_for_current_dir(backends: Vec<String>) -> Result
             .display()
             .to_string(),
         backends,
+        auth_token: iota_core::daemon::auth::load_or_create_token().ok(),
     };
     let daemon_addr = daemon::daemon_addr();
     let response = match daemon::send_warm(&daemon_addr, &request).await {
@@ -132,6 +134,7 @@ pub(super) async fn run_daemon_benchmark(config: &NimiaConfig, rounds: usize) ->
                 execution_id: None,
                 timeout_ms: Some(acp::DEFAULT_TIMEOUT_MS),
                 timing: false,
+                auth_token: iota_core::daemon::auth::load_or_create_token().ok(),
             };
             let started = std::time::Instant::now();
             let result = send_prompt_autostart_daemon(&daemon_addr, &request).await;

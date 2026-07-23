@@ -135,3 +135,83 @@ async fn scoped_approval_channel_is_registered_and_removed() {
             .contains_key("turn-test")
     );
 }
+
+// ---------------------------------------------------------------------------
+// S-02 regression tests: spoofed / malicious tool names must not be
+// auto-approved by exploiting substring, prefix, Unicode, or nested-field
+// matching bugs.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn spoofed_name_with_iota_prefix_is_not_internal_tool() {
+    // Starts with "iota_" but is not one of the actually-registered
+    // internal tool names — must not be treated as internal.
+    assert!(!is_internal_iota_tool_name("iota_evil_tool"));
+    assert!(!is_internal_iota_tool_name("iota_memory_write_but_evil"));
+}
+
+#[test]
+fn exact_internal_tool_name_is_recognized() {
+    assert!(is_internal_iota_tool_name("iota_memory_write"));
+    assert!(is_internal_iota_tool_name(
+        "mcp__iota-context__iota_memory_write"
+    ));
+}
+
+#[test]
+fn internal_tool_identity_rejects_case_format_and_server_variants() {
+    assert!(!is_internal_iota_tool_name("IOTA_MEMORY_WRITE"));
+    assert!(!is_internal_iota_tool_name("iota-memory-write"));
+    assert!(!is_internal_iota_tool_name(
+        " mcp__iota-context__iota_memory_write"
+    ));
+    assert!(!is_internal_iota_tool_name(
+        "mcp__unknown-server__iota_memory_write"
+    ));
+    assert!(!is_internal_iota_tool_name(
+        "mcp__iota-context__nested__iota_memory_write"
+    ));
+}
+
+#[test]
+fn substring_containing_iota_marker_does_not_bypass_whitelist() {
+    // A rule targeting a legitimate tool must not match a different tool
+    // whose name merely contains the rule as a substring.
+    assert!(!tool_is_whitelisted(
+        "iota_memory_write_and_also_delete_everything",
+        &["iota_memory_write".to_string()]
+    ));
+}
+
+#[test]
+fn nested_server_name_cannot_smuggle_unrelated_tail_tool() {
+    // Even though the rule matches a tail exactly, a server segment that
+    // itself contains "__" must not let an unrelated dangerous tool ride
+    // along disguised as the tail.
+    assert!(!tool_is_whitelisted(
+        "mcp__iota_memory_write__delete_all_files",
+        &["iota_memory_write".to_string()]
+    ));
+}
+
+#[test]
+fn non_ascii_confusable_rule_never_matches() {
+    // Cyrillic "а" (U+0430) instead of Latin "a" in "iota_memory_write".
+    let confusable_rule = "iot\u{0430}_memory_write";
+    assert!(!tool_is_whitelisted("iota_memory_write", &[confusable_rule.to_string()]));
+}
+
+#[test]
+fn non_ascii_confusable_tool_name_never_matches_legit_rule() {
+    let confusable_tool = "iot\u{0430}_memory_write";
+    assert!(!tool_is_whitelisted(
+        confusable_tool,
+        &["iota_memory_write".to_string()]
+    ));
+    assert!(!is_internal_iota_tool_name(confusable_tool));
+}
+
+#[test]
+fn is_internal_iota_tool_name_rejects_non_ascii() {
+    assert!(!is_internal_iota_tool_name("iot\u{0430}_memory_write"));
+}

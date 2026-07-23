@@ -101,11 +101,14 @@ pub fn import_event_bundle(
         .cloned()
         .collect();
     let events_skipped = events_seen.saturating_sub(new_events.len());
-    let events_applied = store.replay_events(&new_events)?;
-    for event in &new_events {
-        store.append_event(&event.event_type, &event.payload)?;
-    }
-    store.set_sync_cursor(&bundle.source, bundle.cursor)?;
+    // SECURITY/CORRECTNESS (result.md S-04, AC5.3): replay, event-log
+    // append, and cursor advancement must commit or roll back together.
+    // Previously these were three independent calls; a failure partway
+    // through could advance the cursor past events that were never
+    // actually replayed/appended (silent data loss on the next sync) or
+    // leave replayed state without a corresponding local event record.
+    let events_applied =
+        store.import_event_bundle_atomic(&new_events, &bundle.source, bundle.cursor)?;
     Ok(EventImportReport {
         source: bundle.source.clone(),
         events_seen,

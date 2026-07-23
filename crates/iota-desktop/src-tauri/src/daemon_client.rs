@@ -54,6 +54,7 @@ pub fn hello_message() -> DaemonClientMessage {
         protocol_version: DESKTOP_PROTOCOL_VERSION,
         min_version: Some(PROTOCOL_VERSION_MIN),
         max_version: Some(PROTOCOL_VERSION_MAX),
+        auth_token: iota_core::daemon::auth::load_or_create_token().ok(),
     }
 }
 

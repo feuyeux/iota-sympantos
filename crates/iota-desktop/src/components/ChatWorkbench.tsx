@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, ChevronDown, CircleDashed, Send } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, CircleDashed, Moon, Send, Sun } from "lucide-react";
 import {
   checkBackend,
   currentWorkspace,
@@ -10,6 +10,7 @@ import {
   submitPrompt,
 } from "../api";
 import { initialTurnsState, turnsReducer } from "../turnReducer";
+import { applyTheme, getInitialTheme, type ColorTheme } from "../theme";
 import { RightInspector, type InspectorTab } from "./RightInspector";
 import { ConfigPanel } from "./ConfigPanel";
 import type { BackendCheckResult, DesktopConfigSnapshot, ObservabilitySummary } from "../types";
@@ -97,6 +98,7 @@ export function defaultInspectorWidth(viewportWidth = window.innerWidth) {
 }
 
 export function ChatWorkbench() {
+  const [theme, setTheme] = useState<ColorTheme>(getInitialTheme);
   const [state, dispatch] = useReducer(turnsReducer, initialTurnsState);
   const [backend, setBackend] = useState("hermes");
   const [input, setInput] = useState("");
@@ -111,6 +113,10 @@ export function ChatWorkbench() {
   const [isResizingInspector, setIsResizingInspector] = useState(false);
   const [isBackendMenuOpen, setIsBackendMenuOpen] = useState(false);
   const backendMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   const activeTurn = state.activeTurnId ? state.turns[state.activeTurnId] : undefined;
 
@@ -371,7 +377,7 @@ export function ChatWorkbench() {
           <div
             role="listbox"
             aria-label="Backend"
-            className="absolute bottom-10 left-0 z-30 w-[260px] overflow-hidden rounded-xl border border-slate-800 bg-[#0d1220]/95 backdrop-blur-md p-1.5 shadow-2xl shadow-black/60"
+            className="absolute bottom-10 left-0 z-30 w-[260px] overflow-hidden rounded-xl border border-slate-800 bg-app-surface/95 backdrop-blur-md p-1.5 shadow-2xl shadow-black/60"
           >
             {BACKENDS.map((item) => {
               const check = backendChecks[item];
@@ -418,13 +424,13 @@ export function ChatWorkbench() {
 
   return (
     <div
-      className={`flex h-screen bg-[#0b0f19] text-slate-100 font-sans ${
+      className={`flex h-screen bg-app-canvas text-slate-100 font-sans ${
         isResizingInspector ? "cursor-col-resize select-none" : "select-none"
       }`}
     >
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Header Bar */}
-        <header className="flex items-center border-b border-slate-800/50 bg-[#0d1220]/80 backdrop-blur-md px-6 py-3 shrink-0">
+        <header className="flex items-center justify-between gap-4 border-b border-slate-800/50 bg-app-surface/80 backdrop-blur-md px-6 py-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="iota-logo-container relative flex h-8 w-8 items-center justify-center cursor-pointer transition-transform duration-300 hover:scale-105 active:scale-95">
               <svg
@@ -526,7 +532,7 @@ export function ChatWorkbench() {
             </div>
             <div>
               <h1 className="text-[15px] flex items-center gap-2">
-                <span className="bg-gradient-to-r from-white via-neutral-100 to-neutral-400 bg-clip-text text-transparent font-extrabold tracking-wide">
+                <span className="app-title-gradient font-extrabold tracking-wide">
                   Iota
                 </span>
                 <span className="text-primary font-semibold tracking-wide">
@@ -553,13 +559,22 @@ export function ChatWorkbench() {
             </div>
           </div>
 
+          <button
+            type="button"
+            className="theme-toggle flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-800 bg-slate-950/35 text-slate-400 transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            onClick={() => setTheme((currentTheme) => currentTheme === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
         </header>
 
         {/* Content Panel */}
         {view === "chat" ? (
           <>
             {/* Messages Scroll Area */}
-            <div className="flex-1 overflow-y-auto select-text bg-[#0b0f19]">
+            <div className="flex-1 overflow-y-auto select-text bg-app-canvas">
               {transcript.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-slate-400 gap-3 px-6 text-center">
                   <div className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shadow-inner">
@@ -619,7 +634,7 @@ export function ChatWorkbench() {
             </div>
 
             {/* Prompt Form */}
-            <div className="border-t border-slate-800/40 bg-[#0d1220]/60 backdrop-blur-md p-4 shrink-0">
+            <div className="border-t border-slate-800/40 bg-app-surface/60 backdrop-blur-md p-4 shrink-0">
               <div className="mb-3 flex justify-start">
                 {workspaceControls}
               </div>
@@ -662,7 +677,7 @@ export function ChatWorkbench() {
             <div className="min-h-0 flex-1">
               <ConfigPanel config={config} backendChecks={backendChecks} onConfigUpdate={handleConfigUpdate} />
             </div>
-            <div className="border-t border-slate-800/40 bg-[#0d1220]/60 backdrop-blur-md p-4 shrink-0">
+            <div className="border-t border-slate-800/40 bg-app-surface/60 backdrop-blur-md p-4 shrink-0">
               <div className="flex justify-start">
                 {workspaceControls}
               </div>
@@ -675,7 +690,7 @@ export function ChatWorkbench() {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize inspector panel"
-        className={`group relative z-10 w-2 shrink-0 cursor-col-resize bg-[#0f131c] transition-colors ${
+        className={`group relative z-10 w-2 shrink-0 cursor-col-resize bg-app-divider transition-colors ${
           isResizingInspector ? "bg-primary/20" : "hover:bg-primary/10"
         }`}
         onPointerDown={startInspectorResize}

@@ -30,7 +30,7 @@ export function ConfigPanel({ config: externalConfig, backendChecks = {}, onConf
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-[#0b0f19]">
+    <div className="h-full overflow-y-auto bg-app-canvas">
       <div className="mx-auto max-w-3xl px-6 py-8">
         <h2 className="text-[15px] font-extrabold uppercase tracking-wider text-slate-300">Configuration</h2>
         <p className="mt-1.5 text-xs text-slate-500 font-mono" title={config.config_path}>

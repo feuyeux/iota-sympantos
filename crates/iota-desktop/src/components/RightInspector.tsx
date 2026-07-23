@@ -50,7 +50,7 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
       {observability?.token_summary && observability.token_summary.length > 0 ? (
         <div className="space-y-2.5 text-xs text-slate-300">
           {observability.token_summary.slice(0, 5).map((summary) => (
-            <div key={summary.backend} className="rounded-lg border border-slate-800 bg-[#0b0f19]/40 p-3">
+            <div key={summary.backend} className="rounded-lg border border-slate-800 bg-app-canvas/40 p-3">
               <div className="flex items-center justify-between">
                 <span className="font-bold uppercase text-slate-200">{summary.backend}</span>
                 <span className="text-[10px] text-slate-500 font-mono font-medium">{summary.count} turns</span>
@@ -200,7 +200,7 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
             <p className="mt-2 text-xs text-slate-300 leading-normal">
               The agent requested execution of tool: <strong className="font-mono text-slate-100 bg-rose-950/30 px-1.5 py-0.5 rounded border border-rose-500/25">{pendingApproval.toolName}</strong>
             </p>
-            <pre className="mt-2.5 max-h-36 overflow-auto rounded-lg bg-[#0b0f19] p-3 text-[11px] text-slate-300 font-mono border border-slate-800">
+            <pre className="mt-2.5 max-h-36 overflow-auto rounded-lg bg-app-canvas p-3 text-[11px] text-slate-300 font-mono border border-slate-800">
               {JSON.stringify(pendingApproval.params, null, 2)}
             </pre>
             <div className="mt-4 flex justify-end gap-2.5">
@@ -233,21 +233,21 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
           </div>
           {turn.timing ? (
             <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="bg-[#0b0f19]/40 p-3 rounded-lg border border-slate-800">
+              <div className="bg-app-canvas/40 p-3 rounded-lg border border-slate-800">
                 <div className="text-slate-500 font-medium">Total Duration</div>
                 <div className="text-xs font-bold text-slate-200 mt-1 font-mono">{formatMs(turn.timing.total_ms)}</div>
               </div>
-              <div className="bg-[#0b0f19]/40 p-3 rounded-lg border border-slate-800">
+              <div className="bg-app-canvas/40 p-3 rounded-lg border border-slate-800">
                 <div className="text-slate-500 font-medium">LLM Prompt</div>
                 <div className="text-xs font-bold text-slate-200 mt-1 font-mono">{formatMs(turn.timing.prompt_ms)}</div>
               </div>
-              <div className="bg-[#0b0f19]/40 p-3 rounded-lg border border-slate-800">
+              <div className="bg-app-canvas/40 p-3 rounded-lg border border-slate-800">
                 <div className="text-slate-500 font-medium">Spawn / Init</div>
                 <div className="text-[11px] font-semibold text-slate-300 mt-1 truncate font-mono" title={`${formatMs(turn.timing.process_spawn_ms)} / ${formatMs(turn.timing.init_ms)}`}>
                   {formatMs(turn.timing.process_spawn_ms)} / {formatMs(turn.timing.init_ms)}
                 </div>
               </div>
-              <div className="bg-[#0b0f19]/40 p-3 rounded-lg border border-slate-800">
+              <div className="bg-app-canvas/40 p-3 rounded-lg border border-slate-800">
                 <div className="text-slate-500 font-medium">Session Mode</div>
                 <div className="mt-1">
                   {turn.timing.session_reused ? (
@@ -364,8 +364,8 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
               <div className="text-xs text-slate-500 italic">No events generated yet</div>
             ) : null}
             {turn.events.map((event, index) => (
-              <details key={index} className="rounded-lg border border-slate-800 bg-[#0b0f19]/30 text-xs overflow-hidden">
-                <summary className="px-3.5 py-2.5 cursor-pointer font-bold text-slate-300 hover:bg-[#0b0f19]/60 flex justify-between items-center select-none">
+              <details key={index} className="rounded-lg border border-slate-800 bg-app-canvas/30 text-xs overflow-hidden">
+                <summary className="px-3.5 py-2.5 cursor-pointer font-bold text-slate-300 hover:bg-app-canvas/60 flex justify-between items-center select-none">
                   <span>{event.kind}</span>
                   <span className="text-[10px] text-slate-500 font-mono font-medium">#{index + 1}</span>
                 </summary>
@@ -382,10 +382,10 @@ export function RightInspector({ turn, observability, onApprovalDecision, width 
 
   return (
     <aside
-      className="shrink-0 border-l border-slate-800 bg-[#0d1220] overflow-hidden flex flex-col"
+      className="shrink-0 border-l border-slate-800 bg-app-surface overflow-hidden flex flex-col"
       style={{ width }}
     >
-      <div className="border-b border-slate-800 bg-[#0d1220] p-3">
+      <div className="border-b border-slate-800 bg-app-surface p-3">
         <nav className="grid grid-cols-4 rounded-lg border border-slate-800 bg-slate-950/40 p-0.5">
           <button
             className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-all cursor-pointer ${

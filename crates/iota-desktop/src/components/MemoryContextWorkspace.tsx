@@ -108,9 +108,9 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
   const isMemoryMode = mode === "memory";
 
   return (
-    <div className="flex flex-col h-full bg-[#0b0f19] text-slate-200 overflow-hidden font-sans">
+    <div className="flex flex-col h-full bg-app-canvas text-slate-200 overflow-hidden font-sans">
       {/* Top Header */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-850 bg-[#0d1220]/80 px-4 py-3 backdrop-blur-md shrink-0">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-850 bg-app-surface/80 px-4 py-3 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-primary/10 p-2 text-primary border border-primary/25">
             {isMemoryMode ? <Database className="h-4.5 w-4.5" /> : <Cpu className="h-4.5 w-4.5" />}
@@ -185,7 +185,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
         <div className="bg-red-500/10 border-b border-red-500/20 px-6 py-4 flex items-center gap-3 text-sm text-red-350 shrink-0">
           <AlertCircle className="h-5 w-5 shrink-0 text-red-400" />
           <div>
-            <h4 className="font-semibold text-white">Error loading snapshot</h4>
+            <h4 className="font-semibold text-red-300">Error loading snapshot</h4>
             <p className="text-xs text-red-450 mt-0.5">{error}</p>
           </div>
         </div>
@@ -194,7 +194,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
       <div className="flex-1 overflow-hidden">
         
         {isMemoryMode && (
-        <section className="flex flex-col h-full overflow-hidden bg-[#0b0f19]">
+        <section className="flex flex-col h-full overflow-hidden bg-app-canvas">
           <div className="flex items-center justify-between border-b border-slate-850 bg-slate-955/10 px-4 py-2.5 shrink-0">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
               <Database className="h-4 w-4 text-primary/80" /> Persistent Memory
@@ -234,7 +234,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
             </div>
 
             {/* Records Column */}
-            <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#0b0f19]/25">
+            <div className="flex-1 flex flex-col h-full overflow-hidden bg-app-canvas/25">
               {/* Search Bar */}
               <div className="p-3 border-b border-slate-850 shrink-0">
                 <div className="relative">
@@ -275,7 +275,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
                         className={`w-full text-left p-3.5 flex flex-col gap-2 transition-all cursor-pointer border-b border-slate-900/40 ${
                           isSelected
                             ? "bg-primary/5 border-l-3 border-primary"
-                            : "hover:bg-[#0b0f19]/35"
+                            : "hover:bg-app-canvas/35"
                         }`}
                       >
                         <div className="flex items-center justify-between w-full">
@@ -301,7 +301,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
 
               {/* Record Detail Panel */}
               {selectedRecord && (
-                <div className="border-t border-slate-850 bg-[#0d1220]/80 p-4.5 flex flex-col gap-3 shrink-0">
+                <div className="border-t border-slate-850 bg-app-surface/80 p-4.5 flex flex-col gap-3 shrink-0">
                   <div className="flex items-start justify-between">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] uppercase font-bold text-slate-500 tracking-widest">Selected Memory Detail</span>
@@ -322,23 +322,23 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
                     </div>
                   </div>
 
-                  <div className="bg-[#0b0f19]/60 border border-slate-850 rounded-xl p-3 text-xs leading-relaxed text-slate-350 font-mono max-h-36 overflow-y-auto whitespace-pre-wrap">
+                  <div className="bg-app-canvas/60 border border-slate-850 rounded-xl p-3 text-xs leading-relaxed text-slate-350 font-mono max-h-36 overflow-y-auto whitespace-pre-wrap">
                     {selectedRecord.content}
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[10px]">
-                    <div className="bg-[#0b0f19]/40 p-2.5 rounded-lg border border-slate-850/80">
+                    <div className="bg-app-canvas/40 p-2.5 rounded-lg border border-slate-850/80">
                       <div className="text-slate-500 font-medium uppercase tracking-wider text-[9px]">Confidence</div>
                       <div className="text-slate-300 font-bold mt-1 font-mono">{(selectedRecord.confidence * 100).toFixed(0)}%</div>
                     </div>
-                    <div className="bg-[#0b0f19]/40 p-2.5 rounded-lg border border-slate-850/80">
+                    <div className="bg-app-canvas/40 p-2.5 rounded-lg border border-slate-850/80">
                       <div className="text-slate-300 font-bold mt-1 font-mono truncate">{selectedRecord.facet || "None"} / {selectedRecord.type}</div>
                     </div>
-                    <div className="bg-[#0b0f19]/40 p-2.5 rounded-lg border border-slate-850/80">
+                    <div className="bg-app-canvas/40 p-2.5 rounded-lg border border-slate-850/80">
                       <div className="text-slate-500 font-medium uppercase tracking-wider text-[9px]">Scope</div>
                       <div className="text-slate-300 font-bold mt-1 font-mono capitalize">{selectedRecord.scope}</div>
                     </div>
-                    <div className="bg-[#0b0f19]/40 p-2.5 rounded-lg border border-slate-850/80">
+                    <div className="bg-app-canvas/40 p-2.5 rounded-lg border border-slate-850/80">
                       <div className="text-slate-500 font-medium uppercase tracking-wider text-[9px]">Created At</div>
                       <div className="text-slate-300 font-bold mt-1 font-mono truncate" title={formatDate(selectedRecord.created_at)}>
                         {formatDate(selectedRecord.created_at)}
@@ -353,7 +353,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
         )}
 
         {!isMemoryMode && (
-        <section className="flex flex-col h-full overflow-hidden bg-[#0b0f19]">
+        <section className="flex flex-col h-full overflow-hidden bg-app-canvas">
           <div className="flex items-center justify-between border-b border-slate-850 bg-slate-955/10 px-4 py-2.5 shrink-0">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
               <Cpu className="h-4 w-4 text-primary/80" /> Runtime Context Capsule
@@ -464,7 +464,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
                       {snapshot.runtime_context.sections.map((section) => (
                         <div
                           key={section.name}
-                          className="group rounded-xl border border-slate-850 bg-slate-950/20 p-3.5 hover:bg-[#0b0f19]/40 hover:border-slate-800 transition-all"
+                          className="group rounded-xl border border-slate-850 bg-slate-950/20 p-3.5 hover:bg-app-canvas/40 hover:border-slate-800 transition-all"
                         >
                           <div className="flex items-center justify-between text-xs">
                             <span className="font-mono font-bold text-primary flex items-center gap-1.5">
@@ -475,7 +475,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
                             </span>
                           </div>
                           {section.preview && (
-                            <p className="mt-2.5 text-xs text-slate-400 leading-relaxed bg-[#0b0f19]/55 p-3 rounded-lg border border-slate-900/60 font-mono line-clamp-2">
+                            <p className="mt-2.5 text-xs text-slate-400 leading-relaxed bg-app-canvas/55 p-3 rounded-lg border border-slate-900/60 font-mono line-clamp-2">
                               {section.preview}
                             </p>
                           )}
@@ -502,7 +502,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
                   </button>
 
                   {fullCapsuleExpanded && (
-                    <div className="border-t border-slate-850 bg-[#0b0f19] rounded-b-xl flex flex-col overflow-hidden">
+                    <div className="border-t border-slate-850 bg-app-canvas rounded-b-xl flex flex-col overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-2 border-b border-slate-850 bg-slate-950/20">
                         <span className="text-[10px] text-slate-550 font-mono">
                           Size: {snapshot.runtime_context.capsule_text.length.toLocaleString()} characters
@@ -524,7 +524,7 @@ export function MemoryContextWorkspace({ mode = "memory" }: MemoryContextWorkspa
                           )}
                         </button>
                       </div>
-                      <pre className="p-4 text-xs text-slate-400 font-mono overflow-auto max-h-72 leading-relaxed whitespace-pre-wrap select-text selection:bg-primary/25 bg-[#0b0f19]/25">
+                      <pre className="p-4 text-xs text-slate-400 font-mono overflow-auto max-h-72 leading-relaxed whitespace-pre-wrap select-text selection:bg-primary/25 bg-app-canvas/25">
                         {snapshot.runtime_context.capsule_text}
                       </pre>
                     </div>
