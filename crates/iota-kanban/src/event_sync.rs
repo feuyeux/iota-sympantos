@@ -51,11 +51,21 @@ pub fn export_event_bundle(
     cursor: EventId,
     source: impl Into<String>,
 ) -> Result<KanbanEventBundle> {
+    anyhow::ensure!(
+        cursor <= i64::MAX as u64,
+        "kanban export cursor exceeds SQLite integer range"
+    );
+    let source = source.into();
+    anyhow::ensure!(
+        !source.trim().is_empty() && source.len() <= MAX_EVENT_SYNC_SOURCE_BYTES,
+        "kanban event bundle source must be 1..={} bytes",
+        MAX_EVENT_SYNC_SOURCE_BYTES
+    );
     let events = store.events_since(cursor)?;
     let next_cursor = events.last().map(|event| event.id).unwrap_or(cursor);
     Ok(KanbanEventBundle {
         format_version: FORMAT_VERSION,
-        source: source.into(),
+        source,
         cursor: next_cursor,
         events,
     })
@@ -66,13 +76,36 @@ pub fn write_event_bundle(path: &Path, bundle: &KanbanEventBundle) -> Result<()>
         fs::create_dir_all(parent)
             .with_context(|| format!("creating kanban event bundle dir {}", parent.display()))?;
     }
-    let json = serde_json::to_string_pretty(bundle)?;
+    let json = serde_json::to_vec_pretty(bundle)?;
+    anyhow::ensure!(
+        json.len() <= MAX_EVENT_SYNC_MESSAGE_BYTES,
+        "kanban event bundle exceeds {} byte limit",
+        MAX_EVENT_SYNC_MESSAGE_BYTES
+    );
     fs::write(path, json).with_context(|| format!("writing kanban event bundle {}", path.display()))
 }
 
 pub fn read_event_bundle(path: &Path) -> Result<KanbanEventBundle> {
-    let bytes = fs::read(path)
+    let file = fs::File::open(path)
+        .with_context(|| format!("opening kanban event bundle {}", path.display()))?;
+    let size = file
+        .metadata()
+        .with_context(|| format!("reading kanban event bundle metadata {}", path.display()))?
+        .len();
+    anyhow::ensure!(
+        size <= MAX_EVENT_SYNC_MESSAGE_BYTES as u64,
+        "kanban event bundle exceeds {} byte limit",
+        MAX_EVENT_SYNC_MESSAGE_BYTES
+    );
+    let mut bytes = Vec::with_capacity(size as usize);
+    file.take(MAX_EVENT_SYNC_MESSAGE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
         .with_context(|| format!("reading kanban event bundle {}", path.display()))?;
+    anyhow::ensure!(
+        bytes.len() <= MAX_EVENT_SYNC_MESSAGE_BYTES,
+        "kanban event bundle exceeds {} byte limit",
+        MAX_EVENT_SYNC_MESSAGE_BYTES
+    );
     let bundle: KanbanEventBundle = serde_json::from_slice(&bytes)
         .with_context(|| format!("parsing kanban event bundle {}", path.display()))?;
     anyhow::ensure!(
@@ -81,6 +114,66 @@ pub fn read_event_bundle(path: &Path) -> Result<KanbanEventBundle> {
         bundle.format_version
     );
     Ok(bundle)
+}
+
+const MAX_EVENT_SYNC_SOURCE_BYTES: usize = 256;
+
+fn validate_event_bundle(bundle: &KanbanEventBundle, stored_cursor: u64) -> Result<()> {
+    anyhow::ensure!(
+        !bundle.source.trim().is_empty()
+            && bundle.source.len() <= MAX_EVENT_SYNC_SOURCE_BYTES,
+        "kanban event bundle source must be 1..={} bytes",
+        MAX_EVENT_SYNC_SOURCE_BYTES
+    );
+    anyhow::ensure!(
+        bundle.cursor <= i64::MAX as u64,
+        "kanban event bundle cursor exceeds SQLite integer range"
+    );
+
+    let mut previous = None;
+    for event in &bundle.events {
+        anyhow::ensure!(
+            event.id > 0 && event.id <= i64::MAX as u64,
+            "kanban event id {} is outside SQLite integer range",
+            event.id
+        );
+        if let Some(previous) = previous {
+            anyhow::ensure!(
+                event.id > previous,
+                "kanban event ids must be strictly increasing"
+            );
+        }
+        previous = Some(event.id);
+    }
+
+    if let Some(last) = bundle.events.last() {
+        anyhow::ensure!(
+            bundle.cursor == last.id,
+            "kanban event bundle cursor {} does not match last event {}",
+            bundle.cursor,
+            last.id
+        );
+    } else {
+        anyhow::ensure!(
+            bundle.cursor <= stored_cursor,
+            "empty kanban event bundle cannot advance cursor"
+        );
+    }
+
+    let mut previous_new = stored_cursor;
+    for event in bundle.events.iter().filter(|event| event.id > stored_cursor) {
+        let expected = previous_new
+            .checked_add(1)
+            .context("kanban sync cursor overflow")?;
+        anyhow::ensure!(
+            event.id == expected,
+            "kanban event gap: expected {}, received {}",
+            expected,
+            event.id
+        );
+        previous_new = event.id;
+    }
+    Ok(())
 }
 
 pub fn import_event_bundle(
@@ -92,8 +185,15 @@ pub fn import_event_bundle(
         "unsupported kanban event bundle version: {}",
         bundle.format_version
     );
+    anyhow::ensure!(
+        !bundle.source.trim().is_empty()
+            && bundle.source.len() <= MAX_EVENT_SYNC_SOURCE_BYTES,
+        "kanban event bundle source must be 1..={} bytes",
+        MAX_EVENT_SYNC_SOURCE_BYTES
+    );
     let events_seen = bundle.events.len();
     let stored_cursor = store.sync_cursor(&bundle.source)?;
+    validate_event_bundle(bundle, stored_cursor)?;
     let new_events: Vec<KanbanEvent> = bundle
         .events
         .iter()
@@ -101,20 +201,18 @@ pub fn import_event_bundle(
         .cloned()
         .collect();
     let events_skipped = events_seen.saturating_sub(new_events.len());
-    // SECURITY/CORRECTNESS (result.md S-04, AC5.3): replay, event-log
-    // append, and cursor advancement must commit or roll back together.
-    // Previously these were three independent calls; a failure partway
-    // through could advance the cursor past events that were never
-    // actually replayed/appended (silent data loss on the next sync) or
-    // leave replayed state without a corresponding local event record.
+    let committed_cursor = new_events
+        .last()
+        .map(|event| event.id)
+        .unwrap_or(stored_cursor);
     let events_applied =
-        store.import_event_bundle_atomic(&new_events, &bundle.source, bundle.cursor)?;
+        store.import_event_bundle_atomic(&new_events, &bundle.source, committed_cursor)?;
     Ok(EventImportReport {
         source: bundle.source.clone(),
         events_seen,
         events_applied,
         events_skipped,
-        cursor: bundle.cursor,
+        cursor: committed_cursor,
     })
 }
 
@@ -145,7 +243,9 @@ pub fn serve_event_sync<A: ToSocketAddrs>(store: Arc<SqliteKanbanStore>, addr: A
         let timeout = Some(std::time::Duration::from_secs(EVENT_SYNC_IO_TIMEOUT_SECS));
         let _ = stream.set_read_timeout(timeout);
         let _ = stream.set_write_timeout(timeout);
-        handle_event_sync_stream(store.as_ref(), stream)?;
+        if let Err(error) = handle_event_sync_stream(store.as_ref(), stream) {
+            eprintln!("kanban sync connection failed: {error:#}");
+        }
     }
     Ok(())
 }
@@ -197,9 +297,35 @@ fn send_event_sync_request<A: ToSocketAddrs>(
     addr: A,
     request: &EventSyncRequest,
 ) -> Result<EventSyncResponse> {
-    let mut stream = TcpStream::connect(addr).context("connecting to kanban sync peer")?;
-    let request_json = serde_json::to_string(request)?;
-    stream.write_all(request_json.as_bytes())?;
+    let timeout = std::time::Duration::from_secs(EVENT_SYNC_IO_TIMEOUT_SECS);
+    let mut last_error = None;
+    let mut connected = None;
+    for peer in addr
+        .to_socket_addrs()
+        .context("resolving kanban sync peer")?
+    {
+        match TcpStream::connect_timeout(&peer, timeout) {
+            Ok(stream) => {
+                connected = Some(stream);
+                break;
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let mut stream = connected.with_context(|| match last_error {
+        Some(error) => format!("connecting to kanban sync peer: {error}"),
+        None => "kanban sync peer address did not resolve".to_string(),
+    })?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+
+    let request_json = serde_json::to_vec(request)?;
+    anyhow::ensure!(
+        request_json.len() < MAX_EVENT_SYNC_MESSAGE_BYTES,
+        "kanban sync request exceeded {} byte limit",
+        MAX_EVENT_SYNC_MESSAGE_BYTES
+    );
+    stream.write_all(&request_json)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
 
@@ -218,8 +344,16 @@ fn handle_event_sync_stream(store: &SqliteKanbanStore, mut stream: TcpStream) ->
             error: Some(format!("invalid request: {err}")),
         },
     };
-    let response_json = serde_json::to_string(&response)?;
-    stream.write_all(response_json.as_bytes())?;
+    let mut response_json = serde_json::to_vec(&response)?;
+    if response_json.len() >= MAX_EVENT_SYNC_MESSAGE_BYTES {
+        response_json = serde_json::to_vec(&EventSyncResponse {
+            ok: false,
+            bundle: None,
+            report: None,
+            error: Some("kanban sync response exceeded message limit".to_string()),
+        })?;
+    }
+    stream.write_all(&response_json)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
     // Graceful half-close: signal EOF to the client so it can finish reading

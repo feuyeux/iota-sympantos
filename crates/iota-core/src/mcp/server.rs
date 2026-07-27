@@ -10,7 +10,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
 #[cfg(feature = "kanban")]
 use iota_kanban::SqliteKanbanStore;
@@ -36,17 +36,15 @@ pub fn run_stdio() -> Result<()> {
     #[cfg(feature = "kanban")]
     let kanban = default_kanban_store();
 
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(err) if err.kind() == io::ErrorKind::BrokenPipe => break,
-            Err(err) => return Err(err.into()),
-        };
+    let mut stdin = stdin.lock();
+    while let Some(line) = super::read_limited_line(&mut stdin)? {
         if line.trim().is_empty() {
             continue;
         }
-        let request: Value =
-            serde_json::from_str(&line).with_context(|| format!("Invalid JSON-RPC: {}", line))?;
+        let request: Value = serde_json::from_str(&line).with_context(|| {
+            let preview = line.chars().take(256).collect::<String>();
+            format!("Invalid JSON-RPC: {preview}")
+        })?;
         if request.get("id").is_none() {
             continue;
         }

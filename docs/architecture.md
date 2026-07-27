@@ -167,11 +167,11 @@ React ChatWorkbench
 
 | Backend | 默认命令 | 别名 | 备注 |
 | :--- | :--- | :--- | :--- |
-| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@latest` | `claude`, `claude-code`, `claudecode` | Claude Code ACP adapter |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@0.32.0` | `claude`, `claude-code`, `claudecode` | Claude Code ACP adapter |
 | Codex | `npx -y @zed-industries/codex-acp@0.12.0` | `codex` | Codex ACP adapter |
-| Gemini CLI | `npx -y @google/gemini-cli@latest --acp` | `gemini`, `gemini-cli` | Gemini ACP mode |
+| Gemini CLI | `npx -y @google/gemini-cli@0.41.2 --acp` | `gemini`, `gemini-cli` | Gemini ACP mode |
 | Hermes | `hermes acp` | `hermes`, `hermes-agent` | 不覆盖 `HERMES_HOME` |
-| OpenCode | `npx -y opencode-ai@latest acp` | `opencode`, `open-code` | OpenCode ACP mode |
+| OpenCode | `npx -y opencode-ai@1.14.40 acp` | `opencode`, `open-code` | OpenCode ACP mode |
 
 Windows 上 `normalize_command()` 会把 `npx` 改为 `npx.cmd`。
 

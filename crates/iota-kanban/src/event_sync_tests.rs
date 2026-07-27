@@ -1,7 +1,7 @@
 use crate::event_sync::{
     KanbanEventBundle, default_pull_source, export_event_bundle, handle_event_sync_stream,
     import_event_bundle, pull_event_bundle, push_event_bundle, read_event_bundle,
-    write_event_bundle,
+    write_event_bundle, MAX_EVENT_SYNC_MESSAGE_BYTES,
 };
 use crate::{CreateTaskRequest, KanbanStore, SqliteKanbanStore, Status};
 use anyhow::Context;
@@ -41,8 +41,8 @@ fn event_bundle_round_trips_state_with_stable_ids() {
             assignee: Some("alice".to_string()),
             priority: Some(7),
             tags: vec!["sync".to_string()],
-            workspace_kind: None,
-            workspace_path: None,
+            workspace_kind: Some("existing".to_string()),
+            workspace_path: Some(std::path::PathBuf::from("/workspace/sync-me")),
         })
         .unwrap();
     source.add_comment(task_id, "bob", "comment").unwrap();
@@ -55,7 +55,13 @@ fn event_bundle_round_trips_state_with_stable_ids() {
     assert_eq!(report.events_seen, bundle.events.len());
     assert_eq!(report.events_skipped, 0);
     assert_eq!(target.get_board("dev").unwrap().id, board_id);
-    assert_eq!(target.get_task(task_id).unwrap().title, "Sync me");
+    let imported_task = target.get_task(task_id).unwrap();
+    assert_eq!(imported_task.title, "Sync me");
+    assert_eq!(imported_task.workspace_kind.as_deref(), Some("existing"));
+    assert_eq!(
+        imported_task.workspace_path.as_deref(),
+        Some(Path::new("/workspace/sync-me"))
+    );
     assert_eq!(target.list_comments(task_id).unwrap()[0].body, "comment");
 }
 
@@ -80,9 +86,9 @@ fn unapplicable_event_does_not_advance_cursor() {
     let bundle = KanbanEventBundle {
         format_version: 1,
         source: "node-a".to_string(),
-        cursor: 2,
+        cursor: 1,
         events: vec![crate::KanbanEvent {
-            id: 2,
+            id: 1,
             event_type: "task_updated".to_string(),
             payload: serde_json::json!({
                 "task_id": 999,
@@ -165,8 +171,9 @@ fn tcp_sync_pull_and_push_round_trip() {
     import_event_bundle(&local, &pulled).unwrap();
     assert_eq!(local.get_board("remote").unwrap().name, "Remote");
 
-    local.create_board("local", "Local").unwrap();
-    let outgoing = export_event_bundle(&local, 0, "local-node").unwrap();
+    let outgoing_store = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    outgoing_store.create_board("local", "Local").unwrap();
+    let outgoing = export_event_bundle(&outgoing_store, 0, "local-node").unwrap();
     let report = push_event_bundle(addr, outgoing).unwrap();
     assert!(report.events_applied > 0);
     assert_eq!(remote.get_board("local").unwrap().name, "Local");
@@ -190,4 +197,122 @@ fn write_and_read_event_bundle_file() {
     assert_eq!(loaded.source, "node-a");
     assert_eq!(loaded.events.len(), 1);
     let _ = std::fs::remove_file(tmp);
+}
+
+#[test]
+fn import_rejects_invalid_cursor_sequences() {
+    let target = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let board_event = |id| crate::KanbanEvent {
+        id,
+        event_type: "board_created".to_string(),
+        payload: format!(r#"{{"board_id":{},"slug":"b{id}","name":"B{id}"}}"#, 100 + id),
+        created_at: 0,
+    };
+
+    let mismatched = KanbanEventBundle {
+        format_version: 1,
+        source: "mismatched".to_string(),
+        cursor: 2,
+        events: vec![board_event(1)],
+    };
+    assert!(import_event_bundle(&target, &mismatched).is_err());
+
+    let unordered = KanbanEventBundle {
+        format_version: 1,
+        source: "unordered".to_string(),
+        cursor: 1,
+        events: vec![board_event(1), board_event(1)],
+    };
+    assert!(import_event_bundle(&target, &unordered).is_err());
+
+    let gap = KanbanEventBundle {
+        format_version: 1,
+        source: "gap".to_string(),
+        cursor: 2,
+        events: vec![board_event(2)],
+    };
+    assert!(import_event_bundle(&target, &gap).is_err());
+
+    let internal_gap = KanbanEventBundle {
+        format_version: 1,
+        source: "internal-gap".to_string(),
+        cursor: 3,
+        events: vec![board_event(1), board_event(3)],
+    };
+    assert!(import_event_bundle(&target, &internal_gap).is_err());
+
+    let empty_advance = KanbanEventBundle {
+        format_version: 1,
+        source: "empty".to_string(),
+        cursor: 1,
+        events: vec![],
+    };
+    assert!(import_event_bundle(&target, &empty_advance).is_err());
+    assert_eq!(target.sync_cursor("empty").unwrap(), 0);
+}
+
+#[test]
+fn invalid_task_status_rolls_back_bundle_and_cursor() {
+    let target = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    let bundle = KanbanEventBundle {
+        format_version: 1,
+        source: "invalid-status".to_string(),
+        cursor: 2,
+        events: vec![
+            crate::KanbanEvent {
+                id: 1,
+                event_type: "board_created".to_string(),
+                payload: r#"{"board_id":101,"slug":"invalid","name":"Invalid"}"#.to_string(),
+                created_at: 0,
+            },
+            crate::KanbanEvent {
+                id: 2,
+                event_type: "task_created".to_string(),
+                payload: serde_json::json!({
+                    "task_id": 201,
+                    "board_id": 101,
+                    "title": "bad",
+                    "body": null,
+                    "status": "not-a-status",
+                    "assignee": null,
+                    "priority": 0,
+                    "tags": []
+                })
+                .to_string(),
+                created_at: 0,
+            },
+        ],
+    };
+
+    assert!(import_event_bundle(&target, &bundle).is_err());
+    assert!(target.list_boards().unwrap().is_empty());
+    assert_eq!(target.sync_cursor("invalid-status").unwrap(), 0);
+}
+
+#[test]
+fn entity_id_collision_rolls_back_for_new_source() {
+    let source = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    source.create_board("shared", "Shared").unwrap();
+    let bundle = export_event_bundle(&source, 0, "node-a").unwrap();
+    let target = SqliteKanbanStore::open(Path::new(":memory:")).unwrap();
+    import_event_bundle(&target, &bundle).unwrap();
+
+    let mut colliding = bundle;
+    colliding.source = "node-b".to_string();
+    assert!(import_event_bundle(&target, &colliding).is_err());
+    assert_eq!(target.list_boards().unwrap().len(), 1);
+    assert_eq!(target.sync_cursor("node-b").unwrap(), 0);
+}
+
+#[test]
+fn read_event_bundle_rejects_oversized_file() {
+    let path = std::env::temp_dir().join(format!(
+        "iota-kanban-oversized-{}.json",
+        uuid::Uuid::new_v4()
+    ));
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(MAX_EVENT_SYNC_MESSAGE_BYTES as u64 + 1)
+        .unwrap();
+    assert!(read_event_bundle(&path).is_err());
+    let _ = std::fs::remove_file(path);
 }

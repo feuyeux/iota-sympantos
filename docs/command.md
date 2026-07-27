@@ -40,11 +40,11 @@
 
 | 后端 | 默认命令 | 别名 |
 | :--- | :--- | :--- |
-| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@latest` | `claude`, `claude-code`, `claudecode` |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@0.32.0` | `claude`, `claude-code`, `claudecode` |
 | Codex | `npx -y @zed-industries/codex-acp@0.12.0` | `codex` |
-| Gemini CLI | `npx -y @google/gemini-cli@latest --acp` | `gemini`, `gemini-cli` |
+| Gemini CLI | `npx -y @google/gemini-cli@0.41.2 --acp` | `gemini`, `gemini-cli` |
 | Hermes | `hermes acp` | `hermes`, `hermes-agent` |
-| OpenCode | `npx -y opencode-ai@latest acp` | `opencode`, `open-code` |
+| OpenCode | `npx -y opencode-ai@1.14.40 acp` | `opencode`, `open-code` |
 
 ## Kanban 命令
 

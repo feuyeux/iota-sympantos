@@ -212,7 +212,7 @@ To execute these functions, you need the following language runtimes installed:
 
 | Tool | Runtime path |
 | :---| :---|
-| `fun.python` | `python3 -c <source>` |
+| `fun.python` | `python3 <verified-script>` |
 | `fun.typescript` | `node -e <source>` |
 | `fun.go` | writes `main.go`, runs `go run` |
 | `fun.rust` | writes `main.rs`, compiles with `rustc`, runs cached binary |

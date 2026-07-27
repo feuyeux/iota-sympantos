@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -25,7 +25,7 @@ pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<Skil
             .server
             .as_deref()
             .unwrap_or("iota-fun");
-        let (command, args) = server_command(server);
+        let (command, args) = server_command(server)?;
         for tool in &skill.metadata.execution.tools {
             let arguments = tool_arguments();
             let call_id = format!("skill:{}:{}", skill.metadata.name, tool.label());
@@ -86,22 +86,20 @@ pub async fn run_engine_skill(skill: &Skill, prompt: &str) -> Result<Option<Skil
     Ok(Some(SkillRunOutput { text, events }))
 }
 
-fn server_command(server: &str) -> (String, Vec<String>) {
-    if server == "iota-fun" {
-        let command = std::env::current_exe()
-            .ok()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "iota".to_string());
-        (command, vec!["mcp".to_string(), "fun".to_string()])
-    } else if server == "iota-context" {
-        let command = std::env::current_exe()
-            .ok()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "iota".to_string());
-        (command, vec!["mcp".to_string(), "context".to_string()])
-    } else {
-        (server.to_string(), Vec::new())
-    }
+fn server_command(server: &str) -> Result<(String, Vec<String>)> {
+    let subcommand = match server {
+        "iota-fun" => "fun",
+        "iota-context" => "context",
+        _ => anyhow::bail!("unsupported skill MCP server '{server}'"),
+    };
+    let command = std::env::current_exe()
+        .context("failed to resolve current executable for trusted MCP server")?
+        .display()
+        .to_string();
+    Ok((
+        command,
+        vec!["mcp".to_string(), subcommand.to_string()],
+    ))
 }
 
 fn render_tool_results(results: &[Value]) -> String {

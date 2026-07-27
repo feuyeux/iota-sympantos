@@ -366,3 +366,24 @@ fn events_append_and_read() {
     let rest = store.events_since(id1).unwrap();
     assert_eq!(rest.len(), 2);
 }
+
+#[test]
+fn independently_created_entities_use_non_sequential_ids() {
+    let first = open_memory();
+    let second = open_memory();
+    let first_board = make_board(&first);
+    let second_board = make_board(&second);
+
+    assert_ne!(first_board, second_board);
+    assert!(first_board > 1_000 && second_board > 1_000);
+
+    let first_task = make_task(&first, first_board, "first");
+    let second_task = make_task(&second, second_board, "second");
+    assert_ne!(first_task, second_task);
+    assert!(first_task > 1_000 && second_task > 1_000);
+
+    let first_comment = first.add_comment(first_task, "alice", "first").unwrap();
+    let second_comment = second.add_comment(second_task, "bob", "second").unwrap();
+    assert_ne!(first_comment, second_comment);
+    assert!(first_comment > 1_000 && second_comment > 1_000);
+}

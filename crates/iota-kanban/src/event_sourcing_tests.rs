@@ -9,10 +9,10 @@ fn test_store() -> SqliteKanbanStore {
 #[test]
 fn events_recorded_on_mutations() {
     let store = test_store();
-    store.create_board("test", "Test Board").unwrap();
-    store
+    let board_id = store.create_board("test", "Test Board").unwrap();
+    let task_id = store
         .create_task(CreateTaskRequest {
-            board_id: 1,
+            board_id,
             title: "My task".to_string(),
             body: None,
             status: None,
@@ -23,7 +23,7 @@ fn events_recorded_on_mutations() {
             workspace_path: None,
         })
         .unwrap();
-    store.transition(1, Status::Todo).unwrap();
+    store.transition(task_id, Status::Todo).unwrap();
 
     let events = store.events_since(0).unwrap();
     assert!(
@@ -39,10 +39,10 @@ fn events_recorded_on_mutations() {
 #[test]
 fn replay_rebuilds_state() {
     let store1 = test_store();
-    store1.create_board("dev", "Development").unwrap();
-    store1
+    let board_id = store1.create_board("dev", "Development").unwrap();
+    let task_id = store1
         .create_task(CreateTaskRequest {
-            board_id: 1,
+            board_id,
             title: "Build feature".to_string(),
             body: Some("Details here".to_string()),
             status: None,
@@ -53,8 +53,8 @@ fn replay_rebuilds_state() {
             workspace_path: None,
         })
         .unwrap();
-    store1.transition(1, Status::Todo).unwrap();
-    store1.add_comment(1, "bob", "Looks good").unwrap();
+    store1.transition(task_id, Status::Todo).unwrap();
+    store1.add_comment(task_id, "bob", "Looks good").unwrap();
 
     // Collect events from store1
     let events = store1.events_since(0).unwrap();
@@ -69,18 +69,18 @@ fn replay_rebuilds_state() {
     assert_eq!(boards.len(), 1);
     assert_eq!(boards[0].slug, "dev");
 
-    let task = store2.get_task(1).unwrap();
+    let task = store2.get_task(task_id).unwrap();
     assert_eq!(task.title, "Build feature");
     assert_eq!(task.status, Status::Todo);
     assert_eq!(task.assignee.as_deref(), Some("alice"));
 
-    let comments = store2.list_comments(1).unwrap();
+    let comments = store2.list_comments(task_id).unwrap();
     assert_eq!(comments.len(), 1);
     assert_eq!(comments[0].body, "Looks good");
 }
 
 #[test]
-fn replay_skips_invalid_events() {
+fn replay_rejects_unknown_events_atomically() {
     let store = test_store();
     let events = vec![
         KanbanEvent {
@@ -96,8 +96,8 @@ fn replay_skips_invalid_events() {
             created_at: 0,
         },
     ];
-    let applied = store.replay_events(&events).unwrap();
-    assert_eq!(applied, 2); // unknown events succeed (silently skip)
+    assert!(store.replay_events(&events).is_err());
+    assert!(store.list_boards().unwrap().is_empty());
 }
 
 #[test]
@@ -111,6 +111,8 @@ fn event_payload_round_trips() {
         assignee: Some("alice".to_string()),
         priority: 5,
         tags: vec!["tag1".to_string(), "tag2".to_string()],
+        workspace_kind: Some("existing".to_string()),
+        workspace_path: Some("/workspace/task".to_string()),
     };
     let json = serde_json::to_string(&payload).unwrap();
     let deserialized: TaskCreatedPayload = serde_json::from_str(&json).unwrap();
@@ -125,10 +127,10 @@ fn event_payload_round_trips() {
 #[test]
 fn replay_link_events() {
     let store1 = test_store();
-    store1.create_board("b", "Board").unwrap();
-    store1
+    let board_id = store1.create_board("b", "Board").unwrap();
+    let first_id = store1
         .create_task(CreateTaskRequest {
-            board_id: 1,
+            board_id,
             title: "T1".to_string(),
             body: None,
             status: None,
@@ -139,9 +141,9 @@ fn replay_link_events() {
             workspace_path: None,
         })
         .unwrap();
-    store1
+    let second_id = store1
         .create_task(CreateTaskRequest {
-            board_id: 1,
+            board_id,
             title: "T2".to_string(),
             body: None,
             status: None,
@@ -152,14 +154,15 @@ fn replay_link_events() {
             workspace_path: None,
         })
         .unwrap();
-    store1.create_link(1, 2, LinkKind::Blocks).unwrap();
+    store1
+        .create_link(first_id, second_id, LinkKind::Blocks)
+        .unwrap();
 
     let events = store1.events_since(0).unwrap();
-
     let store2 = test_store();
     store2.replay_events(&events).unwrap();
 
-    let links = store2.get_links(1).unwrap();
+    let links = store2.get_links(first_id).unwrap();
     assert_eq!(links.len(), 1);
     assert_eq!(links[0].kind, LinkKind::Blocks);
 }

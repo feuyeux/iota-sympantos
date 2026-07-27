@@ -45,6 +45,10 @@ pub struct TaskCreatedPayload {
     pub assignee: Option<String>,
     pub priority: i32,
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +71,10 @@ pub struct TaskPatchPayload {
     pub priority: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_kind: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

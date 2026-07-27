@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
-use tokio::time::{Duration, timeout};
+use tokio::time::{Duration, Instant, timeout_at};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolCall {
@@ -33,7 +33,7 @@ pub struct McpToolResult {
 pub struct McpSession {
     _child: Child,
     stdin: ChildStdin,
-    lines: Lines<BufReader<ChildStdout>>,
+    stdout: BufReader<ChildStdout>,
     timeout_ms: u64,
 }
 
@@ -45,9 +45,10 @@ impl McpSession {
         env: &BTreeMap<String, String>,
         timeout_ms: u64,
     ) -> Result<Self> {
-        let mut child = Command::new(command)
+        let mut process = Command::new(command);
+        configure_mcp_environment(&mut process, env);
+        let mut child = process
             .args(args)
-            .envs(env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -59,10 +60,10 @@ impl McpSession {
         if let Some(stderr) = child.stderr.take() {
             forward_mcp_stderr(command.to_string(), stderr);
         }
-        let mut lines = BufReader::new(stdout).lines();
+        let mut stdout = BufReader::new(stdout);
 
         write_json(&mut stdin, json!({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iota","version":env!("CARGO_PKG_VERSION")}}})).await?;
-        wait_id(&mut lines, "init", timeout_ms).await?;
+        wait_id(&mut stdout, "init", timeout_ms).await?;
         write_json(
             &mut stdin,
             json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
@@ -71,7 +72,7 @@ impl McpSession {
         Ok(Self {
             _child: child,
             stdin,
-            lines,
+            stdout,
             timeout_ms,
         })
     }
@@ -83,7 +84,7 @@ impl McpSession {
             json!({"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":call.name,"arguments":call.arguments}}),
         )
         .await?;
-        let result = wait_id(&mut self.lines, "call", self.timeout_ms).await?;
+        let result = wait_id(&mut self.stdout, "call", self.timeout_ms).await?;
         Ok(McpToolResult {
             ok: !result
                 .get("isError")
@@ -121,9 +122,10 @@ pub async fn call_stdio_batch(
     calls: Vec<McpToolCall>,
     timeout_ms: u64,
 ) -> Result<Vec<McpToolResult>> {
-    let mut child = Command::new(command)
+    let mut process = Command::new(command);
+    configure_mcp_environment(&mut process, env);
+    let mut child = process
         .args(args)
-        .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -135,10 +137,10 @@ pub async fn call_stdio_batch(
     if let Some(stderr) = child.stderr.take() {
         forward_mcp_stderr(command.to_string(), stderr);
     }
-    let mut lines = BufReader::new(stdout).lines();
+    let mut stdout = BufReader::new(stdout);
 
     write_json(&mut stdin, json!({"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"iota","version":env!("CARGO_PKG_VERSION")}}})).await?;
-    wait_id(&mut lines, "init", timeout_ms).await?;
+    wait_id(&mut stdout, "init", timeout_ms).await?;
     write_json(
         &mut stdin,
         json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
@@ -148,7 +150,7 @@ pub async fn call_stdio_batch(
     for (index, call) in calls.into_iter().enumerate() {
         let id = format!("call:{}", index);
         write_json(&mut stdin, json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":call.name,"arguments":call.arguments}})).await?;
-        let result = wait_id(&mut lines, &format!("call:{}", index), timeout_ms).await?;
+        let result = wait_id(&mut stdout, &format!("call:{}", index), timeout_ms).await?;
         results.push(McpToolResult {
             ok: !result
                 .get("isError")
@@ -163,12 +165,41 @@ pub async fn call_stdio_batch(
     Ok(results)
 }
 
+const MAX_MCP_LINE_BYTES: usize = 1024 * 1024;
+
+fn configure_mcp_environment(command: &mut Command, env: &BTreeMap<String, String>) {
+    command.env_clear();
+    for key in [
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "SystemRoot",
+        "WINDIR",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    command.envs(env);
+}
+
 fn forward_mcp_stderr(label: String, stderr: ChildStderr) {
     tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if !line.trim().is_empty() {
-                eprintln!("[mcp stderr:{}] {}", label, line);
+        let mut reader = BufReader::new(stderr);
+        loop {
+            match read_limited_line(&mut reader).await {
+                Ok(Some(line)) if !line.trim().is_empty() => {
+                    eprintln!("[mcp stderr:{label}] {line}");
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("[mcp stderr:{label}] stream rejected: {error}");
+                    break;
+                }
             }
         }
     });
@@ -176,30 +207,65 @@ fn forward_mcp_stderr(label: String, stderr: ChildStderr) {
 
 async fn write_json(stdin: &mut ChildStdin, value: Value) -> Result<()> {
     let mut line = serde_json::to_vec(&value)?;
+    anyhow::ensure!(
+        line.len() < MAX_MCP_LINE_BYTES,
+        "MCP request exceeded {MAX_MCP_LINE_BYTES} byte limit"
+    );
     line.push(b'\n');
     stdin.write_all(&line).await?;
     stdin.flush().await?;
     Ok(())
 }
 
-async fn wait_id(
-    lines: &mut Lines<BufReader<ChildStdout>>,
+async fn read_limited_line<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+) -> Result<Option<String>> {
+    let mut bytes = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            break;
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |position| position + 1);
+        let content_len = newline.unwrap_or(consumed);
+        if bytes.len().saturating_add(content_len) > MAX_MCP_LINE_BYTES {
+            anyhow::bail!("MCP line exceeded {MAX_MCP_LINE_BYTES} byte limit");
+        }
+        bytes.extend_from_slice(&available[..content_len]);
+        reader.consume(consumed);
+        if newline.is_some() {
+            break;
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .context("MCP server output was not valid UTF-8")
+}
+
+async fn wait_id<R: AsyncRead + Unpin>(
+    stdout: &mut BufReader<R>,
     id: &str,
     timeout_ms: u64,
 ) -> Result<Value> {
-    let deadline = Duration::from_millis(timeout_ms);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        let line = timeout(deadline, lines.next_line())
+        let line = timeout_at(deadline, read_limited_line(stdout))
             .await
-            .map_err(|_| anyhow!("MCP request timed out after {}ms", timeout_ms))??
+            .map_err(|_| anyhow!("MCP request timed out after {timeout_ms}ms"))??
             .context("MCP server exited before response")?;
-        let value: Value = serde_json::from_str(&line)
-            .with_context(|| format!("MCP server emitted non-JSON line: {}", line))?;
+        let value: Value = serde_json::from_str(&line).with_context(|| {
+            let preview = line.chars().take(256).collect::<String>();
+            format!("MCP server emitted non-JSON line: {preview}")
+        })?;
         if value.get("id").and_then(Value::as_str) != Some(id) {
             continue;
         }
         if let Some(error) = value.get("error") {
-            return Err(anyhow!("MCP error: {}", error));
+            return Err(anyhow!("MCP error: {error}"));
         }
         return Ok(value.get("result").cloned().unwrap_or(Value::Null));
     }

@@ -40,7 +40,7 @@ impl BackendAdapter for ClaudeAdapter {
         let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
         (
             npx,
-            vec!["-y", "@agentclientprotocol/claude-agent-acp@latest"],
+            vec!["-y", "@agentclientprotocol/claude-agent-acp@0.32.0"],
         )
     }
     fn process_env(
@@ -121,7 +121,7 @@ impl BackendAdapter for GeminiAdapter {
     }
     fn acp_command(&self) -> (&'static str, Vec<&'static str>) {
         let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
-        (npx, vec!["-y", "@google/gemini-cli@latest", "--acp"])
+        (npx, vec!["-y", "@google/gemini-cli@0.41.2", "--acp"])
     }
     fn process_env(
         &self,
@@ -200,7 +200,7 @@ impl BackendAdapter for OpenCodeAdapter {
     }
     fn acp_command(&self) -> (&'static str, Vec<&'static str>) {
         let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
-        (npx, vec!["-y", "opencode-ai@latest", "acp"])
+        (npx, vec!["-y", "opencode-ai@1.14.40", "acp"])
     }
     fn process_env(
         &self,

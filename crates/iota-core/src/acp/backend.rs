@@ -38,12 +38,12 @@ impl AcpBackend {
         match self {
             Self::ClaudeCode => (
                 npx,
-                vec!["-y", "@agentclientprotocol/claude-agent-acp@latest"],
+                vec!["-y", "@agentclientprotocol/claude-agent-acp@0.32.0"],
             ),
             Self::Codex => (npx, vec!["-y", "@zed-industries/codex-acp@0.12.0"]),
-            Self::Gemini => (npx, vec!["-y", "@google/gemini-cli@latest", "--acp"]),
+            Self::Gemini => (npx, vec!["-y", "@google/gemini-cli@0.41.2", "--acp"]),
             Self::Hermes => ("hermes", vec!["acp"]),
-            Self::OpenCode => (npx, vec!["-y", "opencode-ai@latest", "acp"]),
+            Self::OpenCode => (npx, vec!["-y", "opencode-ai@1.14.40", "acp"]),
         }
     }
 }

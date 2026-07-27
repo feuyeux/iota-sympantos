@@ -134,17 +134,8 @@ impl SqliteKanbanStore {
     }
 
     pub fn set_sync_cursor(&self, source: &str, cursor: EventId) -> Result<()> {
-        let now = now_ts();
         let conn = self.lock_conn();
-        conn.execute(
-            "INSERT INTO event_sync_cursors (source, cursor, updated_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(source) DO UPDATE SET
-                cursor = MAX(event_sync_cursors.cursor, excluded.cursor),
-                updated_at = excluded.updated_at",
-            params![source, cursor as i64, now],
-        )?;
-        Ok(())
+        Self::set_sync_cursor_on_conn(&conn, source, cursor)
     }
 
     /// Replay a sequence of events against this store, rebuilding state.
@@ -201,6 +192,11 @@ impl SqliteKanbanStore {
     }
 
     fn set_sync_cursor_on_conn(conn: &Connection, source: &str, cursor: EventId) -> Result<()> {
+        anyhow::ensure!(
+            !source.trim().is_empty() && source.len() <= 256,
+            "kanban sync source must be 1..=256 bytes"
+        );
+        let cursor = i64::try_from(cursor).context("kanban sync cursor exceeds SQLite range")?;
         let now = now_ts();
         conn.execute(
             "INSERT INTO event_sync_cursors (source, cursor, updated_at)
@@ -208,38 +204,74 @@ impl SqliteKanbanStore {
              ON CONFLICT(source) DO UPDATE SET
                 cursor = MAX(event_sync_cursors.cursor, excluded.cursor),
                 updated_at = excluded.updated_at",
-            params![source, cursor as i64, now],
+            params![source, cursor, now],
         )?;
         Ok(())
+    }
+
+    fn new_entity_id_on_conn(conn: &Connection, table: &str) -> Result<i64> {
+        for _ in 0..32 {
+            let bytes = uuid::Uuid::new_v4().into_bytes();
+            let id = (u64::from_be_bytes([
+                bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            ]) & i64::MAX as u64) as i64;
+            if id == 0 {
+                continue;
+            }
+            let sql = match table {
+                "boards" => "SELECT EXISTS(SELECT 1 FROM boards WHERE id = ?1)",
+                "tasks" => "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                "comments" => "SELECT EXISTS(SELECT 1 FROM comments WHERE id = ?1)",
+                _ => anyhow::bail!("unsupported entity ID table '{table}'"),
+            };
+            let exists: bool = conn.query_row(sql, params![id], |row| row.get(0))?;
+            if !exists {
+                return Ok(id);
+            }
+        }
+        anyhow::bail!("failed to allocate a collision-free ID for {table}")
+    }
+
+    fn remote_entity_id(id: u64, label: &str) -> Result<i64> {
+        let id = i64::try_from(id)
+            .with_context(|| format!("{label} exceeds SQLite integer range"))?;
+        anyhow::ensure!(id > 0, "{label} must be greater than zero");
+        Ok(id)
     }
 
     fn apply_event_on_conn(conn: &Connection, event: &KanbanEvent) -> Result<()> {
         match event.event_type.as_str() {
             EVT_BOARD_CREATED => {
                 let p: BoardCreatedPayload = serde_json::from_str(&event.payload)?;
+                let board_id = Self::remote_entity_id(p.board_id, "board id")?;
                 conn.execute(
-                    "INSERT OR IGNORE INTO boards (id, slug, name, created_at) VALUES (?1, ?2, ?3, ?4)",
-                    params![p.board_id as i64, p.slug, p.name, event.created_at],
+                    "INSERT INTO boards (id, slug, name, created_at) VALUES (?1, ?2, ?3, ?4)",
+                    params![board_id, p.slug, p.name, event.created_at],
                 )?;
                 Ok(())
             }
             EVT_TASK_CREATED => {
                 let p: TaskCreatedPayload = serde_json::from_str(&event.payload)?;
+                let task_id = Self::remote_entity_id(p.task_id, "task id")?;
+                let board_id = Self::remote_entity_id(p.board_id, "board id")?;
+                let status: Status = p.status.parse()?;
                 let tags_json = serde_json::to_string(&p.tags)?;
                 conn.execute(
-                    "INSERT OR IGNORE INTO tasks
+                    "INSERT INTO tasks
                      (id, board_id, title, body, status, assignee, priority, tags,
-                      created_at, updated_at, claim_ttl_secs)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 900)",
+                      workspace_kind, workspace_path, created_at, updated_at, claim_ttl_secs)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 900)",
                     params![
-                        p.task_id as i64,
-                        p.board_id as i64,
+                        task_id,
+                        board_id,
                         p.title,
                         p.body,
-                        p.status,
+                        status.as_str(),
                         p.assignee,
                         p.priority,
                         tags_json,
+                        p.workspace_kind,
+                        p.workspace_path,
                         event.created_at,
                     ],
                 )?;
@@ -247,45 +279,70 @@ impl SqliteKanbanStore {
             }
             EVT_TASK_UPDATED => {
                 let p: TaskUpdatedPayload = serde_json::from_str(&event.payload)?;
+                Self::remote_entity_id(p.task_id, "task id")?;
                 let patch = TaskPatch {
                     title: p.patch.title,
                     body: p.patch.body,
-                    status: p.patch.status.and_then(|s| s.parse().ok()),
+                    status: p.patch.status.map(|status| status.parse()).transpose()?,
                     assignee: p.patch.assignee,
                     priority: p.patch.priority,
                     tags: p.patch.tags,
-                    workspace_kind: None,
-                    workspace_path: None,
+                    workspace_kind: p.patch.workspace_kind,
+                    workspace_path: p
+                        .patch
+                        .workspace_path
+                        .map(|path| path.map(std::path::PathBuf::from)),
                 };
                 Self::update_task_on_conn(conn, p.task_id, patch)
             }
             EVT_TASK_DELETED => {
                 let p: TaskDeletedPayload = serde_json::from_str(&event.payload)?;
+                Self::remote_entity_id(p.task_id, "task id")?;
                 Self::delete_task_on_conn(conn, p.task_id)
             }
             EVT_TASK_TRANSITIONED => {
                 let p: TaskTransitionedPayload = serde_json::from_str(&event.payload)?;
+                let task_id = Self::remote_entity_id(p.task_id, "task id")?;
+                let declared_from: Status = p.from.parse()?;
+                let actual_from: String = conn.query_row(
+                    "SELECT status FROM tasks WHERE id = ?1",
+                    params![task_id],
+                    |row| row.get(0),
+                )?;
+                anyhow::ensure!(
+                    actual_from == declared_from.as_str(),
+                    "task {} transition expected {}, found {}",
+                    p.task_id,
+                    declared_from.as_str(),
+                    actual_from
+                );
                 let to: Status = p.to.parse()?;
                 Self::transition_on_conn(conn, p.task_id, to)
             }
             EVT_LINK_CREATED => {
                 let p: LinkCreatedPayload = serde_json::from_str(&event.payload)?;
+                Self::remote_entity_id(p.from_id, "link source task id")?;
+                Self::remote_entity_id(p.to_id, "link target task id")?;
                 let kind: LinkKind = p.kind.parse()?;
                 Self::create_link_on_conn(conn, p.from_id, p.to_id, kind)
             }
             EVT_LINK_REMOVED => {
                 let p: LinkRemovedPayload = serde_json::from_str(&event.payload)?;
+                Self::remote_entity_id(p.from_id, "link source task id")?;
+                Self::remote_entity_id(p.to_id, "link target task id")?;
                 let kind: LinkKind = p.kind.parse()?;
                 Self::remove_link_on_conn(conn, p.from_id, p.to_id, kind)
             }
             EVT_COMMENT_ADDED => {
                 let p: CommentAddedPayload = serde_json::from_str(&event.payload)?;
+                let comment_id = Self::remote_entity_id(p.comment_id, "comment id")?;
+                let task_id = Self::remote_entity_id(p.task_id, "task id")?;
                 conn.execute(
-                    "INSERT OR IGNORE INTO comments (id, task_id, author, body, created_at)
+                    "INSERT INTO comments (id, task_id, author, body, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![
-                        p.comment_id as i64,
-                        p.task_id as i64,
+                        comment_id,
+                        task_id,
                         p.author,
                         p.body,
                         event.created_at,
@@ -295,20 +352,32 @@ impl SqliteKanbanStore {
             }
             EVT_RUN_STARTED => {
                 let p: RunStartedPayload = serde_json::from_str(&event.payload)?;
+                let task_id = Self::remote_entity_id(p.task_id, "task id")?;
                 conn.execute(
-                    "INSERT OR IGNORE INTO runs
+                    "INSERT INTO runs
                      (id, task_id, profile, status, started_at, last_heartbeat)
                      VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
-                    params![p.run_id, p.task_id as i64, p.profile, event.created_at],
+                    params![p.run_id, task_id, p.profile, event.created_at],
                 )?;
                 Ok(())
             }
             EVT_RUN_COMPLETED => {
                 let p: RunCompletedPayload = serde_json::from_str(&event.payload)?;
+                let task_id = Self::remote_entity_id(p.task_id, "task id")?;
+                let actual_task_id: i64 = conn.query_row(
+                    "SELECT task_id FROM runs WHERE id = ?1",
+                    params![&p.run_id],
+                    |row| row.get(0),
+                )?;
+                anyhow::ensure!(
+                    actual_task_id == task_id,
+                    "run '{}' belongs to a different task",
+                    p.run_id
+                );
                 let status: RunStatus = p.status.parse()?;
                 Self::complete_run_on_conn(conn, &p.run_id, status, p.exit_code)
             }
-            _ => Ok(()), // Unknown event types are silently skipped
+            other => anyhow::bail!("unsupported kanban event type '{other}'"),
         }
     }
 }
@@ -323,11 +392,12 @@ impl KanbanStore for SqliteKanbanStore {
     fn create_board(&self, slug: &str, name: &str) -> Result<BoardId> {
         self.with_transaction(|conn| {
             let now = now_ts();
+            let id = Self::new_entity_id_on_conn(conn, "boards")?;
             conn.execute(
-                "INSERT INTO boards (slug, name, created_at) VALUES (?1, ?2, ?3)",
-                params![slug, name, now],
+                "INSERT INTO boards (id, slug, name, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![id, slug, name, now],
             )?;
-            let id = conn.last_insert_rowid() as u64;
+            let id = id as u64;
             let payload = serde_json::to_string(&BoardCreatedPayload {
                 board_id: id,
                 slug: slug.to_string(),
@@ -353,6 +423,11 @@ impl KanbanStore for SqliteKanbanStore {
         let assignee = req.assignee.clone();
         let priority = req.priority.unwrap_or(0);
         let tags = req.tags.clone();
+        let workspace_kind = req.workspace_kind.clone();
+        let workspace_path = req
+            .workspace_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
         // SECURITY/CORRECTNESS (result.md S-04): the domain write (INSERT
         // INTO tasks) and the event-log append (INSERT INTO events) must
         // be atomic — a crash between them previously could leave a task
@@ -370,8 +445,9 @@ impl KanbanStore for SqliteKanbanStore {
                 assignee,
                 priority,
                 tags,
-            })
-            ?;
+                workspace_kind,
+                workspace_path,
+            })?;
             Self::append_event_on_conn(conn, EVT_TASK_CREATED, &payload)?;
             Ok(id)
         })?;
@@ -389,14 +465,18 @@ impl KanbanStore for SqliteKanbanStore {
             assignee: patch.assignee.clone(),
             priority: patch.priority,
             tags: patch.tags.clone(),
+            workspace_kind: patch.workspace_kind.clone(),
+            workspace_path: patch.workspace_path.as_ref().map(|path| {
+                path.as_ref()
+                    .map(|path| path.to_string_lossy().into_owned())
+            }),
         };
         self.with_transaction(|conn| {
             Self::update_task_on_conn(conn, id, patch)?;
             let payload = serde_json::to_string(&TaskUpdatedPayload {
                 task_id: id,
                 patch: patch_payload,
-            })
-            ?;
+            })?;
             Self::append_event_on_conn(conn, EVT_TASK_UPDATED, &payload)?;
             Ok(())
         })?;
@@ -446,8 +526,7 @@ impl KanbanStore for SqliteKanbanStore {
                 from_id: from,
                 to_id: to,
                 kind: kind.as_str().to_string(),
-            })
-            ?;
+            })?;
             Self::append_event_on_conn(conn, EVT_LINK_CREATED, &payload)?;
             Ok(())
         })
@@ -459,8 +538,7 @@ impl KanbanStore for SqliteKanbanStore {
                 from_id: from,
                 to_id: to,
                 kind: kind.as_str().to_string(),
-            })
-            ?;
+            })?;
             Self::append_event_on_conn(conn, EVT_LINK_REMOVED, &payload)?;
             Ok(())
         })
@@ -476,8 +554,7 @@ impl KanbanStore for SqliteKanbanStore {
                 task_id,
                 author: author.to_string(),
                 body: body.to_string(),
-            })
-            ?;
+            })?;
             Self::append_event_on_conn(conn, EVT_COMMENT_ADDED, &payload)?;
             Ok(comment_id)
         })?;
@@ -497,8 +574,7 @@ impl KanbanStore for SqliteKanbanStore {
                 run_id: run_id.clone(),
                 task_id,
                 profile: profile.to_string(),
-            })
-            ?;
+            })?;
             Self::append_event_on_conn(conn, EVT_RUN_STARTED, &payload)?;
             Ok(run_id)
         })?;
@@ -521,8 +597,7 @@ impl KanbanStore for SqliteKanbanStore {
                 task_id: task_id as u64,
                 status: status.as_str().to_string(),
                 exit_code,
-            })
-            ?;
+            })?;
             Self::append_event_on_conn(conn, EVT_RUN_COMPLETED, &payload)?;
             Ok(task_id as u64)
         })?;

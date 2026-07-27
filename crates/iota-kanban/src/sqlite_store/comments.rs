@@ -16,11 +16,12 @@ impl SqliteKanbanStore {
         body: &str,
     ) -> Result<CommentId> {
         let now = now_ts();
+        let id = Self::new_entity_id_on_conn(conn, "comments")?;
         conn.execute(
-            "INSERT INTO comments (task_id, author, body, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![task_id as i64, author, body, now],
+            "INSERT INTO comments (id, task_id, author, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, task_id as i64, author, body, now],
         )?;
-        Ok(conn.last_insert_rowid() as u64)
+        Ok(id as u64)
     }
 
     pub(super) fn list_comments_impl(&self, task_id: TaskId) -> Result<Vec<Comment>> {

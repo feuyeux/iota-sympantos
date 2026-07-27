@@ -5,13 +5,12 @@
 //! - Reconnection after disconnect (AC9.2)
 //! - Protocol error handling
 //!
-//! Tests that require a full engine or external services are marked #[ignore].
+//! Protocol-only integration tests run without external services.
 
 use iota_core::daemon::{
     DESKTOP_PROTOCOL_VERSION, DaemonClientMessage, DaemonServerMessage, PROTOCOL_VERSION_MAX,
     PROTOCOL_VERSION_MIN,
 };
-use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn hello_handshake_v2_client_succeeds() {
@@ -84,24 +83,6 @@ async fn ping_pong_roundtrip() {
     let pong_json = serde_json::to_string(&pong).unwrap();
     assert!(pong_json.contains("\"type\":\"pong\""));
     assert!(pong_json.contains("\"seq\":42"));
-}
-
-#[tokio::test]
-#[ignore]
-async fn full_turn_lifecycle_requires_daemon() {
-    // AC9.1: Full flow: connect → Hello → StartTurn → TextChunk → TurnCompleted
-    // This test requires a running daemon with a configured backend.
-    // Run manually with: cargo test --test daemon_integration full_turn -- --ignored
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let _addr = listener.local_addr().unwrap();
-    // Would need a full EnginePool setup here
-}
-
-#[tokio::test]
-#[ignore]
-async fn reconnect_after_disconnect() {
-    // AC9.2: Verify client can reconnect after TCP disconnect
-    // Requires daemon infrastructure
 }
 
 // ---------------------------------------------------------------------------

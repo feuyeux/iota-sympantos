@@ -184,11 +184,11 @@ initialize
 
 | Backend | 默认命令 | 别名 | 特殊点 |
 | :--- | :--- | :--- | :--- |
-| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@latest` | `claude`, `claude-code`, `claudecode` | 支持 Anthropic env 映射 |
+| Claude Code | `npx -y @agentclientprotocol/claude-agent-acp@0.32.0` | `claude`, `claude-code`, `claudecode` | 支持 Anthropic env 映射 |
 | Codex | `npx -y @zed-industries/codex-acp@0.12.0` | `codex` | 通过 `-c` 追加 Codex provider/model 配置 |
-| Gemini CLI | `npx -y @google/gemini-cli@latest --acp` | `gemini`, `gemini-cli` | 支持 `GEMINI_API_KEY` / `GEMINI_MODEL` |
+| Gemini CLI | `npx -y @google/gemini-cli@0.41.2 --acp` | `gemini`, `gemini-cli` | 支持 `GEMINI_API_KEY` / `GEMINI_MODEL` |
 | Hermes | `hermes acp` | `hermes`, `hermes-agent` | 不覆盖 `HERMES_HOME` |
-| OpenCode | `npx -y opencode-ai@latest acp` | `opencode`, `open-code` | 使用 `OPENCODE_MODEL` |
+| OpenCode | `npx -y opencode-ai@1.14.40 acp` | `opencode`, `open-code` | 使用 `OPENCODE_MODEL` |
 
 起外部进程而不是接 SDK，是为了让 iota 能跟着各家迭代的节奏走：这些工具本身就是成熟的 coding agent，iota 只需要在它们现成的 ACP 边界上把上下文、权限、事件统一掉，犯不着重新实现每家 provider 的工具调用协议——吃力不讨好，而且追不上人家迭代的速度。
 

@@ -64,11 +64,48 @@ impl SkillMetadata {
                 anyhow::bail!("Trigger in skill '{}' cannot be empty", self.name);
             }
         }
+        if self.execution.tools.len() > MAX_SKILL_TOOLS {
+            anyhow::bail!(
+                "Skill '{}' declares {} tools; maximum is {}",
+                self.name,
+                self.execution.tools.len(),
+                MAX_SKILL_TOOLS
+            );
+        }
+        let server = self.execution.server.as_deref().unwrap_or("iota-fun");
+        if self.execution.mode.is_mcp() && !ALLOWED_SKILL_SERVERS.contains(&server) {
+            anyhow::bail!(
+                "Skill '{}' uses unsupported MCP server '{}'; allowed servers: {}",
+                self.name,
+                server,
+                ALLOWED_SKILL_SERVERS.join(", ")
+            );
+        }
+        if !self.execution.mode.is_mcp()
+            && (self.execution.server.is_some() || !self.execution.tools.is_empty())
+        {
+            anyhow::bail!(
+                "Advisory skill '{}' cannot declare an MCP server or tools",
+                self.name
+            );
+        }
         let mut seen_tools = BTreeSet::new();
         for tool in &self.execution.tools {
             let tool_name = tool.name.trim();
             if tool_name.is_empty() {
                 anyhow::bail!("Tool in skill '{}' cannot be empty", self.name);
+            }
+            let valid_namespace = match server {
+                "iota-fun" => tool_name.starts_with("fun."),
+                "iota-context" => tool_name.starts_with("iota_"),
+                _ => false,
+            };
+            if !valid_namespace {
+                anyhow::bail!(
+                    "Tool '{}' is not valid for trusted server '{}'",
+                    tool_name,
+                    server
+                );
             }
             if !seen_tools.insert(tool_name.to_string()) {
                 anyhow::bail!("Duplicate tool '{}' in skill '{}'", tool_name, self.name);
@@ -77,6 +114,9 @@ impl SkillMetadata {
         Ok(())
     }
 }
+
+const MAX_SKILL_TOOLS: usize = 32;
+const ALLOWED_SKILL_SERVERS: &[&str] = &["iota-fun", "iota-context"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillTool {

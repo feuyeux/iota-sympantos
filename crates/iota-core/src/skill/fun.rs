@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
@@ -26,13 +26,15 @@ const MAX_COMMAND_OUTPUT_BYTES: usize = 64 * 1024;
 pub fn run_stdio() -> Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    for line in stdin.lock().lines() {
-        let line = line?;
+    let mut stdin = stdin.lock();
+    while let Some(line) = crate::mcp::read_limited_line(&mut stdin)? {
         if line.trim().is_empty() {
             continue;
         }
-        let request: Value =
-            serde_json::from_str(&line).with_context(|| format!("Invalid JSON-RPC: {}", line))?;
+        let request: Value = serde_json::from_str(&line).with_context(|| {
+            let preview = line.chars().take(256).collect::<String>();
+            format!("Invalid JSON-RPC: {preview}")
+        })?;
         if request.get("id").is_none() {
             continue;
         }
@@ -99,15 +101,8 @@ pub fn run_tool(name: &str, args: &Value) -> Result<String> {
 fn run_python(timeout_ms: u64) -> Result<String> {
     let script = fun_root()?.join("python").join("random_number.py");
     ensure_file(&script)?;
-    let source = format!(
-        "import importlib.util; spec = importlib.util.spec_from_file_location('random_number', r'{}'); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); print(module.random_number())",
-        script.display()
-    );
-    run_interpreter(
-        "python3",
-        &[OsString::from("-c"), OsString::from(source)],
-        timeout_ms,
-    )
+    let cwd = script.parent().context("Python fun source has no parent")?;
+    run_command("python3", &[script.as_os_str().to_os_string()], Some(cwd), timeout_ms)
 }
 
 fn run_typescript(timeout_ms: u64) -> Result<String> {
@@ -218,6 +213,7 @@ fn run_java(timeout_ms: u64) -> Result<String> {
 fn run_cpp(timeout_ms: u64) -> Result<String> {
     let cwd = fun_root()?.join("cpp");
     let sources = [
+        cwd.join("random_action.h"),
         cwd.join("random_action.cpp"),
         cwd.join("random_action_runner.cpp"),
     ];
@@ -233,6 +229,7 @@ fn run_cpp(timeout_ms: u64) -> Result<String> {
         let compiled = run_command(
             compiler,
             &[
+                OsString::from("random_action.cpp"),
                 OsString::from("random_action_runner.cpp"),
                 OsString::from("-std=c++17"),
                 OsString::from("-O2"),
@@ -274,10 +271,6 @@ fn run_zig(timeout_ms: u64) -> Result<String> {
         )?;
     }
     run_command(bin.as_os_str(), &[], Some(&cwd), effective_timeout)
-}
-
-fn run_interpreter(command: &str, args: &[OsString], timeout_ms: u64) -> Result<String> {
-    run_command(command, args, None, timeout_ms)
 }
 
 fn run_command<S: AsRef<std::ffi::OsStr>>(
@@ -472,11 +465,38 @@ fn ensure_files(paths: &[PathBuf]) -> Result<()> {
 }
 
 fn ensure_file(path: &Path) -> Result<()> {
-    if path.is_file() {
-        Ok(())
-    } else {
-        Err(anyhow!("Fun source file not found: {}", path.display()))
+    let language = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str());
+    let file = path.file_name().and_then(|value| value.to_str());
+    let expected = match (language, file) {
+        (Some("python"), Some("random_number.py")) => "1bd1030a00f5682712982851a91f72b7c639cc79ab53d3c705dfde140b033881",
+        (Some("typescript"), Some("randomColor.ts")) => "f6ff1218de3bc67f89e1c7c6ff79b66ddc26060f4364ba8c6ab4c1708cad7f75",
+        (Some("typescript"), Some("runner.js")) => "822d063c706c3bcd8fdc141f1111416b64a57f53beeb03a4cc104681300d4f85",
+        (Some("rust"), Some("random_material.rs")) => "13e3e2696a1f1ea844aa9ce9c6ba40c18a4301fc28a8f70c1d391c598d0b12fb",
+        (Some("rust"), Some("runner.rs")) => "2191e06624cc8081f642c330be89c1e8599c396e114c552174fe4ec54112b2ed",
+        (Some("go"), Some("random_shape.go")) => "eb3f59324aa189b5453257a2187efde30acdc93e033c67750571a77572c8e857",
+        (Some("go"), Some("runner.go")) => "b90e4ce2be84bfd33d408fc86bf9a7a1a9456033358132478188c73ec957fd39",
+        (Some("java"), Some("RandomAnimal.java")) => "ecedecaae43a659cb427f51e818f3f071ce5d90693cd50d1d8fe628f18e6dfb4",
+        (Some("java"), Some("RandomAnimalRunner.java")) => "0e39a3f42a047caec15a8081f25acc741c5f47550d83c3780af01a900f20765e",
+        (Some("cpp"), Some("random_action.h")) => "4c881ea8f935374b51d684dffcac2faaff77ed43760e3d8eee2f909681e02edd",
+        (Some("cpp"), Some("random_action.cpp")) => "e7ab0c1e95fbe46195f31725caff10cdb7e85aaa5a28affd337061219ab80be2",
+        (Some("cpp"), Some("random_action_runner.cpp")) => "43eeef77330e6d375a0456ef6f94a9a20c220122e11a9c5809115a859402b654",
+        (Some("zig"), Some("random_size.zig")) => "ac7af0b5523b21f47311855cd621eb4921e495768f9af792ca48ce3a6143d713",
+        (Some("zig"), Some("runner.zig")) => "dd7ec946191b9e010116811b2012fbe30bdb2217542c435d6a15ea0556f9a988",
+        _ => return Err(anyhow!("Untrusted iota-fun source path: {}", path.display())),
+    };
+    let bytes = fs::read(path)
+        .with_context(|| format!("Failed to read fun source {}", path.display()))?;
+    let actual = hex::encode(Sha256::digest(&bytes));
+    if actual != expected {
+        return Err(anyhow!(
+            "Refusing modified iota-fun source {} (sha256 mismatch)",
+            path.display()
+        ));
     }
+    Ok(())
 }
 
 fn cached_binary_path(language: &str, sources: &[PathBuf]) -> Result<PathBuf> {
@@ -496,16 +516,10 @@ fn cached_path(language: &str, sources: &[PathBuf], suffix: &str) -> Result<Path
     hasher.update(std::env::consts::ARCH.as_bytes());
     hasher.update(language.as_bytes());
     for source in sources {
-        let metadata = source
-            .metadata()
-            .with_context(|| format!("Failed to stat {}", source.display()))?;
+        let bytes = fs::read(source)
+            .with_context(|| format!("Failed to read {}", source.display()))?;
         hasher.update(source.to_string_lossy().as_bytes());
-        hasher.update(metadata.len().to_string().as_bytes());
-        if let Ok(modified) = metadata.modified()
-            && let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH)
-        {
-            hasher.update(duration.as_millis().to_string().as_bytes());
-        }
+        hasher.update(Sha256::digest(&bytes));
     }
     let dir = home.join(".i6").join("iota-fun");
     fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;

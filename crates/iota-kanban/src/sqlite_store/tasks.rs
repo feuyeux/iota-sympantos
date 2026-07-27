@@ -20,12 +20,14 @@ impl SqliteKanbanStore {
             .workspace_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
+        let id = Self::new_entity_id_on_conn(conn, "tasks")?;
         conn.execute(
             "INSERT INTO tasks
-             (board_id, title, body, status, assignee, priority, tags,
+             (id, board_id, title, body, status, assignee, priority, tags,
               workspace_kind, workspace_path, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
             params![
+                id,
                 req.board_id as i64,
                 req.title,
                 req.body,
@@ -38,7 +40,7 @@ impl SqliteKanbanStore {
                 now,
             ],
         )?;
-        Ok(conn.last_insert_rowid() as u64)
+        Ok(id as u64)
     }
 
     pub(super) fn get_task_impl(&self, id: TaskId) -> Result<Task> {

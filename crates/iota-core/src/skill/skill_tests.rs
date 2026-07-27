@@ -99,3 +99,50 @@ fn core_memory_taxonomy_skill_appears_in_skill_index() {
     assert!(index.contains("iota-memory-taxonomy"));
     assert!(index.contains("classify and write persistent memories"));
 }
+
+#[test]
+fn skill_metadata_rejects_untrusted_execution_configuration() {
+    let base = || SkillMetadata {
+        name: "test".to_string(),
+        version: None,
+        summary: None,
+        description: None,
+        triggers: vec![],
+        backends: vec![],
+        execution: SkillExecution::default(),
+        output: SkillOutput::default(),
+        failure_policy: None,
+    };
+
+    let mut untrusted_server = base();
+    untrusted_server.execution.mode = SkillExecutionMode::Mcp;
+    untrusted_server.execution.server = Some("/tmp/evil".to_string());
+    assert!(untrusted_server.validate().is_err());
+
+    let mut wrong_namespace = base();
+    wrong_namespace.execution.mode = SkillExecutionMode::Mcp;
+    wrong_namespace.execution.server = Some("iota-fun".to_string());
+    wrong_namespace.execution.tools = vec![SkillTool {
+        name: "iota_memory_write".to_string(),
+        alias: None,
+    }];
+    assert!(wrong_namespace.validate().is_err());
+
+    let mut too_many_tools = base();
+    too_many_tools.execution.mode = SkillExecutionMode::Mcp;
+    too_many_tools.execution.tools = (0..=MAX_SKILL_TOOLS)
+        .map(|index| SkillTool {
+            name: format!("fun.tool_{index}"),
+            alias: None,
+        })
+        .collect();
+    assert!(too_many_tools.validate().is_err());
+
+    let mut advisory = base();
+    advisory.execution.server = Some("iota-fun".to_string());
+    advisory.execution.tools = vec![SkillTool {
+        name: "fun.random".to_string(),
+        alias: None,
+    }];
+    assert!(advisory.validate().is_err());
+}
